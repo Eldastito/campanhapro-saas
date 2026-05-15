@@ -1,0 +1,17 @@
+name: Deploy to EasyPanel
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Trigger EasyPanel Webhook
+        run: |
+          curl -X POST "http://72.60.50.138:3000/api/deploy/e0e9e5cde96d84937b1fff6fc99b8183756090f0c0e51133" \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"main"}'

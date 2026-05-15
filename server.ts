@@ -1,0 +1,976 @@
+import 'dotenv/config';
+import { createClient } from '@supabase/supabase-js';
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import axios from 'axios';
+import fs from 'fs';
+import fsPromises from 'fs/promises';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import crypto from 'crypto';
+import { createServer as createViteServer } from 'vite';
+import { createServer as createHttpServer } from 'http';
+import { supabase } from './src/lib/supabaseClient';
+import { createAuthMiddleware } from './src/middleware/authMiddleware';
+import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
+import { runManager } from './src/lib/managerAgent';
+import { startProactiveMonitor } from './src/lib/proactiveMonitor';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Configuração centralizada
+const SUPREME_ADMIN_EMAIL = process.env.SUPREME_ADMIN_EMAIL || 'eldastito@gmail.com';
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'];
+const GEMINI_MODEL_NAME = "gemini-1.5-flash"; 
+
+let supabaseAdmin: any = null;
+
+const adminUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const adminKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (adminUrl && adminKey) {
+  supabaseAdmin = createClient(adminUrl, adminKey);
+  console.log("[Supabase Admin] Inicializado com sucesso.");
+} else {
+  console.warn("[Supabase Admin] Falha ao inicializar: URL ou Service Role Key ausentes.");
+}
+
+const requireAuth = createAuthMiddleware(supabaseAdmin);
+
+// --- CATÁLOGO DE SKILLS (AGENT TOOLS) ---
+const AGENT_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "create_backup",
+      description: "Cria um snapshot de segurança de todos os dados da campanha.",
+      parameters: { type: "object", properties: { reason: { type: "string" } } }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_dalle_image",
+      description: "Gera uma imagem real usando DALL-E 3 baseada em um prompt artístico.",
+      parameters: { type: "object", properties: { prompt: { type: "string" } }, required: ["prompt"] }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "open_social_media_studio",
+      description: "Prepara a interface de publicação para as redes sociais.",
+      parameters: { type: "object", properties: { content: { type: "string" } } }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "publish_war_room_insight",
+      description: "Publica um insight crítico no feed da Sala de Guerra para visualização no Dashboard.",
+      parameters: { 
+        type: "object", 
+        properties: { 
+          category: { type: "string", enum: ["Nicho", "Crise", "Oportunidade", "Logística"] },
+          priority: { type: "string", enum: ["Baixa", "Media", "Alta", "CRÍTICO"] },
+          insight_text: { type: "string" },
+          neighborhood: { type: "string" }
+        },
+        required: ["category", "priority", "insight_text"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "flag_fraudulent_data",
+      description: "Sinaliza um registro (eleitor ou reporte) como suspeito de fraude para auditoria.",
+      parameters: { 
+        type: "object", 
+        properties: { 
+          entity_type: { type: "string", enum: ["voter", "street_report"] },
+          entity_id: { type: "string" },
+          risk_level: { type: "string", enum: ["Médio", "Alto", "CRÍTICO"] },
+          reason: { type: "string" }
+        },
+        required: ["entity_type", "entity_id", "risk_level", "reason"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_conversion_funnel",
+      description: "Retorna as estatísticas atuais do funil de conversão (quantos eleitores em cada estágio da jornada).",
+      parameters: { type: "object", properties: {} }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "analyze_territorial_gap",
+      description: "Analisa os bairros com maior diferença entre visitas realizadas e potencial de votos (Gaps Territoriais).",
+      parameters: { type: "object", properties: {} }
+    }
+  }
+];
+
+const cleanJSON = (text: string) => text.replace(/```json/g, '').replace(/```/g, '').trim();
+
+// supabaseAdmin (service role) NÃO usa o Proxy do supabaseClient — então
+// retorna chaves snake_case do banco. O frontend espera camelCase.
+// Esta helper converte recursivamente snake_case -> camelCase nas respostas.
+const snakeToCamelKey = (key: string) =>
+  key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+
+const toCamel = (value: any): any => {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(toCamel);
+  if (typeof value !== 'object') return value;
+  if (value instanceof Date) return value;
+  const out: any = {};
+  for (const k of Object.keys(value)) out[snakeToCamelKey(k)] = toCamel(value[k]);
+  return out;
+};
+
+// callChatGPT foi removido — substituido por callAgent() em src/lib/aiCallAgent.ts
+// que tem provider chain (OpenAI → Anthropic → Gemini), retry, budget cap e log.
+
+const callGeminiREST = async (prompt: string) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL_NAME });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return {
+      text: () => response.text(),
+      response: { text: () => response.text() }
+    };
+  } catch (error: any) {
+    console.error("[Gemini] Erro na chamada:", error.message);
+    throw error;
+  }
+};
+
+async function startServer() {
+  const app = express();
+  const httpServer = createHttpServer(app);
+  const port = Number(process.env.PORT) || 3001;
+  console.log(`[System] Inicializando CampanhaPro v1.0.3...`);
+  console.log(`[Env] Modo: ${process.env.NODE_ENV || 'development'}`);
+
+  app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+  app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+  app.use(express.json());
+  
+  // Middleware de diagnóstico de versão
+  app.use((req, res, next) => {
+      res.setHeader('X-App-Version', '1.0.3');
+      next();
+  });
+
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+  // --- OAuth Social (Simulação) ---
+  app.get('/api/auth/meta/url', async (req, res) => {
+    const { campaignId } = req.query;
+    res.json({ url: `${req.protocol}://${req.get('host')}/api/auth/callback/simulate?campaignId=${campaignId}&provider=meta` });
+  });
+
+  app.get('/api/auth/tiktok/url', async (req, res) => {
+    const { campaignId } = req.query;
+    res.json({ url: `${req.protocol}://${req.get('host')}/api/auth/callback/simulate?campaignId=${campaignId}&provider=tiktok` });
+  });
+
+  app.get('/api/auth/callback/simulate', async (req, res) => {
+    const { campaignId, provider } = req.query;
+    
+    if (supabaseAdmin && campaignId) {
+        await supabaseAdmin.from('social_tokens').upsert({
+            campaign_id: campaignId,
+            provider,
+            access_token: 'SIMULATED_TOKEN_' + Math.random().toString(36).substring(7),
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'campaign_id,provider' });
+    }
+
+    res.send(`
+      <html>
+        <body style="background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; text-align: center; padding: 20px;">
+          <div style="background: #1e293b; padding: 40px; rounded-radius: 20px; border: 1px solid #334155; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+            <div style="color: #22c55e; font-size: 48px; margin-bottom: 20px;">✓</div>
+            <h2 style="margin: 0 0 10px 0;">Conexão Bem Sucedida!</h2>
+            <p style="color: #94a3b8; font-size: 14px;">A conta do ${String(provider).toUpperCase()} foi vinculada com sucesso.</p>
+            <p style="color: #64748b; font-size: 12px; margin-top: 20px;">Esta janela fechará automaticamente...</p>
+          </div>
+          <script>
+            setTimeout(() => {
+              if (window.opener) {
+                window.opener.postMessage({ type: '${provider === 'tiktok' ? 'TIKTOK' : 'META'}_AUTH_SUCCESS' }, '*');
+              }
+              window.close();
+            }, 2500);
+          </script>
+        </body>
+      </html>
+    `);
+  });
+
+  // --- Endpoints de IA e Agentes ---
+
+  app.post('/api/agents/chat', requireAuth, async (req, res) => {
+    try {
+      const { prompt, systemInstruction, campaignId, userId, agentId } = req.body;
+      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      if (supabaseAdmin && agentId) {
+          await supabaseAdmin.from('agent_chat_history').insert({
+              campaign_id: campaignId, agent_id: agentId, role: 'user', content: prompt
+          });
+      }
+
+      // Chamada principal via helper (provider chain + retry + budget + log)
+      const aiResponse = await callAgent(supabaseAdmin, agentId || 'chat', prompt, {
+          campaignId,
+          userId,
+          systemInstruction,
+          tools: AGENT_TOOLS,
+      });
+      let textResult = aiResponse.text;
+
+      // Executar tools que o modelo chamou.
+      const toolResults: { tool_call_id: string; output: any }[] = [];
+
+      for (const tool of aiResponse.toolCalls || []) {
+          const args = JSON.parse(tool.function.arguments || '{}');
+          let toolOutput: any = { success: true };
+
+          if (tool.function.name === 'publish_war_room_insight') {
+              if (supabaseAdmin) {
+                  await supabaseAdmin.from('war_room_intelligence').insert({
+                      campaign_id: campaignId,
+                      source_agent: agentId,
+                      category: args.category,
+                      priority: args.priority,
+                      insight_text: args.insight_text,
+                      metadata: { neighborhood: args.neighborhood },
+                      created_at: new Date().toISOString()
+                  });
+              }
+              toolOutput = { success: true, message: 'Insight publicado na Sala de Guerra.' };
+          } else if (tool.function.name === 'get_conversion_funnel') {
+              const stats = await getConversionFunnelStats(campaignId);
+              if (supabaseAdmin) {
+                  await supabaseAdmin.from('war_room_intelligence').insert({
+                      campaign_id: campaignId,
+                      source_agent: agentId,
+                      category: 'Oportunidade',
+                      priority: 'Media',
+                      insight_text: `Análise de Funil solicitada: ${stats.map(s => `${s.stage}: ${s.count}`).join(', ')}`,
+                      created_at: new Date().toISOString()
+                  });
+              }
+              toolOutput = { funnel: stats };
+          } else if (tool.function.name === 'analyze_territorial_gap') {
+              const alerts = await getTerritorialAlerts(campaignId);
+              if (supabaseAdmin) {
+                  for (const alert of alerts.slice(0, 3)) {
+                      await supabaseAdmin.from('war_room_intelligence').insert({
+                          campaign_id: campaignId,
+                          source_agent: agentId,
+                          category: 'Logística',
+                          priority: alert.risk_level === 'Critical' ? 'CRÍTICO' : 'Alta',
+                          insight_text: `GAP TERRITORIAL em ${alert.neighborhood}: ${alert.gap_percentage.toFixed(1)}% de defasagem.`,
+                          metadata: { neighborhood: alert.neighborhood, risk: alert.risk_level },
+                          created_at: new Date().toISOString()
+                      });
+                  }
+              }
+              toolOutput = { territorial_alerts: alerts };
+          } else if (tool.function.name === 'flag_fraudulent_data') {
+              if (supabaseAdmin) {
+                  await supabaseAdmin.from('fraud_audit_logs').insert({
+                      campaign_id: campaignId,
+                      entity_type: args.entity_type,
+                      entity_id: args.entity_id,
+                      detected_by: agentId,
+                      risk_level: args.risk_level,
+                      description: args.reason,
+                      metadata: { source: 'agent_tool', original_args: args },
+                  });
+              }
+              toolOutput = { success: true, message: `Registro ${args.entity_type}/${args.entity_id} flagged como ${args.risk_level}.` };
+          } else if (tool.function.name === 'create_backup') {
+              // Stub: backup real é disparado no service do front. Aqui só registra a intenção.
+              toolOutput = { success: true, message: 'Pedido de backup registrado. Execute via UI de Backup.', reason: args.reason };
+          } else if (tool.function.name === 'generate_dalle_image') {
+              // Direciona o user a chamar /api/agents/generate-image — não geramos imagem dentro de chat (ciclo seria muito longo).
+              toolOutput = { success: false, message: 'Use o Produtor Criativo na UI pra gerar imagens. Tool não-executável neste contexto.' };
+          } else {
+              toolOutput = { success: false, message: `Tool '${tool.function.name}' não suportada.` };
+          }
+
+          toolResults.push({ tool_call_id: tool.id, output: toolOutput });
+      }
+
+      // Follow-up: alimenta resultados das tools de volta na IA pra texto final.
+      if (toolResults.length > 0) {
+          try {
+              const followupPrompt = `${prompt}\n\n[RESULTADO DAS FERRAMENTAS EXECUTADAS]\n${toolResults.map(tr => `- ${tr.tool_call_id}: ${JSON.stringify(tr.output)}`).join('\n')}\n\nGere a resposta final consolidando o resultado das ferramentas.`;
+              const followup = await callAgent(supabaseAdmin, agentId || 'chat', followupPrompt, {
+                  campaignId, userId, systemInstruction,
+              });
+              if (followup.text) textResult = followup.text;
+          } catch (followupErr: any) {
+              console.error('[Agent Chat] Erro no follow-up:', followupErr.message);
+          }
+      }
+
+      if (supabaseAdmin && agentId) {
+          await supabaseAdmin.from('agent_chat_history').insert({
+              campaign_id: campaignId, agent_id: agentId, role: 'agent', content: textResult,
+              metadata: { tool_calls: aiResponse.toolCalls, run_id: aiResponse.runId, provider: aiResponse.provider, model: aiResponse.model }
+          });
+
+          await supabaseAdmin.from('ai_compliance_logs').insert({
+              campaign_id: campaignId,
+              agent_id: agentId,
+              action_type: 'chat_generation',
+              input_summary: prompt.substring(0, 200),
+              output_summary: textResult.substring(0, 200),
+              ai_disclosure_required: true,
+              human_approved: false,
+              created_by: userId
+          });
+      }
+
+      res.json({ text: textResult, tool_calls: aiResponse.toolCalls, run_id: aiResponse.runId, provider: aiResponse.provider });
+    } catch (error: any) {
+      if (error instanceof BudgetExceededError) {
+          return res.status(429).json({ error: error.message, code: 'BUDGET_EXCEEDED' });
+      }
+      console.error("[Agent Chat] Erro:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Endpoints Gemini (Usados pelo geminiService.ts) ---
+  app.post('/api/gemini/chat', requireAuth, async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      const aiResponse = await callGeminiREST(prompt);
+      res.json({ text: aiResponse.text() });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/public/chat', async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      // Endpoint público usa Gemini (mais econômico/rápido para eleitores)
+      const aiResponse = await callGeminiREST(prompt);
+      res.json({ text: aiResponse.text() });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/agents/history/:agentId', requireAuth, async (req, res) => {
+    const { agentId } = req.params;
+    const { campaignId } = req.query;
+    const { data } = await supabaseAdmin.from('agent_chat_history')
+      .select('*').eq('campaign_id', campaignId).eq('agent_id', agentId)
+      .order('created_at', { ascending: true }).limit(50);
+    res.json({ history: toCamel(data || []) });
+  });
+
+  app.post('/api/agents/generate-image', requireAuth, async (req, res) => {
+    try {
+      const { prompt, campaignId, agentId } = req.body;
+      const ptPrompt = `ESTRITAMENTE EM PORTUGUÊS DO BRASIL: Qualquer texto na imagem deve ser em português brasileiro. Tema: ${prompt}.`;
+      const response = await axios.post('https://api.openai.com/v1/images/generations', {
+        model: "dall-e-3", prompt: ptPrompt, n: 1, size: "1024x1792"
+      }, { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` } });
+
+      const imageUrl = response.data.data[0].url;
+      await supabaseAdmin.from('agent_chat_history').insert({
+          campaign_id: campaignId, agent_id: agentId, role: 'agent', content: `![ATIVO](${imageUrl})`, metadata: { type: 'image' }
+      });
+      res.json({ imageUrl });
+    } catch (error) { res.status(500).json({ error: 'Erro DALL-E' }); }
+  });
+
+  // --- Dashboard Feed ---
+  app.get('/api/war-room/feed', requireAuth, async (req, res) => {
+    const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
+    const { data } = await supabaseAdmin.from('war_room_intelligence')
+      .select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(10);
+    res.json({ insights: toCamel(data || []) });
+  });
+
+  // --- Auditoria de Fraude ---
+  app.get('/api/fraud/logs', requireAuth, async (req, res) => {
+    const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
+    const { data } = await supabaseAdmin.from('fraud_audit_logs')
+      .select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false });
+    res.json({ logs: toCamel(data || []) });
+  });
+
+  app.post('/api/agents/publish-social', requireAuth, async (req, res) => {
+    try {
+      const { campaign_id, platforms, content, mediaUrl, agent_id, ai_disclosure_required } = req.body;
+      const user_id = req.user?.id;
+
+      // 1. Validar se o usuário pertence à campanha e tem permissão (Admin ou Líder)
+      if (supabaseAdmin) {
+        const { data: userCampaign, error: campaignError } = await supabaseAdmin
+          .from('users')
+          .select('campaign_id, type')
+          .eq('id', user_id)
+          .single();
+
+        if (campaignError || !userCampaign || userCampaign.campaign_id !== campaign_id) {
+          return res.status(403).json({ error: "Acesso negado: Usuário não pertence a esta campanha." });
+        }
+
+        const allowedTypes = ['Admin', 'Líder', 'Candidato'];
+        if (!allowedTypes.includes(userCampaign.type)) {
+          return res.status(403).json({ error: "Permissão insuficiente para publicar em redes sociais." });
+        }
+
+        // 2. Registrar log de compliance
+        await supabaseAdmin.from('ai_compliance_logs').insert({
+          campaign_id,
+          agent_id: agent_id || 'manual_publish',
+          action_type: 'social_publication',
+          input_summary: content.substring(0, 200),
+          output_summary: `Publicado em: ${platforms.join(', ')}`,
+          ai_disclosure_required: ai_disclosure_required || true,
+          human_approved: true,
+          risk_level: 'baixo',
+          created_by: user_id
+        });
+      }
+
+      console.log(`[SOCIAL PUBLISH] Campanha ${campaign_id} postando por usuário ${user_id} em: ${platforms.join(', ')}`);
+      
+      // Simulação de processamento de rede social
+      await new Promise(r => setTimeout(r, 1500));
+      
+      res.json({ 
+        success: true, 
+        message: `Conteúdo publicado com sucesso em ${platforms.length} rede(s).`,
+        platforms: platforms
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- API Externa v1 (Ingestão de Dados) ---
+  app.post('/api/agents/advisor', requireAuth, async (req, res) => {
+    try {
+      const { campaignDataPrompt, campaignId, userId } = req.body;
+      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const aiResponse = await callAgent(supabaseAdmin, 'advisor', campaignDataPrompt, {
+          campaignId, userId,
+          systemInstruction: "Você é um consultor político sênior. Forneça exatamente 3 dicas práticas baseadas nos dados fornecidos. Responda ESTRITAMENTE em formato JSON: { \"tips\": [{ \"title\": \"...\", \"message\": \"...\", \"type\": \"info\"|\"warning\"|\"success\" }] }",
+      });
+
+      try {
+        const cleanData = JSON.parse(cleanJSON(aiResponse.text));
+        res.json(cleanData);
+      } catch (parseError) {
+        // IA não retornou JSON válido — devolve fallback usando o próprio texto.
+        res.json({
+          tips: [
+            { title: "Análise Estratégica", message: aiResponse.text.substring(0, 200) + "...", type: "info" },
+            { title: "Dica de Campo", message: "Continue monitorando os bairros com maior rejeição para ações rápidas.", type: "warning" },
+            { title: "Foco Digital", message: "Gere novos conteúdos baseados nas dores captadas hoje.", type: "success" }
+          ]
+        });
+      }
+    } catch (error: any) {
+      if (error instanceof BudgetExceededError) {
+          return res.status(429).json({ error: error.message, code: 'BUDGET_EXCEEDED' });
+      }
+      console.error("[Advisor] Erro:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Pipeline Automática (Analisar Agora) ---
+  app.post('/api/agents/pipeline', requireAuth, async (req, res) => {
+    try {
+      const { campaignDataPrompt, campaignId, userId } = req.body;
+      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+      console.log("[Pipeline] Iniciando análise profunda para campanha:", campaignId);
+
+      const aiResponse = await callAgent(
+        supabaseAdmin, 'pipeline',
+        `Analise estes dados e gere uma estratégia completa. Você DEVE separar cada seção com o marcador '#' seguido do nome do agente (ex: # Estrategista, # Growth, # Social, # Field, # Creative):\n\n${campaignDataPrompt}`,
+        { campaignId, userId }
+      );
+      const text = aiResponse.text;
+
+      if (!text || text.length < 50) {
+          throw new Error("Resposta da IA muito curta ou vazia.");
+      }
+
+      const parts = text.split('#');
+      const findPart = (keywords: string[]) => {
+          const part = parts.find(p => keywords.some(k => p.toLowerCase().includes(k.toLowerCase())));
+          return part ? part.split('\n').slice(1).join('\n').trim() : '';
+      };
+
+      const result = {
+        strategist: findPart(['Estrategista', 'Strategist']) || (parts[1] || text),
+        growth: findPart(['Growth', 'Hacker']),
+        social: findPart(['Social', 'Media']),
+        field: findPart(['Field', 'Campo', 'Comandante']),
+        creativeText: findPart(['Creative', 'Criativo', 'Produtor']),
+      };
+
+      if (supabaseAdmin) {
+          const { error } = await supabaseAdmin.from('agent_outputs').insert({
+            campaign_id: campaignId,
+            agent_type: 'war-room-pipeline',
+            output_type: 'pipeline_result',
+            content: text,
+            metadata: { input: { description: 'Full automated analysis' }, output: result, run_id: aiResponse.runId },
+            created_at: new Date().toISOString()
+          });
+          if (error) console.error("[Pipeline] Erro ao salvar:", error);
+      }
+
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof BudgetExceededError) {
+          return res.status(429).json({ error: error.message, code: 'BUDGET_EXCEEDED' });
+      }
+      console.error("[Pipeline] Erro crítico:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Secretário de Agenda: multi-turn com validação de 5 campos obrigatórios ---
+  app.post('/api/agents/secretary', requireAuth, async (req, res) => {
+    try {
+      const { campaignId, command, context } = req.body;
+      // context (opcional): { extracted?: {...}, pendingEvent?: {...}, awaitingFields?: string[] }
+      const userId = req.user?.id;
+      if (!campaignId || !command || typeof command !== 'string' || command.trim().length < 1) {
+        return res.status(400).json({ error: 'campaignId e command obrigatórios' });
+      }
+
+      const SECRETARY_INSTR = (await import('./src/lib/agentInstructions.js')).SECRETARY_AGENT_INSTRUCTION;
+      const nowIso = new Date().toISOString();
+
+      // Monta prompt incorporando contexto multi-turn (se houver).
+      let promptWithContext = `AGORA: ${nowIso}\nFUSO: America/Sao_Paulo\n\n`;
+      if (context?.pendingEvent) {
+        promptWithContext += `EVENTO PENDENTE (aguardando confirmação):\n${JSON.stringify(context.pendingEvent, null, 2)}\n\nRESPOSTA DO USUÁRIO:\n"${command.trim()}"`;
+      } else if (context?.extracted) {
+        promptWithContext += `DADOS JÁ EXTRAÍDOS (turno anterior):\n${JSON.stringify(context.extracted, null, 2)}\n\nCAMPOS QUE FALTAVAM: ${(context.awaitingFields || []).join(', ')}\n\nNOVA INFORMAÇÃO DO USUÁRIO:\n"${command.trim()}"`;
+      } else {
+        promptWithContext += `COMANDO DO USUÁRIO:\n"${command.trim()}"`;
+      }
+
+      const aiResponse = await callAgent(supabaseAdmin, 'secretary', promptWithContext, {
+        campaignId, userId, systemInstruction: SECRETARY_INSTR,
+      });
+
+      // Parser tolerante
+      let cleaned = aiResponse.text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace  = cleaned.lastIndexOf('}');
+      if (firstBrace >= 0 && lastBrace > firstBrace) cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+
+      let parsed: any = {};
+      try { parsed = JSON.parse(cleaned); } catch (e) {
+        return res.status(500).json({ error: 'Secretário retornou JSON inválido', raw: aiResponse.text.slice(0, 300) });
+      }
+
+      // SÓ persiste em confirm_save (o usuário deu OK explícito).
+      let executed = false;
+      if (parsed.action === 'confirm_save' && parsed.event?.title && parsed.event?.starts_at) {
+        const ev = parsed.event;
+        // Validação dura: garante 5 campos obrigatórios mesmo se a IA escapulir.
+        const required = ['title', 'starts_at', 'location', 'with_whom', 'priority'];
+        const missing = required.filter(k => !ev[k] || String(ev[k]).trim() === '');
+        if (missing.length > 0) {
+          parsed.action = 'need_more_info';
+          parsed.extracted = ev;
+          parsed.missing_fields = missing;
+          parsed.speech_response = `Faltam ainda: ${missing.join(', ')}. Pode me passar?`;
+        } else {
+          const validPrios = ['critica','alta','media','baixa'];
+          const prio = validPrios.includes(ev.priority) ? ev.priority : 'media';
+          const { error: insErr } = await supabaseAdmin.from('agenda_events').insert({
+            campaign_id: campaignId,
+            title: String(ev.title).slice(0, 200),
+            starts_at: ev.starts_at,
+            ends_at: ev.ends_at || null,
+            location: String(ev.location).slice(0, 200),
+            with_whom: String(ev.with_whom).slice(0, 200),
+            priority: prio,
+            category: ev.category || 'outro',
+            description: ev.description || null,
+            reminder_minutes_before: typeof ev.reminder_minutes_before === 'number' ? ev.reminder_minutes_before : 30,
+            created_by: userId,
+          });
+          if (!insErr) executed = true;
+          else { parsed.action = 'error'; parsed.error = insErr.message; }
+        }
+      }
+
+      res.json({
+        ...parsed,
+        executed,
+        cost_cents_usd: aiResponse.costCentsUsd,
+        provider: aiResponse.provider,
+      });
+    } catch (error: any) {
+      if (error instanceof BudgetExceededError) {
+        return res.status(429).json({ error: error.message, code: 'BUDGET_EXCEEDED' });
+      }
+      console.error('[Secretary] Erro:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Classificação IA de eleitores (Indeciso → Apoiador → Multiplicador) ---
+  app.post('/api/ai/classify-contacts', requireAuth, async (req, res) => {
+    try {
+      const campaignId = req.body.campaignId;
+      const userId = req.user?.id;
+      const limit = Math.min(Number(req.body.limit) || 30, 100);
+      if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      // Pega contatos ainda não classificados (ou classificados há mais de 14 dias).
+      const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: contacts, error: contactsErr } = await supabaseAdmin
+        .from('contacts')
+        .select('id, name, phone, neighborhood, classification, tags, ai_notes, source, support_level, support_classified_at')
+        .eq('campaign_id', campaignId)
+        .or(`support_level.eq.desconhecido,support_classified_at.lt.${cutoff}`)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (contactsErr) throw contactsErr;
+      if (!contacts || contacts.length === 0) {
+        return res.json({ classified: 0, message: 'Sem contatos pra classificar agora.' });
+      }
+
+      // Monta prompt em batch — mais barato que 1 chamada por contato.
+      const lines = contacts.map((c: any, i: number) =>
+        `${i+1}. id=${c.id} | nome=${c.name} | bairro=${c.neighborhood||'?'} | classif_legado=${c.classification||'?'} | tags=${(c.tags||[]).join(',')||'?'} | notas=${(c.ai_notes||'').slice(0,80)||'?'} | origem=${c.source||'?'}`
+      ).join('\n');
+
+      const systemPrompt = `Você é o Classificador de Eleitores. Sua única tarefa: ler dados de cada contato e classificar em UM dos níveis:
+- 'rejeitador': demonstra rejeição clara ao candidato/causa
+- 'indeciso': sem sinal claro de apoio nem rejeição
+- 'simpatizante': sinais leves de apoio (ex: tags positivas, classificação legado "Apoiador")
+- 'apoiador': apoio declarado consistente
+- 'multiplicador': apoiador que ATIVAMENTE traz outros (ex: tags "lider de bairro", origem "Indicação")
+- 'desconhecido': dados insuficientes pra classificar com >50% de confiança
+
+Atribua também um support_score (0-100) que é sua CONFIANÇA na classificação.
+Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
+[{ "id": "uuid", "support_level": "indeciso", "support_score": 60, "reasoning": "frase curta" }, ...]`;
+
+      const aiResponse = await callAgent(supabaseAdmin, 'crm', `Classifique estes ${contacts.length} contatos:\n\n${lines}\n\nLembre: JSON array puro, sem markdown.`, {
+        campaignId, userId, systemInstruction: systemPrompt,
+      });
+
+      // Parser tolerante (IA às vezes envolve em ```json)
+      let cleaned = aiResponse.text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const firstBracket = cleaned.indexOf('[');
+      const lastBracket = cleaned.lastIndexOf(']');
+      if (firstBracket >= 0 && lastBracket > firstBracket) cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+
+      let parsed: any[] = [];
+      try { parsed = JSON.parse(cleaned); } catch (e: any) {
+        return res.status(500).json({ error: 'IA retornou JSON inválido', raw: aiResponse.text.slice(0, 500) });
+      }
+
+      const validLevels = new Set(['desconhecido','rejeitador','indeciso','simpatizante','apoiador','multiplicador']);
+      let classified = 0;
+      for (const item of parsed) {
+        if (!item?.id || !validLevels.has(item.support_level)) continue;
+        const { error: upErr } = await supabaseAdmin.from('contacts').update({
+          support_level: item.support_level,
+          support_score: typeof item.support_score === 'number' ? Math.max(0, Math.min(100, item.support_score)) : null,
+          support_reasoning: (item.reasoning || '').slice(0, 500),
+          support_classified_at: new Date().toISOString(),
+          support_classified_by: 'ai_crm_agent',
+        }).eq('id', item.id).eq('campaign_id', campaignId);
+        if (!upErr) classified++;
+      }
+
+      res.json({
+        classified,
+        total: contacts.length,
+        cost_cents_usd: aiResponse.costCentsUsd,
+        provider: aiResponse.provider,
+        run_id: aiResponse.runId,
+      });
+    } catch (error: any) {
+      if (error instanceof BudgetExceededError) {
+        return res.status(429).json({ error: error.message, code: 'BUDGET_EXCEEDED' });
+      }
+      console.error('[Classify] Erro:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Manager Agent (orquestrador) com SSE streaming ---
+  app.post('/api/agents/manager', requireAuth, async (req, res) => {
+    const { campaignId, intent } = req.body;
+    const userId = req.user?.id;
+    if (!campaignId || !intent || typeof intent !== 'string' || intent.trim().length < 5) {
+      return res.status(400).json({ error: 'campaignId e intent (>=5 chars) obrigatórios' });
+    }
+
+    // Server-Sent Events: cada evento do Manager vira uma linha "data: ...\n\n"
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+
+    const send = (event: string, payload: any) => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    // Heartbeat a cada 15s pra evitar proxies fecharem conexão.
+    const heartbeat = setInterval(() => res.write(`: keepalive\n\n`), 15_000);
+
+    try {
+      const result = await runManager({
+        supabaseAdmin,
+        campaignId,
+        userId,
+        intent,
+        onEvent: (e) => send(e.type, { ...e.data, ts: e.timestamp }),
+      });
+      send('done', result);
+    } catch (err: any) {
+      const code = err instanceof BudgetExceededError ? 'BUDGET_EXCEEDED' : 'ERROR';
+      send('error', { error: err?.message || String(err), code });
+    } finally {
+      clearInterval(heartbeat);
+      res.end();
+    }
+  });
+
+  // GET histórico de execuções do Manager
+  app.get('/api/agents/manager/runs', requireAuth, async (req, res) => {
+    try {
+      const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
+      if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const { data } = await supabaseAdmin.from('manager_runs')
+          .select('id, intent, final_summary, total_cost_cents_usd, iterations, status, started_at, finished_at')
+          .eq('campaign_id', campaignId)
+          .order('started_at', { ascending: false })
+          .limit(20);
+      res.json({ runs: data || [] });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- AI Health (uso e custo do mês para o dashboard "Manager") ---
+  app.get('/api/ai/health', requireAuth, async (req, res) => {
+    try {
+      const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
+      if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const startOfMonth = new Date(); startOfMonth.setUTCDate(1); startOfMonth.setUTCHours(0,0,0,0);
+      const { data: runs } = await supabaseAdmin.from('agent_runs')
+          .select('agent_id, provider, model, status, cost_cents_usd, latency_ms, created_at')
+          .eq('campaign_id', campaignId)
+          .gte('created_at', startOfMonth.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(2000);
+      const list = runs || [];
+      const totalCents = list.reduce((s: number, r: any) => s + (r.cost_cents_usd || 0), 0);
+      const errors = list.filter((r: any) => r.status !== 'ok').length;
+      const byAgent: Record<string, { runs: number; cost_cents: number }> = {};
+      for (const r of list) {
+          const a = (r as any).agent_id || 'unknown';
+          if (!byAgent[a]) byAgent[a] = { runs: 0, cost_cents: 0 };
+          byAgent[a].runs += 1;
+          byAgent[a].cost_cents += (r as any).cost_cents_usd || 0;
+      }
+      res.json({
+        month_total_cents_usd: totalCents,
+        month_total_brl: Number((totalCents / 100 * Number(process.env.BRL_PER_USD || 5.50)).toFixed(2)),
+        cap_brl: 100,
+        runs_count: list.length,
+        errors_count: errors,
+        by_agent: byAgent,
+        recent: list.slice(0, 20),
+      });
+    } catch (error: any) {
+      console.error('[AI Health] Erro:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Ordens de Produção (Passagem de Bola) ---
+  app.post('/api/agents/production-order', requireAuth, async (req, res) => {
+    try {
+      const { campaignId, originAgent, targetAgent, content } = req.body;
+      const { data, error } = await supabaseAdmin.from('production_orders').insert({
+        campaign_id: campaignId,
+        origin_agent: originAgent,
+        target_agent: targetAgent,
+        content: typeof content === 'string' ? content : JSON.stringify(content ?? ''),
+        status: 'pending'
+      }).select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
+  app.get('/api/agents/production-orders', requireAuth, async (req, res) => {
+    try {
+      const { campaignId, targetAgent } = req.query;
+      const { data } = await supabaseAdmin.from('production_orders')
+        .select('*').eq('campaign_id', campaignId).eq('target_agent', targetAgent).eq('status', 'pending');
+      res.json({ orders: toCamel(data || []) });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
+  // --- Gerar/Rotacionar API Key da campanha (Admin/Líder/Candidato) ---
+  app.post('/api/campaigns/:id/api-key', requireAuth, async (req, res) => {
+    try {
+      const campaignId = req.params.id;
+      const userId = req.user?.id;
+      if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase admin indisponível.' });
+
+      const { data: userRow, error: userErr } = await supabaseAdmin
+        .from('users').select('campaign_id, type, is_supreme_admin').eq('id', userId).single();
+      if (userErr || !userRow) return res.status(403).json({ error: 'Usuário não encontrado.' });
+
+      const allowed = userRow.is_supreme_admin || (
+        userRow.campaign_id === campaignId && ['Admin', 'Líder', 'Candidato'].includes(userRow.type)
+      );
+      if (!allowed) return res.status(403).json({ error: 'Permissão insuficiente para gerar chave da campanha.' });
+
+      const newKey = `cp_${crypto.randomBytes(24).toString('base64url')}`;
+      const { error: updErr } = await supabaseAdmin
+        .from('campaigns').update({ api_key: newKey, updated_at: new Date().toISOString() }).eq('id', campaignId);
+      if (updErr) throw updErr;
+
+      // A chave em texto pleno é retornada apenas nesta resposta — não fica visível depois.
+      res.json({ api_key: newKey, campaign_id: campaignId });
+    } catch (error: any) {
+      console.error('[API Key] Erro ao gerar:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- API EXTERNA V1 (Integração com Apps Terceiros) ---
+  const validateApiKey = async (req: any, res: any, next: any) => {
+    const apiKey = req.headers['x-api-key'];
+    if (!apiKey) return res.status(401).json({ error: 'X-API-KEY ausente' });
+    
+    // Busca campanha pela API KEY
+    const { data: campaign, error } = await supabaseAdmin
+      .from('campaigns')
+      .select('id')
+      .eq('api_key', apiKey)
+      .single();
+
+    if (error || !campaign) return res.status(403).json({ error: 'API KEY inválida' });
+    req.campaignId = campaign.id;
+    next();
+  };
+
+  app.post('/api/external/v1/voters', validateApiKey, async (req: any, res) => {
+    try {
+      const { name, phone, email, neighborhood, city, observations, birthDate, gps } = req.body;
+      const { data, error } = await supabaseAdmin.from('contacts').insert({
+        campaign_id: req.campaignId,
+        name: name,
+        phone: phone,
+        email: email,
+        neighborhood: neighborhood,
+        city: city,
+        ai_notes: observations,
+        birth_date: birthDate,
+        gps_coords: gps,
+        created_at: new Date().toISOString()
+      }).select().single();
+      if (error) throw error;
+      res.status(201).json({ message: 'Eleitor importado com sucesso', id: data.id });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
+  app.post('/api/external/v1/visits', validateApiKey, async (req: any, res) => {
+    try {
+      const { contactId, type, notes, status, gps, duration } = req.body;
+      const { data, error } = await supabaseAdmin.from('visits').insert({
+        campaign_id: req.campaignId,
+        leader_id: contactId, // Usando leader_id como fallback para associação de contato
+        resp: 'Importado via API',
+        bairro: 'API',
+        apoiador: 'Sistema',
+        votos: 0,
+        solicit: notes,
+        realizada: status === 'realizada' ? 'sim' : 'nao',
+        gps_coords: gps,
+        duracao_segundos: duration,
+        data: new Date().toISOString().split('T')[0],
+        created_at: new Date().toISOString()
+      }).select().single();
+      if (error) throw error;
+      res.status(201).json({ message: 'Atendimento/Visita registrada via API', id: data.id });
+    } catch (error: any) { res.status(500).json({ error: error.message }); }
+  });
+
+  // Vite / Static Assets
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({ server: { middlewareMode: true, hmr: { server: httpServer } }, appType: 'custom' });
+    app.use(vite.middlewares);
+    app.use('*', async (req, res, next) => {
+      const url = req.originalUrl;
+      if (url.startsWith('/api') || url.includes('.')) return next();
+      let template = await fsPromises.readFile(path.resolve(__dirname, 'index.html'), 'utf-8');
+      template = await vite.transformIndexHtml(url, template);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+    });
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    if (fs.existsSync(distPath)) {
+        console.log(`[Production] Servindo arquivos estáticos de: ${distPath}`);
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    } else {
+        console.error(`[CRÍTICO] Pasta de build não encontrada: ${distPath}`);
+    }
+  }
+
+  httpServer.listen(port, '0.0.0.0', () => {
+    console.log(`Servidor rodando em todas as interfaces na porta ${port}`);
+    // Inicia monitor proativo (varre campanhas com flag ativa). Por default
+    // todas as campanhas vêm com proactive_monitoring_enabled=false, então
+    // o monitor só dispara IA pra quem opt-in.
+    startProactiveMonitor(supabaseAdmin);
+  });
+}
+
+startServer();

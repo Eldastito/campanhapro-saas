@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+/* Hide arrows in numeric inputs for a better UX */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  background-color: #0f172a;
+  color: #e5e7eb;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+}
+
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-size: 12pt;
+  }
+  .no-print { display: none !important; }
+  .print-card {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+    padding: 1rem !important;
+  }
+  .print-bg-transparent { background-color: transparent !important; }
+  .print-text-black { color: #000000 !important; }
+  .print-page-title {
+    display: block !important;
+    text-align: center;
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 2rem;
+  }
+  .print-footer {
+    display: block !important;
+    position: fixed;
+    bottom: 20px;
+    left: 0;
+    right: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 10px;
+  }
+  .print-break-inside-avoid { break-inside: avoid; }
+  .print-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  a {
+    text-decoration: none;
+    color: #000000 !important;
+  }
+}
