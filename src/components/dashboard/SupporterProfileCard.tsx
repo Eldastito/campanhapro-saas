@@ -64,7 +64,7 @@ const SupporterProfileCard: React.FC<SupporterProfileCardProps> = ({ supporterNa
                     <div className="mt-2 pt-2 border-t border-slate-700/50 text-sm">
                         <p><span className="text-slate-400">CPF:</span> {supporterData.cpf || 'Não preenchido'}</p>
                         <p><span className="text-slate-400">RG:</span> {supporterData.rg || 'Não preenchido'}</p>
-                        <p><span className="text-slate-400">Título:</span> {supporterData.voter_id || 'Não preenchido'}</p>
+                        <p><span className="text-slate-400">Título:</span> {supporterData.voterId || 'Não preenchido'}</p>
                     </div>
                 </div>
 
@@ -78,7 +78,7 @@ const SupporterProfileCard: React.FC<SupporterProfileCardProps> = ({ supporterNa
                                 <>
                                     <p>{supporterData.address}</p>
                                     <p>{supporterData.neighborhood} - {supporterData.city}/{supporterData.state}</p>
-                                    <p className="text-slate-500 mt-1">CEP: {supporterData.zip_code}</p>
+                                    <p className="text-slate-500 mt-1">CEP: {supporterData.zipcode}</p>
                                 </>
                             ) : (
                                 <span className="text-slate-500 italic">Endereço não cadastrado</span>
@@ -93,14 +93,14 @@ const SupporterProfileCard: React.FC<SupporterProfileCardProps> = ({ supporterNa
                     <div className="flex gap-2 text-sm text-slate-300 items-start">
                         <Landmark className="w-4 h-4 text-slate-400 mt-1 flex-shrink-0" />
                         <div>
-                            {supporterData.bank_name ? (
+                            {supporterData.bankName ? (
                                 <>
-                                    <p className="font-medium text-emerald-400">{supporterData.bank_name}</p>
-                                    <p>Agência: <span className="text-slate-200">{supporterData.bank_agency}</span></p>
-                                    <p>Conta: <span className="text-slate-200">{supporterData.bank_account}</span></p>
-                                    {supporterData.pix_key && (
+                                    <p className="font-medium text-emerald-400">{supporterData.bankName}</p>
+                                    <p>Agência: <span className="text-slate-200">{supporterData.bankAgency}</span></p>
+                                    <p>Conta: <span className="text-slate-200">{supporterData.bankAccount}</span></p>
+                                    {supporterData.pixKey && (
                                         <p className="mt-1 pt-1 border-t border-slate-700/50">
-                                            PIX: <span className="text-[#4ac7f0] select-all">{supporterData.pix_key}</span>
+                                            PIX: <span className="text-[#4ac7f0] select-all">{supporterData.pixKey}</span>
                                         </p>
                                     )}
                                 </>

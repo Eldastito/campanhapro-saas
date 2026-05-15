@@ -54,8 +54,6 @@ const ConversionFunnel: React.FC = () => {
 
       <div className="flex flex-col gap-2">
         {stats.map((item, idx) => {
-          const total = stats[0].count || 1;
-          const percentage = (item.count / total) * 100;
           const width = 100 - (idx * 10); // Visual funnel effect
 
           return (

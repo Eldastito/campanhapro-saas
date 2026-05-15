@@ -2,7 +2,8 @@ import * as React from 'react';
 import { RJ_MUNICIPALITIES } from '../../data/rj-locations';
 import { useVisits } from '../../contexts/VisitsContext';
 import { useTeam } from '../../contexts/TeamContext';
-import { useProfilePermissions } from '../../contexts/PermissionsContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useProfilePermissions, CustomField } from '../../contexts/PermissionsContext';
 import { Visit } from '../../types/visits';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
@@ -40,6 +41,7 @@ const emptyVisit: Omit<Visit, 'id'> = {
 const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
     const { visits } = useVisits();
     const { locations, teamMembers } = useTeam();
+    const { user } = useAuth();
     const { config } = useProfilePermissions();
     const [formData, setFormData] = React.useState(initialData || emptyVisit);
 
@@ -60,13 +62,13 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
         let combined = [...new Set([...fromTeam, ...fromVisits])].sort();
         
         // Se a lista estiver vazia e o usuário logado for apoiador, adiciona ele como opção padrão
-        if (combined.length === 0 && config?.user?.name) {
-            combined = [config.user.name];
+        if (combined.length === 0 && user?.name) {
+            combined = [user.name];
         }
         
         console.log("[VisitForm] Apoiadores encontrados:", combined.length);
         return combined;
-    }, [teamMembers, visits, config?.user?.name]);
+    }, [teamMembers, visits, user?.name]);
 
     // Base Global de Municípios do RJ
     const municipios = React.useMemo(() => {
@@ -126,7 +128,7 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
         onSave(formData);
     };
 
-    const customFields = config?.customFields?.visits || [];
+    const customFields: CustomField[] = config?.customFields?.visits || [];
 
     return (
         <form onSubmit={handleSubmit} className="space-y-4">

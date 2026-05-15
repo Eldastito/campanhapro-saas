@@ -8,11 +8,9 @@ import fs from 'fs';
 import fsPromises from 'fs/promises';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { createServer as createHttpServer } from 'http';
-import { supabase } from './src/lib/supabaseClient';
 import { createAuthMiddleware } from './src/middleware/authMiddleware';
 import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -24,7 +22,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuração centralizada
-const SUPREME_ADMIN_EMAIL = process.env.SUPREME_ADMIN_EMAIL || 'eldastito@gmail.com';
+// SUPREME_ADMIN_EMAIL available via process.env.SUPREME_ADMIN_EMAIL when needed
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'];
 const GEMINI_MODEL_NAME = "gemini-1.5-flash"; 
 
@@ -172,7 +170,7 @@ async function startServer() {
   app.use(express.json());
   
   // Middleware de diagnóstico de versão
-  app.use((req, res, next) => {
+  app.use((_req, res, next) => {
       res.setHeader('X-App-Version', '1.0.3');
       next();
   });
@@ -427,7 +425,7 @@ async function startServer() {
 
   app.post('/api/agents/publish-social', requireAuth, async (req, res) => {
     try {
-      const { campaign_id, platforms, content, mediaUrl, agent_id, ai_disclosure_required } = req.body;
+      const { campaign_id, platforms, content, agent_id, ai_disclosure_required } = req.body;
       const user_id = req.user?.id;
 
       // 1. Validar se o usuário pertence à campanha e tem permissão (Admin ou Líder)
@@ -922,7 +920,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
 
   app.post('/api/external/v1/visits', validateApiKey, async (req: any, res) => {
     try {
-      const { contactId, type, notes, status, gps, duration } = req.body;
+      const { contactId, notes, status, gps, duration } = req.body;
       const { data, error } = await supabaseAdmin.from('visits').insert({
         campaign_id: req.campaignId,
         leader_id: contactId, // Usando leader_id como fallback para associação de contato
@@ -958,7 +956,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     if (fs.existsSync(distPath)) {
         console.log(`[Production] Servindo arquivos estáticos de: ${distPath}`);
         app.use(express.static(distPath));
-        app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+        app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
     } else {
         console.error(`[CRÍTICO] Pasta de build não encontrada: ${distPath}`);
     }

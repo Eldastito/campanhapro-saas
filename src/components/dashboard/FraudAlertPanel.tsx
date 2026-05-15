@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
-import { ShieldAlert, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { ShieldAlert, CheckCircle, Clock } from 'lucide-react';
 import Card from '../ui/Card';
 
 interface FraudLog {
@@ -20,7 +20,7 @@ const FraudAlertPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Somente Admins e Leaders devem ver este painel
-  const canView = userType === 'Admin' || userType === 'Leader';
+  const canView = userType === 'Admin' || userType === 'Líder';
 
   useEffect(() => {
     if (!canView || !user?.campaignId) {
@@ -37,8 +37,8 @@ const FraudAlertPanel: React.FC = () => {
         schema: 'public', 
         table: 'fraud_audit_logs',
         filter: `campaignId=eq.${user.campaignId}` 
-      }, (payload) => {
-        setLogs(prev => [payload.new as FraudLog, ...prev]);
+      }, (payload: { new: FraudLog }) => {
+        setLogs(prev => [payload.new, ...prev]);
       })
       .subscribe();
 

@@ -107,7 +107,7 @@ const SupremeAdminPage: React.FC = () => {
             if (configsError) throw configsError;
 
             const configs: Record<string, CampaignConfig> = {};
-            configsData?.forEach(c => {
+            configsData?.forEach((c: any) => {
                 configs[c.id] = c as CampaignConfig;
             });
             setCampaignConfigs(configs);

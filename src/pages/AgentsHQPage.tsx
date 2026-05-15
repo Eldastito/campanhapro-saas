@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bot, TrendingUp, Share2, Map, Send, Loader2, LayoutDashboard, Ticket, ArrowRight, CheckCircle2, Link as LinkIcon, ShieldCheck, Sparkles as SparklesIcon, History, Shield, Database, RefreshCcw, Zap, X, BellRing, Trash2 } from 'lucide-react';
+import { Bot, TrendingUp, Share2, Map, Send, Loader2, LayoutDashboard, Ticket, ArrowRight, CheckCircle2, Link as LinkIcon, ShieldCheck, Sparkles as SparklesIcon, History, Shield, Zap, X, BellRing, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { askStrategist, askGrowthHacker, askSocialMedia, askFieldCommander, askCreativeProducer, askBackupAgent, askFraudAuditor, runFullPipeline, getPipelineHistory, PipelineResult, generateCreativeImage, createProductionOrder, publishToSocialMedia } from '../services/agentsClientService';
 import { createBackup, restoreBackup, BackupData } from '../services/backupService';
@@ -93,7 +93,7 @@ const AgentsHQPage: React.FC = () => {
         try {
             const { data } = await supabase.from('social_tokens').select('provider').eq('campaignId', user.campaignId);
             const newConn = { instagram: false, facebook: false, whatsapp: false, tiktok: false };
-            data?.forEach(t => {
+            data?.forEach((t: { provider: string }) => {
                 if (t.provider === 'meta') {
                     newConn.instagram = true; newConn.facebook = true; newConn.whatsapp = true;
                 } else if (t.provider in newConn) {
@@ -178,6 +178,7 @@ const AgentsHQPage: React.FC = () => {
     const getContextData = async (type: 'field' | 'growth' | 'strategist' | 'social' | 'fraud') => {
         try {
             const limitVal = type === 'field' ? 5 : 20;
+            const campaignId = user?.campaignId || 'default';
 
             const [
                 { data: reports },
@@ -185,10 +186,10 @@ const AgentsHQPage: React.FC = () => {
                 { data: visits },
                 { data: campaign }
             ] = await Promise.all([
-                supabase.from('street_reports').select('*').eq('campaignId', user.campaignId).order('createdAt', { ascending: false }).limit(15),
-                supabase.from('pesquisas').select('*').eq('campaignId', user.campaignId).order('createdAt', { ascending: false }).limit(limitVal),
-                supabase.from('visits').select('*').eq('campaignId', user.campaignId).order('createdAt', { ascending: false }).limit(20),
-                supabase.from('campaigns').select('electionDate, electionRole, electionState, electionCity, electionRound, candidateNumber').eq('id', user.campaignId).maybeSingle(),
+                supabase.from('street_reports').select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false }).limit(15),
+                supabase.from('pesquisas').select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false }).limit(limitVal),
+                supabase.from('visits').select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false }).limit(20),
+                supabase.from('campaigns').select('electionDate, electionRole, electionState, electionCity, electionRound, candidateNumber').eq('id', campaignId).maybeSingle(),
             ]);
 
             let context = "\n\n[DADOS REAIS DA CAMPANHA (EXTRAÍDOS DO BANCO)]\n";
@@ -213,16 +214,16 @@ const AgentsHQPage: React.FC = () => {
 
             if (type === 'fraud' && visits) {
                 context += "--- Dados de Visitas para Auditoria ---\n";
-                visits.forEach(v => {
+                visits.forEach((v: any) => {
                     context += `- Eleitor: ${v.nomeEleitor || 'N/A'} | Bairro: ${v.bairro} | Votos: ${v.votos} | Notas: ${v.notas || 'Sem notas'}\n`;
                 });
             }
 
             if (pesquisas && pesquisas.length > 0) {
-                const rejeicoes = pesquisas.map(p => p.fatorRejeicao).filter(Boolean);
-                const dores = pesquisas.map(p => p.dorImediata).filter(Boolean);
-                const topRejeicao = rejeicoes.sort((a,b) => rejeicoes.filter(v => v===a).length - rejeicoes.filter(v => v===b).length).pop() || 'N/A';
-                const topDor = dores.sort((a,b) => dores.filter(v => v===a).length - dores.filter(v => v===b).length).pop() || 'N/A';
+                const rejeicoes = pesquisas.map((p: any) => p.fatorRejeicao).filter(Boolean);
+                const dores = pesquisas.map((p: any) => p.dorImediata).filter(Boolean);
+                const topRejeicao = rejeicoes.sort((a: any, b: any) => rejeicoes.filter((v: any) => v===a).length - rejeicoes.filter((v: any) => v===b).length).pop() || 'N/A';
+                const topDor = dores.sort((a: any, b: any) => dores.filter((v: any) => v===a).length - dores.filter((v: any) => v===b).length).pop() || 'N/A';
                 
                 context += "--- Insights da Pesquisa Eleitoral Mais Recente ---\n";
                 context += `- Amostra: ${pesquisas.length} eleitores.\n`;
@@ -233,7 +234,7 @@ const AgentsHQPage: React.FC = () => {
 
             if (reports && reports.length > 0) {
                 context += "--- Últimos Reportes da Equipe de Rua ---\n";
-                reports.forEach(r => {
+                reports.forEach((r: any) => {
                     context += `- Bairro: ${r.bairro} | Clima: ${r.clima} | Reclamação: ${r.reclamacao || 'Nenhuma'}\n`;
                 });
             }
@@ -273,7 +274,7 @@ const AgentsHQPage: React.FC = () => {
                         "Quais devem ser nossos 3 principais KPIs para esta semana de campanha?",
                         "Com base nas maiores dores mapeadas no município, desenhe as diretrizes para meu plano de governo."
                     ]}
-                    agent_id="strategist"
+                    agentId="strategist"
                     campaignId={user?.campaignId || 'default'}
                     agentCall={(p) => handleAgentCallGen(p, askStrategist, 'strategist')}
                     placeholder="Ex: Como lidar com nossa taxa de rejeição atual?"
@@ -288,7 +289,7 @@ const AgentsHQPage: React.FC = () => {
                         "Crie uma sequência de de WhatsApp agressiva direcionada às periferias listadas nos reportes.",
                         "Identifique um segmento na amostra de pesquisa perfeito para uma ação 'Member-get-member'."
                     ]}
-                    agent_id="growth"
+                    agentId="growth"
                     campaignId={user?.campaignId || 'default'}
                     agentCall={(p) => handleAgentCallGen(p, askGrowthHacker, 'growth')}
                     placeholder="Ex: Crie um funil focado nas dores captadas na pesquisa."
@@ -303,7 +304,7 @@ const AgentsHQPage: React.FC = () => {
                         "Escreva uma legenda agressiva (sem atacar ninguém) sobre a dor imediata descoberta na pesquisa.",
                         "Crie um Story focado em eleitores com Perfil D e Alto Consumo de Info no IG."
                     ]}
-                    agent_id="social"
+                    agentId="social"
                     campaignId={user?.campaignId || 'default'}
                     agentCall={(p) => handleAgentCallGen(p, askSocialMedia, 'social')}
                     placeholder="Ex: Roteiro de TikTok de 60s focando na dor primária."
@@ -322,7 +323,7 @@ const AgentsHQPage: React.FC = () => {
                         "Renderize um vídeo de 15s estilo cinemático sobre as obras de asfalto prometidas no script.",
                         "Crie um carrossel de 4 artes focadas na dor de segurança pública mapeada."
                     ]}
-                    agent_id="creative"
+                    agentId="creative"
                     campaignId={user?.campaignId || 'default'}
                     agentCall={(p) => askCreativeProducer(p, user?.campaignId || 'default', String(user?.id || 'unknown'))}
                     placeholder="Cole aqui o SCRIPT PARA O PRODUTOR gerado pelo Social Media..."
@@ -342,7 +343,7 @@ const AgentsHQPage: React.FC = () => {
                         "Onde estão os maiores focos de reclamação sobre iluminação pública nesta semana?",
                         "Trace uma rota de panfletagem focando na localidade onde as respostas apontam que as pessoas votariam em outros candidatos."
                     ]}
-                    agent_id="field"
+                    agentId="field"
                     campaignId={user?.campaignId || 'default'}
                     agentCall={(p) => handleAgentCallGen(p, askFieldCommander, 'field')}
                     placeholder="Ex: Onde focar panfletagem para mitigar críticas de asfalto detectadas na pesquisa?"
@@ -362,7 +363,7 @@ const AgentsHQPage: React.FC = () => {
                         "Identifique se há reportes de rua com textos idênticos vindo de voluntários diferentes.",
                         "Sinale possíveis fraudes no bairro X baseadas nas contradições das notas de atendimento."
                     ]}
-                    agent_id="fraud"
+                    agentId="fraud"
                     campaignId={user?.campaignId || 'default'}
                     agentCall={(p) => handleAgentCallGen(p, askFraudAuditor, 'fraud')}
                     placeholder="Ex: Verifique a integridade dos cadastros realizados hoje."
@@ -508,7 +509,7 @@ interface AgentRoomProps {
     title: string;
     description: string;
     examples?: string[];
-    icon: React.ReactNode;
+    icon?: React.ReactNode;
     agentId: string;
     campaignId: string;
     agentCall: (prompt: string, agentId: string) => Promise<any>;
@@ -588,11 +589,9 @@ const AgentRoom: React.FC<AgentRoomProps> = ({ title, description, agentId, camp
         setIsLoading(true);
         try {
             const resultUrl = await onExecuteAction(content, agentId);
-            setHistory(prev => {
-                const newHist = [...prev];
-                newHist[msgIdx].content += `\n\n![ATIVO GERADO](${resultUrl})`;
-                return newHist;
-            });
+            const newHist = [...history];
+            newHist[msgIdx] = { ...newHist[msgIdx], content: newHist[msgIdx].content + `\n\n![ATIVO GERADO](${resultUrl})` };
+            setHistory(agentId, newHist);
         } catch (error) {
             alert("Erro ao executar ação automática.");
         } finally {
@@ -712,7 +711,7 @@ const AgentRoom: React.FC<AgentRoomProps> = ({ title, description, agentId, camp
                                             if (!confirm("Excluir este card permanentemente?")) return;
                                             try {
                                                 if (msg.id) await supabase.from('agent_chat_history').delete().eq('id', msg.id);
-                                                setHistory(prev => prev.filter((_, i) => i !== idx));
+                                                setHistory(agentId, history.filter((_, i) => i !== idx));
                                             } catch (e) { console.error(e); }
                                         }}
                                         className="absolute -top-2 -right-2 p-1.5 bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-red-700 z-10"

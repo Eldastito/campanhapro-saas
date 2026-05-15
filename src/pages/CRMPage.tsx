@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Users, UserPlus, FileUp, Search, Calendar,
+  Users, UserPlus, Search, Calendar,
   MessageSquare, TrendingUp, Phone, MapPin,
-  ChevronRight, Sparkles, Target, Activity,
-  Map, Award, Filter, MoreVertical, Send
+  Sparkles, Target, Activity,
+  Award, Filter, MoreVertical, Send
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer,
-  Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis
+  Tooltip as RechartsTooltip
 } from 'recharts';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
@@ -403,7 +403,7 @@ const CRMPage: React.FC = () => {
               <Award className="w-3 h-3 text-yellow-500" /> Top Mobilizadores
             </h4>
             <div className="space-y-3">
-              {topMobilizadores.map((mob, idx) => (
+              {topMobilizadores.map((mob) => (
                 <div key={mob.nome} className="flex items-center justify-between bg-black/20 p-2 rounded-xl border border-white/5">
                   <div className="flex items-center gap-2">
                     <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold">
