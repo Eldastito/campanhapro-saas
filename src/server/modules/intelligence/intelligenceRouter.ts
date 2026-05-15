@@ -4,6 +4,7 @@ import { buildCampaignSnapshot } from '../../../services/snapshotBuilder';
 import {
   ingestSnapshot,
   getLatestFactors,
+  getScenarios,
 } from '../integrations/campanhaproCenariosClient';
 
 export function createIntelligenceRouter(supabaseAdmin: SupabaseClient) {
@@ -79,6 +80,27 @@ export function createIntelligenceRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ factors, lastSync: logRow ?? null });
     } catch (err: any) {
       console.error('[Intelligence Factors]', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/v1/intelligence/scenarios
+   * Returns scenario projections from CampanhaProCenarios.
+   */
+  router.get('/scenarios', async (req: Request, res: Response) => {
+    try {
+      const campaignId: string | undefined =
+        (req as any).user?.campaignId ?? (req.query.campaignId as string);
+
+      if (!campaignId) {
+        return res.status(400).json({ error: 'campaignId obrigatório' });
+      }
+
+      const scenarios = await getScenarios(campaignId);
+      return res.json({ scenarios });
+    } catch (err: any) {
+      console.error('[Intelligence Scenarios]', err);
       return res.status(500).json({ error: err.message });
     }
   });
