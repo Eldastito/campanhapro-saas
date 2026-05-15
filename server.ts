@@ -18,6 +18,7 @@ import { createPaperclipRouter } from './src/server/modules/paperclip/paperclipR
 import { createChannelsRouter } from './src/server/modules/channels/channelsRouter';
 import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
+import { createScenariosRouter } from './src/server/modules/scenarios/scenariosRouter';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
@@ -191,6 +192,7 @@ async function startServer() {
     app.use('/api/v1/channels', requireAuth, createChannelsRouter(supabaseAdmin));
     app.use('/api/v1/rag', requireAuth, createRagRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
+    app.use('/api/v1/scenarios', requireAuth, createScenariosRouter(supabaseAdmin));
     app.use('/webhooks', createWebhookRouter(supabaseAdmin));
   }
 
