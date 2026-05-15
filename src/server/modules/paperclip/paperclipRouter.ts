@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { AgentTask } from '../integrations/paperclipClient';
 import { enqueueTask, executeTask, approveTask, rejectTask, syncTaskStatus } from './taskQueue';
+import { audit, actorFromRequest } from '../observability/auditLogger';
 
 export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
@@ -103,6 +104,14 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
 
       await approveTask(supabaseAdmin, taskId, campaignId, userId);
 
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'agent_task.approve',
+        resourceType: 'agent_task',
+        resourceId: taskId,
+        severity: 'warn',
+      });
+
       // Fire-and-forget execution
       executeTask(supabaseAdmin, taskId, campaignId).catch(err =>
         console.error('[Paperclip] post-approve execute error:', err)
@@ -127,6 +136,13 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
       if (!campaignId || !userId) return res.status(400).json({ error: 'auth obrigatório' });
 
       await rejectTask(supabaseAdmin, taskId, campaignId, userId);
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'agent_task.reject',
+        resourceType: 'agent_task',
+        resourceId: taskId,
+        severity: 'info',
+      });
       return res.json({ ok: true });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

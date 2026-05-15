@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { sendMessage, Channel } from '../integrations/channelsClient';
 import { hasOutboundConsent } from './consent';
+import { audit, actorFromRequest } from '../observability/auditLogger';
 
 export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
@@ -103,6 +104,14 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
           Date.now() - new Date(openConvo.lastInboundAt).getTime() < 24 * 3600 * 1000;
 
         if (!consent && !within24h && !templateName) {
+          await audit(supabaseAdmin, {
+            ...actorFromRequest(req),
+            action: 'message.send.blocked',
+            resourceType: 'contact',
+            resourceId: contactId,
+            severity: 'warn',
+            metadata: { reason: 'no_consent_and_outside_24h_window', channel, to },
+          });
           return res.status(403).json({ error: 'no_consent_and_outside_24h_window' });
         }
       }

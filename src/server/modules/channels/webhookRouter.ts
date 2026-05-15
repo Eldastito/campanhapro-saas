@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { audit } from '../observability/auditLogger';
 
 interface RawRequest extends Request {
   rawBody?: Buffer;
@@ -46,10 +47,24 @@ export function createWebhookRouter(supabaseAdmin: SupabaseClient) {
    * (configured via express.json({ verify }) in server.ts).
    */
   router.post('/meta', async (req: RawRequest, res: Response) => {
+    const payloadHash = req.rawBody
+      ? crypto.createHash('sha256').update(req.rawBody).digest('hex')
+      : crypto.randomBytes(16).toString('hex');
     try {
       const signature = req.header('x-hub-signature-256');
-      if (!req.rawBody || !verifySignature(req.rawBody, signature)) {
+      const valid = !!req.rawBody && verifySignature(req.rawBody, signature);
+      if (!valid) {
         console.warn('[Webhook] invalid signature');
+        await recordWebhookEvent(supabaseAdmin, {
+          source: 'meta', signatureValid: false, payloadHash,
+          error: 'invalid_signature',
+        });
+        await audit(supabaseAdmin, {
+          actorType: 'webhook',
+          action: 'webhook.meta.signature_invalid',
+          severity: 'critical',
+          metadata: { ip: req.ip, ua: req.get('user-agent') },
+        });
         return res.sendStatus(403);
       }
 
@@ -58,6 +73,8 @@ export function createWebhookRouter(supabaseAdmin: SupabaseClient) {
       res.sendStatus(200);
 
       // Process entries
+      let ingestedCampaign: string | null = null;
+      let processedCount = 0;
       for (const entry of payload.entry ?? []) {
         for (const change of entry.changes ?? []) {
           const value = change.value ?? {};
@@ -65,7 +82,7 @@ export function createWebhookRouter(supabaseAdmin: SupabaseClient) {
           const messages = value.messages ?? [];
 
           for (const msg of messages) {
-            await ingestInboundMessage(supabaseAdmin, {
+            const outcome = await ingestInboundMessage(supabaseAdmin, {
               channel: 'whatsapp',
               externalId: msg.from,
               providerMessageId: msg.id,
@@ -73,12 +90,31 @@ export function createWebhookRouter(supabaseAdmin: SupabaseClient) {
               receivedAt: new Date(Number(msg.timestamp) * 1000).toISOString(),
               phoneNumberId,
             });
+            if (outcome?.campaignId) ingestedCampaign = outcome.campaignId;
+            processedCount++;
           }
         }
       }
+
+      await recordWebhookEvent(supabaseAdmin, {
+        source: 'meta', signatureValid: true, payloadHash,
+        campaignId: ingestedCampaign,
+        eventType: payload.object ?? 'unknown',
+        processedAt: new Date().toISOString(),
+      });
+      await audit(supabaseAdmin, {
+        actorType: 'webhook',
+        campaignId: ingestedCampaign,
+        action: 'webhook.meta.received',
+        severity: 'info',
+        metadata: { processedCount },
+      });
     } catch (err: any) {
       console.error('[Webhook] error:', err);
-      // Response already sent
+      await recordWebhookEvent(supabaseAdmin, {
+        source: 'meta', signatureValid: true, payloadHash,
+        error: err?.message ?? 'processing_error',
+      });
     }
   });
 
@@ -106,7 +142,7 @@ async function ingestInboundMessage(
   const campaignId = mapping?.campaignId;
   if (!campaignId) {
     console.warn('[Webhook] no campaign mapped for phone', params.phoneNumberId);
-    return;
+    return null;
   }
 
   // Try to match an existing contact by phone
@@ -145,5 +181,37 @@ async function ingestInboundMessage(
       body: params.text,
       createdAt: now,
     });
+  }
+
+  return { campaignId };
+}
+
+async function recordWebhookEvent(
+  supabase: SupabaseClient,
+  params: {
+    source: string;
+    signatureValid: boolean;
+    payloadHash: string;
+    campaignId?: string | null;
+    eventType?: string;
+    processedAt?: string;
+    error?: string;
+  }
+) {
+  try {
+    await supabase.from('webhook_events').upsert(
+      {
+        source: params.source,
+        signature_valid: params.signatureValid,
+        payload_hash: params.payloadHash,
+        campaign_id: params.campaignId ?? null,
+        event_type: params.eventType ?? null,
+        processed_at: params.processedAt ?? null,
+        error: params.error ?? null,
+      },
+      { onConflict: 'source,payload_hash', ignoreDuplicates: true },
+    );
+  } catch (err) {
+    console.error('[Webhook] event log failed:', err);
   }
 }

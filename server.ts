@@ -19,6 +19,8 @@ import { createChannelsRouter } from './src/server/modules/channels/channelsRout
 import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
 import { createScenariosRouter } from './src/server/modules/scenarios/scenariosRouter';
+import { createObservabilityRouter } from './src/server/modules/observability/observabilityRouter';
+import { requestTracer } from './src/server/modules/observability/requestTracer';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
@@ -176,7 +178,10 @@ async function startServer() {
   app.use(express.json({
     verify: (req: any, _res, buf) => { req.rawBody = buf; },
   }));
-  
+
+  // Structured request tracing — assigns trace_id, logs request lines
+  app.use(requestTracer());
+
   // Middleware de diagnóstico de versão
   app.use((_req, res, next) => {
       res.setHeader('X-App-Version', '1.0.3');
@@ -193,6 +198,12 @@ async function startServer() {
     app.use('/api/v1/rag', requireAuth, createRagRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
     app.use('/api/v1/scenarios', requireAuth, createScenariosRouter(supabaseAdmin));
+    // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
+    const obsRouter = createObservabilityRouter(supabaseAdmin);
+    app.use('/api/v1/observability', (req, res, next) => {
+      if (req.path === '/health') return next();
+      return requireAuth(req, res, next);
+    }, obsRouter);
     app.use('/webhooks', createWebhookRouter(supabaseAdmin));
   }
 
