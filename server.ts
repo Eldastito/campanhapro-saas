@@ -14,6 +14,7 @@ import { createServer as createHttpServer } from 'http';
 import { createAuthMiddleware } from './src/middleware/authMiddleware';
 import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
 import { createIntelligenceRouter } from './src/server/modules/intelligence/intelligenceRouter';
+import { createPaperclipRouter } from './src/server/modules/paperclip/paperclipRouter';
 import { createChannelsRouter } from './src/server/modules/channels/channelsRouter';
 import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
@@ -186,6 +187,7 @@ async function startServer() {
   // --- Intelligence v1 (Snapshot → CampanhaProCenarios) ---
   if (supabaseAdmin) {
     app.use('/api/v1/intelligence', requireAuth, createIntelligenceRouter(supabaseAdmin));
+    app.use('/api/v1/paperclip', requireAuth, createPaperclipRouter(supabaseAdmin));
     app.use('/api/v1/channels', requireAuth, createChannelsRouter(supabaseAdmin));
     app.use('/api/v1/rag', requireAuth, createRagRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
