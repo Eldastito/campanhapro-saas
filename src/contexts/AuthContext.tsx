@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { AuthenticatedUser, Plan } from '../types/user';
 import { ensureCampaignConfig } from '../utils/planUtils';
@@ -77,7 +78,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     // mesmo se onAuthStateChange falhar silenciosamente.
     const safetyTimeout = setTimeout(() => setIsInitializing(false), 2000);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
       clearTimeout(safetyTimeout);
       try {
         if (session?.user) {

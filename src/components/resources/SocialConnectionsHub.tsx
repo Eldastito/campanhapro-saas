@@ -13,8 +13,7 @@ import {
   Key,
   Database,
   HelpCircle,
-  BookOpen,
-  ExternalLink
+  BookOpen
 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
@@ -74,7 +73,7 @@ export const SocialConnectionsHub: React.FC = () => {
 
       if (error) throw error;
 
-      const newStatus = {
+      const newStatus: Record<string, ConnectionStatus> = {
         whatsapp: { provider: 'whatsapp', connected: false },
         instagram: { provider: 'instagram', connected: false },
         facebook: { provider: 'facebook', connected: false },
@@ -87,9 +86,9 @@ export const SocialConnectionsHub: React.FC = () => {
           newStatus.instagram = { provider: 'instagram', connected: true, lastUpdated: token.updated_at, settings: token.settings };
           newStatus.whatsapp = { provider: 'whatsapp', connected: true, lastUpdated: token.updated_at, settings: token.settings };
         } else if (newStatus[token.provider]) {
-          newStatus[token.provider] = { 
-            provider: token.provider, 
-            connected: true, 
+          newStatus[token.provider] = {
+            provider: token.provider,
+            connected: true,
             lastUpdated: token.updated_at,
             settings: token.settings
           };

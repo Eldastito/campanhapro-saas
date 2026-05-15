@@ -40,7 +40,7 @@ export async function getConversionFunnelStats(campaignId: string): Promise<Funn
 
     const stats = stages.map(stage => ({
       stage,
-      count: data?.filter(d => d.currentStage === stage).length || 0
+      count: data?.filter((d: any) => d.currentStage === stage).length || 0
     }));
 
     return stats;
@@ -68,7 +68,7 @@ export async function getTerritorialAlerts(campaignId: string): Promise<Territor
     // 2. Pegar bairros e metas (exemplo simplificado)
     // Em uma versão real, cruzaríamos com dados de seções eleitorais
     const neighborhoodCounts: Record<string, number> = {};
-    visitsData?.forEach(v => {
+    visitsData?.forEach((v: any) => {
       if (v.bairro) {
         neighborhoodCounts[v.bairro] = (neighborhoodCounts[v.bairro] || 0) + 1;
       }

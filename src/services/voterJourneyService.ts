@@ -143,8 +143,8 @@ export async function syncVoterJourneys(campaignId: string) {
       .select('contactId')
       .eq('campaignId', campaignId);
 
-    const existingIds = new Set(existingJourneys?.map(j => j.contactId) || []);
-    const missingIds = contactsWithoutJourney.filter(c => !existingIds.has(c.id)).map(c => c.id);
+    const existingIds = new Set(existingJourneys?.map((j: any) => j.contactId) || []);
+    const missingIds = contactsWithoutJourney.filter((c: any) => !existingIds.has(c.id)).map((c: any) => c.id);
 
     console.log(`[JOURNEY SYNC] Processando ${missingIds.length} contatos...`);
 
