@@ -15,6 +15,9 @@ import { createAuthMiddleware } from './src/middleware/authMiddleware';
 import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
 import { createIntelligenceRouter } from './src/server/modules/intelligence/intelligenceRouter';
 import { createPaperclipRouter } from './src/server/modules/paperclip/paperclipRouter';
+import { createChannelsRouter } from './src/server/modules/channels/channelsRouter';
+import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
+import { createRagRouter } from './src/server/modules/rag/ragRouter';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
@@ -169,7 +172,9 @@ async function startServer() {
 
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
-  app.use(express.json());
+  app.use(express.json({
+    verify: (req: any, _res, buf) => { req.rawBody = buf; },
+  }));
   
   // Middleware de diagnóstico de versão
   app.use((_req, res, next) => {
@@ -183,6 +188,10 @@ async function startServer() {
   if (supabaseAdmin) {
     app.use('/api/v1/intelligence', requireAuth, createIntelligenceRouter(supabaseAdmin));
     app.use('/api/v1/paperclip', requireAuth, createPaperclipRouter(supabaseAdmin));
+    app.use('/api/v1/channels', requireAuth, createChannelsRouter(supabaseAdmin));
+    app.use('/api/v1/rag', requireAuth, createRagRouter(supabaseAdmin));
+    // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
+    app.use('/webhooks', createWebhookRouter(supabaseAdmin));
   }
 
   // --- OAuth Social (Simulação) ---
