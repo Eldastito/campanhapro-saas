@@ -30,9 +30,10 @@ const CRMPage = React.lazy(() => import('./pages/CRMPage'));
 const IntelligencePage = React.lazy(() => import('./pages/IntelligencePage'));
 const AgentTasksPage = React.lazy(() => import('./pages/AgentTasksPage'));
 const InboxPage = React.lazy(() => import('./pages/InboxPage'));
+const ScenariosPage = React.lazy(() => import('./pages/ScenariosPage'));
 
 // Import Icons for Tabs
-import { Bot, ShieldCheck, Brain, Cpu, Inbox } from 'lucide-react';
+import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical } from 'lucide-react';
 import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
     UsersGroupIcon, CurrencyDollarIcon, AcademicCapIcon, CogIcon,
@@ -91,7 +92,7 @@ const AdminApp: React.FC = () => {
                 'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
                 'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
                 'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)'
+                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários'
             ];
             mandatory.forEach(tab => {
                 if (!allowedTabs.includes(tab)) allowedTabs.push(tab);
@@ -121,6 +122,7 @@ const AdminApp: React.FC = () => {
         Inteligência: <Brain className="h-5 w-5" />,
         'Caixa de Entrada': <Inbox className="h-5 w-5" />,
         'Agentes (Tarefas)': <Cpu className="h-5 w-5" />,
+        'Cenários': <FlaskConical className="h-5 w-5" />,
     };
 
     // Componentes mapeados para as abas (deve seguir a ordem lógica do ALL_TABS para o componente Tabs indexar corretamente)
@@ -144,6 +146,7 @@ const AdminApp: React.FC = () => {
         'Inteligência': <IntelligencePage />,
         'Caixa de Entrada': <InboxPage />,
         'Agentes (Tarefas)': <AgentTasksPage />,
+        'Cenários': <ScenariosPage />,
     };
 
     if (isLoading) {
