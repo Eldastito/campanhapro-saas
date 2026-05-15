@@ -28,9 +28,10 @@ const ElectionDayPage = React.lazy(() => import('./pages/ElectionDayPage'));
 const ElectionReportsPage = React.lazy(() => import('./pages/ElectionReportsPage'));
 const CRMPage = React.lazy(() => import('./pages/CRMPage'));
 const IntelligencePage = React.lazy(() => import('./pages/IntelligencePage'));
+const InboxPage = React.lazy(() => import('./pages/InboxPage'));
 
 // Import Icons for Tabs
-import { Bot, ShieldCheck, Brain } from 'lucide-react';
+import { Bot, ShieldCheck, Brain, Inbox } from 'lucide-react';
 import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
     UsersGroupIcon, CurrencyDollarIcon, AcademicCapIcon, CogIcon,
@@ -89,7 +90,7 @@ const AdminApp: React.FC = () => {
                 'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
                 'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
                 'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-                'Analytics', 'CRM', 'Inteligência'
+                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada'
             ];
             mandatory.forEach(tab => {
                 if (!allowedTabs.includes(tab)) allowedTabs.push(tab);
@@ -117,6 +118,7 @@ const AdminApp: React.FC = () => {
         Analytics: <ChartBarIcon className="h-5 w-5" />,
         CRM: <UsersGroupIcon className="h-5 w-5" />,
         Inteligência: <Brain className="h-5 w-5" />,
+        'Caixa de Entrada': <Inbox className="h-5 w-5" />,
     };
 
     // Componentes mapeados para as abas (deve seguir a ordem lógica do ALL_TABS para o componente Tabs indexar corretamente)
@@ -138,6 +140,7 @@ const AdminApp: React.FC = () => {
         'Analytics': <ElectionReportsPage />,
         'CRM': <CRMPage />,
         'Inteligência': <IntelligencePage />,
+        'Caixa de Entrada': <InboxPage />,
     };
 
     if (isLoading) {
