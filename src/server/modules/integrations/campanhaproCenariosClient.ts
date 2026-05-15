@@ -1,5 +1,4 @@
 // Stub client for CampanhaProCenarios intelligence service.
-// Phase 1 will implement real HTTP calls; for now all methods return graceful no-ops.
 
 import { getInternalToken } from './internalAuth';
 
@@ -52,4 +51,23 @@ export async function getLatestFactors(campaignId: string): Promise<Intelligence
   });
   if (!res.ok) return null;
   return res.json() as Promise<IntelligenceFactors>;
+}
+
+export interface ScenarioProjection {
+  id: string;
+  name: string;
+  probability: number;
+  projectedVotes: number;
+  description: string;
+  requiredActions: string[];
+}
+
+export async function getScenarios(campaignId: string): Promise<ScenarioProjection[]> {
+  if (!BASE_URL) return [];
+  const token = getInternalToken('campanhapro', campaignId);
+  const res = await fetch(`${BASE_URL}/api/v1/campaigns/${campaignId}/scenarios`, {
+    headers: { 'X-Internal-Token': token },
+  });
+  if (!res.ok) return [];
+  return res.json() as Promise<ScenarioProjection[]>;
 }
