@@ -14,6 +14,7 @@ import { createServer as createHttpServer } from 'http';
 import { createAuthMiddleware } from './src/middleware/authMiddleware';
 import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
 import { createIntelligenceRouter } from './src/server/modules/intelligence/intelligenceRouter';
+import { createPaperclipRouter } from './src/server/modules/paperclip/paperclipRouter';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
@@ -181,6 +182,7 @@ async function startServer() {
   // --- Intelligence v1 (Snapshot → CampanhaProCenarios) ---
   if (supabaseAdmin) {
     app.use('/api/v1/intelligence', requireAuth, createIntelligenceRouter(supabaseAdmin));
+    app.use('/api/v1/paperclip', requireAuth, createPaperclipRouter(supabaseAdmin));
   }
 
   // --- OAuth Social (Simulação) ---
