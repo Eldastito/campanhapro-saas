@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runMonteCarlo, CandidateInput } from './monteCarloService';
+import { audit, actorFromRequest } from '../observability/auditLogger';
 
 export function createScenariosRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -178,6 +179,14 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
       .eq('status', 'pending_approval');
 
     if (error) return res.status(500).json({ error: error.message });
+
+    await audit(supabase, {
+      ...actorFromRequest(req),
+      action: 'dossier.approve',
+      resourceType: 'dossier',
+      resourceId: req.params.id,
+      severity: 'warn',
+    });
     return res.json({ status: 'approved' });
   });
 
@@ -193,6 +202,14 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
       .eq('campaign_id', campaignId);
 
     if (error) return res.status(500).json({ error: error.message });
+
+    await audit(supabase, {
+      ...actorFromRequest(req),
+      action: 'dossier.reject',
+      resourceType: 'dossier',
+      resourceId: req.params.id,
+      severity: 'info',
+    });
     return res.json({ status: 'rejected' });
   });
 
