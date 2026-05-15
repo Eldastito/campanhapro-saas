@@ -15,6 +15,7 @@ import WarRoomFeed from '../components/dashboard/WarRoomFeed';
 import SupporterProfileCard from '../components/dashboard/SupporterProfileCard';
 import ConversionFunnel from '../components/dashboard/ConversionFunnel';
 import TeamTasksWidget from '../components/dashboard/TeamTasksWidget';
+import IntelligencePanel from '../components/dashboard/IntelligencePanel';
 import Button from '../components/ui/Button';
 import SyncButton from '../components/ui/SyncButton';
 import { PrintIcon, SparklesIcon } from '../components/icons';
@@ -109,6 +110,8 @@ const DashboardPage = () => {
       {idealScenario && <DailyGoal dailyGoal={dailyGoal} />}
 
       <AgendaPanel voiceSlot={<VoiceCommandButton campaignId={user?.campaignId} />} />
+
+      <IntelligencePanel />
 
       <div className="print-stack space-y-6">
         <KpiGrid kpis={kpis} currentScenarioStatus={currentScenarioStatus} isLoading={isLoading} />
