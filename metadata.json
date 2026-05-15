@@ -1,0 +1,9 @@
+{
+  "name": "Voto Inteligente - Ecossistema Político & IA",
+  "description": "Plataforma avançada de gestão eleitoral com inteligência artificial multi-agente, controle global de campanhas, monitoramento de campo em tempo real e automação de marketing político.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
