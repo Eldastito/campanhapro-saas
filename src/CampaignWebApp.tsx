@@ -32,9 +32,10 @@ const AgentTasksPage = React.lazy(() => import('./pages/AgentTasksPage'));
 const InboxPage = React.lazy(() => import('./pages/InboxPage'));
 const ScenariosPage = React.lazy(() => import('./pages/ScenariosPage'));
 const CompliancePage = React.lazy(() => import('./pages/CompliancePage'));
+const BillingPage = React.lazy(() => import('./pages/BillingPage'));
 
 // Import Icons for Tabs
-import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical } from 'lucide-react';
+import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard } from 'lucide-react';
 import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
     UsersGroupIcon, CurrencyDollarIcon, AcademicCapIcon, CogIcon,
@@ -93,7 +94,7 @@ const AdminApp: React.FC = () => {
                 'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
                 'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
                 'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários', 'Conformidade'
+                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários', 'Conformidade', 'Plano'
             ];
             mandatory.forEach(tab => {
                 if (!allowedTabs.includes(tab)) allowedTabs.push(tab);
@@ -125,6 +126,7 @@ const AdminApp: React.FC = () => {
         'Agentes (Tarefas)': <Cpu className="h-5 w-5" />,
         'Cenários': <FlaskConical className="h-5 w-5" />,
         'Conformidade': <ShieldCheck className="h-5 w-5" />,
+        'Plano': <CreditCard className="h-5 w-5" />,
     };
 
     // Componentes mapeados para as abas (deve seguir a ordem lógica do ALL_TABS para o componente Tabs indexar corretamente)
@@ -150,6 +152,7 @@ const AdminApp: React.FC = () => {
         'Agentes (Tarefas)': <AgentTasksPage />,
         'Cenários': <ScenariosPage />,
         'Conformidade': <CompliancePage />,
+        'Plano': <BillingPage />,
     };
 
     if (isLoading) {

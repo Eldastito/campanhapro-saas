@@ -420,6 +420,19 @@ export async function callAgent(
                         },
                     }).select('id').single();
                     runId = data?.id || '';
+
+                    // Phase 8 — billing: mirror cost into usage_records for plan budget tracking
+                    try {
+                        await supabaseAdmin.from('usage_records').insert({
+                            campaign_id: opts.campaignId,
+                            metric: 'ai_call',
+                            quantity: 1,
+                            cost_cents: costCents,
+                            metadata: { provider, model: raw.model, agentId, runId },
+                        });
+                    } catch (e) {
+                        // never block on billing telemetry
+                    }
                 }
 
                 return {
