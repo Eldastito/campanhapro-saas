@@ -69,6 +69,29 @@ export function createWebhookRouter(supabaseAdmin: SupabaseClient) {
       }
 
       const payload = req.body as any;
+
+      // Replay protection: reject entries older than 5 minutes
+      // (Meta sends epoch-second timestamps in entry.time).
+      const REPLAY_WINDOW_MS = 5 * 60 * 1000;
+      const nowMs = Date.now();
+      const oldestAllowedMs = nowMs - REPLAY_WINDOW_MS;
+      const stale = (payload.entry ?? []).some(
+        (e: any) => typeof e.time === 'number' && e.time * 1000 < oldestAllowedMs,
+      );
+      if (stale) {
+        await recordWebhookEvent(supabaseAdmin, {
+          source: 'meta', signatureValid: true, payloadHash,
+          error: 'stale_payload',
+        });
+        await audit(supabaseAdmin, {
+          actorType: 'webhook',
+          action: 'webhook.meta.stale',
+          severity: 'warn',
+          metadata: { ip: req.ip },
+        });
+        return res.sendStatus(408);
+      }
+
       // Respond 200 immediately per Meta best practices — process async
       res.sendStatus(200);
 
