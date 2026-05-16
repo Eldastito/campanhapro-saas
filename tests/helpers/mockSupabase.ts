@@ -56,12 +56,16 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       return { data: inserted, error: null };
     }
     if (state.mode === 'update' && state.updatePayload) {
+      // Match rows BEFORE applying the update — Postgres semantics for
+      // UPDATE...WHERE...RETURNING: the returned rows are those that matched
+      // the predicate at the time of the update, not after.
       const matching = applyFilters(rows, state.filters);
       const updatedRows = rows.map(r =>
         matching.includes(r) ? { ...r, ...state.updatePayload } : r,
       );
       store.set(table, updatedRows);
-      return { data: applyFilters(updatedRows, state.filters), error: null };
+      const returned = updatedRows.filter((_r, i) => matching.includes(rows[i]));
+      return { data: returned, error: null };
     }
     if (state.mode === 'upsert' && state.upsertRows) {
       const updated = [...rows];
@@ -136,6 +140,9 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
     eq: (col: string, val: any) => { state.filters.push(r => r[col] === val); return chain; },
     in: (col: string, vals: any[]) => { state.filters.push(r => vals.includes(r[col])); return chain; },
     gte: (col: string, val: any) => { state.filters.push(r => r[col] >= val); return chain; },
+    gt: (col: string, val: any) => { state.filters.push(r => r[col] > val); return chain; },
+    lt: (col: string, val: any) => { state.filters.push(r => r[col] < val); return chain; },
+    lte: (col: string, val: any) => { state.filters.push(r => r[col] <= val); return chain; },
     ilike: (col: string, pattern: string) => {
       const re = new RegExp('^' + pattern.replace(/%/g, '.*'), 'i');
       state.filters.push(r => re.test(String(r[col] ?? '')));

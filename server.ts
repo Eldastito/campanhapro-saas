@@ -27,6 +27,7 @@ import {
 import { createBillingRouter } from './src/server/modules/billing/billingRouter';
 import { createPaymentWebhookRouter } from './src/server/modules/billing/paymentWebhookRouter';
 import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
+import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
 import { requireAiBudget } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
@@ -1009,6 +1010,9 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     // todas as campanhas vêm com proactive_monitoring_enabled=false, então
     // o monitor só dispara IA pra quem opt-in.
     startProactiveMonitor(supabaseAdmin);
+    // Phase 11 — billing lifecycle: pre-renewal reminders + auto-downgrade
+    // after grace period. Disable via LIFECYCLE_ENABLED=false in tests.
+    if (supabaseAdmin) startLifecycleSweeper(supabaseAdmin);
   });
 }
 
