@@ -13,6 +13,9 @@ declare global {
         id: string;
         email?: string;
         role?: string;
+        campaignId?: string | null;
+        userType?: string | null;
+        isSupremeAdmin?: boolean;
       };
     }
   }
@@ -46,11 +49,34 @@ export function createAuthMiddleware(supabaseAdmin: any) {
         return res.status(401).json({ error: 'Token inválido ou expirado.' });
       }
 
-      // 4. Injetar dados do usuário no request
+      // 4. Enrich with profile data from `users` table (campaign_id, type, is_supreme_admin).
+      // Missing row is OK during onboarding — frontend bootstraps it on first auth.
+      let campaignId: string | null = null;
+      let userType: string | null = null;
+      let isSupremeAdmin = false;
+      try {
+        const { data: profile } = await supabaseAdmin
+          .from('users')
+          .select('campaign_id, type, is_supreme_admin')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (profile) {
+          campaignId = profile.campaign_id ?? null;
+          userType = profile.type ?? null;
+          isSupremeAdmin = !!profile.is_supreme_admin;
+        }
+      } catch (err: any) {
+        console.warn('[Auth Middleware] Falha ao carregar perfil:', err.message);
+      }
+
+      // 5. Injetar dados do usuário no request
       req.user = {
         id: user.id,
         email: user.email,
         role: user.role,
+        campaignId,
+        userType,
+        isSupremeAdmin,
       };
 
       next();

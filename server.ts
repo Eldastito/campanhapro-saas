@@ -26,6 +26,7 @@ import {
 } from './src/server/middleware/perCampaignRateLimit';
 import { createBillingRouter } from './src/server/modules/billing/billingRouter';
 import { createPaymentWebhookRouter } from './src/server/modules/billing/paymentWebhookRouter';
+import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
 import { requireAiBudget } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
@@ -203,6 +204,7 @@ async function startServer() {
     app.use('/api/v1/channels', requireAuth, messagingLimiter, createChannelsRouter(supabaseAdmin));
     app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
     app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
+    app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
     app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, createScenariosRouter(supabaseAdmin));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth

@@ -31,7 +31,7 @@ CREATE POLICY "payment_events_campaign_isolation"
   ON payment_events FOR SELECT
   USING (
     campaign_id IS NULL OR
-    campaign_id IN (SELECT campaign_id FROM profiles WHERE id = auth.uid())
+    campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid())
   );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_events_provider_event

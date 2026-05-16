@@ -32,7 +32,7 @@ ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "subscriptions_campaign_isolation"
   ON subscriptions FOR SELECT
-  USING (campaign_id IN (SELECT campaign_id FROM profiles WHERE id = auth.uid()));
+  USING (campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid()));
 
 -- Only one active subscription per campaign
 CREATE UNIQUE INDEX IF NOT EXISTS uq_subscriptions_active_campaign
@@ -54,7 +54,7 @@ ALTER TABLE usage_records ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "usage_records_campaign_isolation"
   ON usage_records FOR SELECT
-  USING (campaign_id IN (SELECT campaign_id FROM profiles WHERE id = auth.uid()));
+  USING (campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid()));
 
 CREATE INDEX IF NOT EXISTS idx_usage_records_campaign_metric
   ON usage_records (campaign_id, metric, recorded_at DESC);
