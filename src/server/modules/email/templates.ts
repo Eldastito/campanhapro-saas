@@ -195,4 +195,43 @@ export const templates = {
       text: `Aviso LGPD — registramos acesso aos seus dados em "${params.campaignName}". Responda este email para falar com o DPO.`,
     };
   },
+
+  paymentUpcoming(params: { name: string; planName: string; amountCents: number; daysUntilDue: number; dueDate: string }) {
+    const dateStr = new Date(params.dueDate).toLocaleDateString('pt-BR');
+    const when = params.daysUntilDue === 1 ? 'amanhã' : `em ${params.daysUntilDue} dias`;
+    return {
+      subject: `Sua próxima cobrança vence ${when}`,
+      html: shell('Próxima cobrança', `
+        <h2 style="margin:0 0 8px;font-size:22px;color:#1a1a1f;">Sua cobrança vence ${when}</h2>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.55;">
+          Olá ${escapeHtml(params.name)}, é só um lembrete amigável: a próxima cobrança do plano <strong>${escapeHtml(params.planName)}</strong> no valor de <strong>${BRL(params.amountCents)}</strong> está prevista para <strong>${dateStr}</strong>.
+        </p>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.55;">
+          Se você paga via PIX ou boleto, garanta que o pagamento seja efetuado até a data acima para evitar interrupção dos seus recursos. Para cartão de crédito, a cobrança é automática.
+        </p>
+        ${button(`${APP_URL}/app`, 'Ver minha assinatura')}
+      `),
+      text: `Sua cobrança de ${BRL(params.amountCents)} do plano ${params.planName} vence em ${dateStr}.`,
+    };
+  },
+
+  subscriptionDowngraded(params: { name: string; previousPlanName: string; gracePeriodDays: number }) {
+    return {
+      subject: 'Sua assinatura foi rebaixada para o plano Gratuito',
+      html: shell('Assinatura rebaixada', `
+        <h2 style="margin:0 0 8px;font-size:22px;color:#d97706;">Sua assinatura foi rebaixada</h2>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.55;">
+          Olá ${escapeHtml(params.name)}, após ${params.gracePeriodDays} dias sem confirmação de pagamento, sua assinatura do plano <strong>${escapeHtml(params.previousPlanName)}</strong> foi rebaixada para o plano <strong>Gratuito</strong>.
+        </p>
+        <p style="margin:0 0 14px;font-size:15px;line-height:1.55;">
+          Seus dados estão intactos — você só perdeu acesso aos recursos exclusivos do plano pago. Para reativar todos os recursos, basta assinar novamente.
+        </p>
+        ${button(`${APP_URL}/app`, 'Reativar plano pago')}
+        <p style="margin:0;font-size:13px;color:#6b6b75;">
+          Se já efetuou o pagamento, entre em contato — responda este email.
+        </p>
+      `),
+      text: `Sua assinatura do plano ${params.previousPlanName} foi rebaixada para Gratuito após ${params.gracePeriodDays} dias sem confirmação de pagamento. Reative em: ${APP_URL}/app`,
+    };
+  },
 };

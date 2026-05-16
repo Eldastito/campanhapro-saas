@@ -218,3 +218,61 @@ export async function sendTeamInviteEmail(
     metadata: { role: params.role, campaignName: params.campaignName },
   }, tpl);
 }
+
+export async function sendPaymentUpcomingEmail(
+  supabase: SupabaseClient,
+  params: {
+    campaignId: string;
+    email: string;
+    name: string;
+    planName: string;
+    amountCents: number;
+    daysUntilDue: number;
+    dueDate: string;
+    subscriptionId: string;
+    /** A reminder is sent at most once per (subscription, period, daysBucket) */
+    periodStart: string;
+  },
+): Promise<void> {
+  const tpl = templates.paymentUpcoming({
+    name: params.name,
+    planName: params.planName,
+    amountCents: params.amountCents,
+    daysUntilDue: params.daysUntilDue,
+    dueDate: params.dueDate,
+  });
+  await sendAndLog(supabase, {
+    campaignId: params.campaignId,
+    recipientEmail: params.email,
+    template: 'payment_upcoming',
+    subject: tpl.subject,
+    idempotencyKey: `payment_upcoming:${params.subscriptionId}:${params.periodStart}:${params.daysUntilDue}`,
+    metadata: { planName: params.planName, amountCents: params.amountCents, daysUntilDue: params.daysUntilDue },
+  }, tpl);
+}
+
+export async function sendSubscriptionDowngradedEmail(
+  supabase: SupabaseClient,
+  params: {
+    campaignId: string;
+    email: string;
+    name: string;
+    previousPlanName: string;
+    gracePeriodDays: number;
+    subscriptionId: string;
+  },
+): Promise<void> {
+  const tpl = templates.subscriptionDowngraded({
+    name: params.name,
+    previousPlanName: params.previousPlanName,
+    gracePeriodDays: params.gracePeriodDays,
+  });
+  await sendAndLog(supabase, {
+    campaignId: params.campaignId,
+    recipientEmail: params.email,
+    template: 'subscription_downgraded',
+    subject: tpl.subject,
+    idempotencyKey: `subscription_downgraded:${params.subscriptionId}`,
+    metadata: { previousPlanName: params.previousPlanName, gracePeriodDays: params.gracePeriodDays },
+  }, tpl);
+}

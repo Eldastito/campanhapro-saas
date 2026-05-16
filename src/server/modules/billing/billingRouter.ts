@@ -8,6 +8,7 @@ import { getPaymentGateway } from './paymentGateway';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { sendSubscriptionCanceledEmail } from '../email/emailService';
 import { requireSupremeAdmin } from '../../middleware/requireSupremeAdmin';
+import { runLifecycleSweep } from './subscriptionLifecycle';
 
 interface PlanInput {
   id: string;
@@ -401,6 +402,23 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
     });
 
     res.json({ ok: true });
+  });
+
+  // POST /admin/lifecycle/run — manual trigger for the lifecycle sweeper.
+  // Returns the SweepResult so the operator can verify the run.
+  router.post('/admin/lifecycle/run', requireSupremeAdmin(), async (req, res) => {
+    try {
+      const result = await runLifecycleSweep(supabase);
+      await audit(supabase, {
+        ...actorFromRequest(req),
+        action: 'admin.lifecycle.manual_run',
+        severity: 'info',
+        metadata: result as any,
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;
