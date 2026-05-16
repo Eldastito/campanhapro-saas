@@ -6,6 +6,7 @@ import Tabs from '../components/Tabs';
 import ErrorBoundary from '../components/dev/ErrorBoundary';
 import PlanCard, { Plan } from '../components/billing/PlanCard';
 import UsageDashboard from '../components/billing/UsageDashboard';
+import CheckoutDialog from '../components/billing/CheckoutDialog';
 
 interface Subscription {
   id: string;
@@ -112,6 +113,7 @@ const BillingPage: React.FC = () => {
   const [withinBudget, setWithinBudget] = React.useState(true);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const [pendingPlan, setPendingPlan] = React.useState<Plan | null>(null);
 
   const refresh = React.useCallback(async () => {
     setLoading(true);
@@ -145,14 +147,25 @@ const BillingPage: React.FC = () => {
 
   const subscribe = async (planId: string) => {
     setError(null);
+    const target = plans.find(p => p.id === planId);
+    // Free plan or no price → no checkout dialog needed
+    if (!target || target.monthlyCents === 0) {
+      await postCheckout({ planId });
+      return;
+    }
+    setPendingPlan(target);
+  };
+
+  const postCheckout = async (body: any) => {
     try {
       const res = await fetch('/api/v1/billing/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planId }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erro ao assinar');
+      setPendingPlan(null);
       if (json.checkoutUrl) {
         window.location.href = json.checkoutUrl;
         return;
@@ -160,6 +173,7 @@ const BillingPage: React.FC = () => {
       await refresh();
     } catch (err: any) {
       setError(err.message);
+      throw err;
     }
   };
 
@@ -225,6 +239,18 @@ const BillingPage: React.FC = () => {
           <HistoryTab />
         </ErrorBoundary>
       </Tabs>
+
+      <CheckoutDialog
+        open={pendingPlan !== null}
+        planName={pendingPlan?.name ?? ''}
+        monthlyCents={pendingPlan?.monthlyCents ?? 0}
+        onClose={() => setPendingPlan(null)}
+        onSubmit={async ({ name, email, cpfCnpj, phone, method }) => {
+          await postCheckout({
+            planId: pendingPlan!.id, name, email, cpfCnpj, phone, method,
+          });
+        }}
+      />
     </div>
   );
 };

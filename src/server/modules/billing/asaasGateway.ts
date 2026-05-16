@@ -1,0 +1,179 @@
+/**
+ * Asaas payment gateway implementation.
+ *
+ * API docs: https://docs.asaas.com (v3 REST API)
+ *
+ * Env vars:
+ *   ASAAS_API_KEY              — required. Sandbox keys start with $aact_YTU5...
+ *   ASAAS_BASE_URL             — optional. Defaults to https://api.asaas.com/v3
+ *                                Set to https://sandbox.asaas.com/api/v3 for sandbox.
+ *   ASAAS_WEBHOOK_AUTH_TOKEN   — optional. If set, every incoming webhook must
+ *                                carry header `asaas-access-token` matching it.
+ */
+import crypto from 'crypto';
+import type {
+  PaymentGateway,
+  CreateCustomerParams, CreateCustomerResult,
+  CreateSubscriptionParams, CreateSubscriptionResult,
+  CancelSubscriptionParams,
+  NormalizedWebhookEvent,
+  PaymentMethod, PaymentStatus,
+} from './paymentGateway';
+
+function baseUrl(): string {
+  return process.env.ASAAS_BASE_URL ?? 'https://api.asaas.com/v3';
+}
+
+/** Map our internal payment method enum to Asaas billingType */
+const METHOD_TO_ASAAS: Record<PaymentMethod, string> = {
+  pix: 'PIX',
+  credit_card: 'CREDIT_CARD',
+  debit_card: 'CREDIT_CARD',          // Asaas treats both via CREDIT_CARD with subType
+  boleto: 'BOLETO',
+  undefined: 'UNDEFINED',             // lets the customer choose at checkout
+};
+
+const ASAAS_STATUS_TO_NORMALIZED: Record<string, PaymentStatus> = {
+  PENDING: 'pending',
+  RECEIVED: 'paid',
+  CONFIRMED: 'paid',
+  RECEIVED_IN_CASH: 'paid',
+  REFUNDED: 'refunded',
+  REFUND_REQUESTED: 'refunded',
+  REFUND_IN_PROGRESS: 'refunded',
+  OVERDUE: 'overdue',
+  CHARGEBACK_REQUESTED: 'failed',
+  CHARGEBACK_DISPUTE: 'failed',
+  AWAITING_CHARGEBACK_REVERSAL: 'failed',
+  DUNNING_REQUESTED: 'overdue',
+  DUNNING_RECEIVED: 'paid',
+  AWAITING_RISK_ANALYSIS: 'pending',
+};
+
+const ASAAS_BILLING_TO_NORMALIZED: Record<string, PaymentMethod> = {
+  PIX: 'pix',
+  CREDIT_CARD: 'credit_card',
+  BOLETO: 'boleto',
+  UNDEFINED: 'undefined',
+};
+
+export class AsaasGateway implements PaymentGateway {
+  readonly providerName = 'asaas' as const;
+
+  private apiKey(): string {
+    const key = process.env.ASAAS_API_KEY;
+    if (!key) throw new Error('ASAAS_API_KEY not configured');
+    return key;
+  }
+
+  private async request<T>(method: string, path: string, body?: any): Promise<T> {
+    const res = await fetch(`${baseUrl()}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'access_token': this.apiKey(),
+        'User-Agent': 'CampanhaPro/1.0',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let parsed: any = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* leave as text */ }
+    if (!res.ok) {
+      const msg = parsed?.errors?.[0]?.description ?? parsed?.message ?? `asaas_http_${res.status}`;
+      throw new Error(msg);
+    }
+    return parsed as T;
+  }
+
+  async createCustomer(params: CreateCustomerParams): Promise<CreateCustomerResult> {
+    const body: Record<string, any> = {
+      name: params.name,
+      email: params.email,
+      externalReference: params.campaignId,
+    };
+    if (params.cpfCnpj) body.cpfCnpj = params.cpfCnpj;
+    if (params.phone) body.mobilePhone = params.phone;
+
+    const data = await this.request<{ id: string }>('POST', '/customers', body);
+    return { providerCustomerId: data.id };
+  }
+
+  async createSubscription(params: CreateSubscriptionParams): Promise<CreateSubscriptionResult> {
+    // Asaas wants the next due date in YYYY-MM-DD.
+    // Use tomorrow so the user has time to pay the first invoice.
+    const tomorrow = new Date(Date.now() + 24 * 3600 * 1000);
+    const nextDueDate = tomorrow.toISOString().slice(0, 10);
+
+    const billingType = params.allowedMethods[0]
+      ? METHOD_TO_ASAAS[params.allowedMethods[0]]
+      : 'UNDEFINED';
+
+    const body = {
+      customer: params.providerCustomerId,
+      billingType,
+      nextDueDate,
+      value: params.amountCents / 100,
+      cycle: params.cycle === 'yearly' ? 'YEARLY' : 'MONTHLY',
+      description: params.description ?? `Assinatura CampanhaPro — plano ${params.planId}`,
+      externalReference: `${params.campaignId}:${params.planId}`,
+    };
+
+    const data = await this.request<{
+      id: string;
+      invoiceUrl?: string;
+      bankSlipUrl?: string;
+    }>('POST', '/subscriptions', body);
+
+    return {
+      providerSubscriptionId: data.id,
+      // Asaas returns invoiceUrl on the first invoice; we fetch it lazily.
+      checkoutUrl: data.invoiceUrl ?? null,
+    };
+  }
+
+  async cancelSubscription(params: CancelSubscriptionParams): Promise<void> {
+    await this.request<unknown>('DELETE', `/subscriptions/${params.providerSubscriptionId}`);
+  }
+
+  parseWebhook(
+    headers: Record<string, string | string[] | undefined>,
+    rawBody: Buffer,
+  ): NormalizedWebhookEvent {
+    // Auth check: if ASAAS_WEBHOOK_AUTH_TOKEN is configured, validate header
+    const expectedToken = process.env.ASAAS_WEBHOOK_AUTH_TOKEN;
+    if (expectedToken) {
+      const received = headers['asaas-access-token'];
+      const got = Array.isArray(received) ? received[0] : received;
+      if (!got || !timingSafeEqual(got, expectedToken)) {
+        throw new Error('invalid_webhook_token');
+      }
+    }
+
+    let payload: any;
+    try {
+      payload = JSON.parse(rawBody.toString('utf8'));
+    } catch {
+      throw new Error('invalid_webhook_payload');
+    }
+
+    const payment = payload.payment ?? {};
+    return {
+      providerEventId: payload.id ?? payment.id ?? null,
+      eventType: payload.event ?? 'UNKNOWN',
+      status: ASAAS_STATUS_TO_NORMALIZED[payment.status] ?? 'pending',
+      paymentMethod: ASAAS_BILLING_TO_NORMALIZED[payment.billingType] ?? 'undefined',
+      amountCents: typeof payment.value === 'number' ? Math.round(payment.value * 100) : null,
+      providerSubscriptionId: payment.subscription ?? null,
+      providerCustomerId: payment.customer ?? null,
+      raw: payload,
+    };
+  }
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}

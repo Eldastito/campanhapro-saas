@@ -25,6 +25,7 @@ import {
   expensiveLimiter, messagingLimiter, mutationLimiter, webhookLimiter,
 } from './src/server/middleware/perCampaignRateLimit';
 import { createBillingRouter } from './src/server/modules/billing/billingRouter';
+import { createPaymentWebhookRouter } from './src/server/modules/billing/paymentWebhookRouter';
 import { requireAiBudget } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
@@ -211,6 +212,8 @@ async function startServer() {
       return requireAuth(req, res, next);
     }, obsRouter);
     app.use('/webhooks', webhookLimiter, createWebhookRouter(supabaseAdmin));
+    // Payment provider webhooks (Asaas / Stripe / Pagar.me) — token-validated by gateway
+    app.use('/webhooks/payments', webhookLimiter, createPaymentWebhookRouter(supabaseAdmin));
   }
 
   // --- OAuth Social (Simulação) ---
