@@ -24,6 +24,8 @@ import { requestTracer } from './src/server/modules/observability/requestTracer'
 import {
   expensiveLimiter, messagingLimiter, mutationLimiter, webhookLimiter,
 } from './src/server/middleware/perCampaignRateLimit';
+import { createBillingRouter } from './src/server/modules/billing/billingRouter';
+import { requireAiBudget } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
@@ -196,9 +198,10 @@ async function startServer() {
   // --- Intelligence v1 (Snapshot → CampanhaProCenarios) ---
   if (supabaseAdmin) {
     app.use('/api/v1/intelligence', requireAuth, mutationLimiter, createIntelligenceRouter(supabaseAdmin));
-    app.use('/api/v1/paperclip', requireAuth, expensiveLimiter, createPaperclipRouter(supabaseAdmin));
+    app.use('/api/v1/paperclip', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createPaperclipRouter(supabaseAdmin));
     app.use('/api/v1/channels', requireAuth, messagingLimiter, createChannelsRouter(supabaseAdmin));
-    app.use('/api/v1/rag', requireAuth, expensiveLimiter, createRagRouter(supabaseAdmin));
+    app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
+    app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
     app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, createScenariosRouter(supabaseAdmin));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth

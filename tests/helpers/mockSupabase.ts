@@ -42,7 +42,16 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
   const exec = async () => {
     const rows = store.get(table) ?? [];
     if (state.mode === 'insert' && state.insertRows) {
-      const inserted = state.insertRows.map(r => ({ id: r.id ?? cryptoRandomId(), ...r }));
+      const nowIso = new Date().toISOString();
+      const inserted = state.insertRows.map(r => ({
+        id: r.id ?? cryptoRandomId(),
+        // simulate DB defaults — only set if caller didn't provide
+        created_at: r.created_at ?? nowIso,
+        updated_at: r.updated_at ?? nowIso,
+        recorded_at: r.recorded_at ?? nowIso,
+        received_at: r.received_at ?? nowIso,
+        ...r,
+      }));
       store.set(table, [...rows, ...inserted]);
       return { data: inserted, error: null };
     }
@@ -125,6 +134,7 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       };
     },
     eq: (col: string, val: any) => { state.filters.push(r => r[col] === val); return chain; },
+    in: (col: string, vals: any[]) => { state.filters.push(r => vals.includes(r[col])); return chain; },
     gte: (col: string, val: any) => { state.filters.push(r => r[col] >= val); return chain; },
     ilike: (col: string, pattern: string) => {
       const re = new RegExp('^' + pattern.replace(/%/g, '.*'), 'i');
