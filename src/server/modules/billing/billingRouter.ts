@@ -6,6 +6,7 @@ import {
 } from './billingService';
 import { getPaymentGateway } from './paymentGateway';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { sendSubscriptionCanceledEmail } from '../email/emailService';
 
 export function createBillingRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -181,6 +182,32 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
       resourceType: 'subscription',
       severity: 'warn',
     });
+
+    // Cancellation confirmation email (non-blocking)
+    if (existing?.id) {
+      try {
+        const userId = (req as any).user?.id;
+        const userEmail = (req as any).user?.email;
+        const { data: planRow } = existing.planId
+          ? await supabase.from('plans').select('name').eq('id', existing.planId).maybeSingle()
+          : { data: null };
+        const { data: profileRow } = userId
+          ? await supabase.from('users').select('name').eq('id', userId).maybeSingle()
+          : { data: null };
+        if (userEmail) {
+          sendSubscriptionCanceledEmail(supabase, {
+            campaignId,
+            email: userEmail,
+            name: profileRow?.name ?? userEmail.split('@')[0],
+            planName: planRow?.name ?? existing.planId,
+            periodEnd: existing.currentPeriodEnd,
+            subscriptionId: existing.id,
+          }).catch(err => console.warn('[billing] cancel email failed:', err.message));
+        }
+      } catch (err: any) {
+        console.warn('[billing] cancel email prep failed:', err.message);
+      }
+    }
 
     res.json({ ok: true });
   });
