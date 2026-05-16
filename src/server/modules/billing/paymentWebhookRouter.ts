@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPaymentGateway } from './paymentGateway';
 import { audit } from '../observability/auditLogger';
+import { sendPaymentConfirmedEmail, sendPaymentOverdueEmail } from '../email/emailService';
 
 interface RawRequest extends Request {
   rawBody?: Buffer;
@@ -112,6 +113,45 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
           amountCents: event.amountCents,
         },
       });
+
+      // Notify the campaign admin via email (idempotent via providerEventId)
+      if (campaignId && subscriptionRowId && event.providerEventId &&
+          (event.status === 'paid' || event.status === 'overdue')) {
+        try {
+          const { data: adminUser } = await supabase
+            .from('users')
+            .select('email, name')
+            .eq('campaign_id', campaignId)
+            .eq('type', 'Admin')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+          const { data: sub } = await supabase
+            .from('subscriptions')
+            .select('plan_id')
+            .eq('id', subscriptionRowId)
+            .maybeSingle();
+          const { data: plan } = sub?.plan_id
+            ? await supabase.from('plans').select('name').eq('id', sub.plan_id).maybeSingle()
+            : { data: null };
+
+          if (adminUser?.email && plan?.name && event.amountCents != null) {
+            const sender = event.status === 'paid' ? sendPaymentConfirmedEmail : sendPaymentOverdueEmail;
+            await sender(supabase, {
+              campaignId,
+              email: adminUser.email,
+              name: adminUser.name ?? adminUser.email.split('@')[0],
+              planName: plan.name,
+              amountCents: event.amountCents,
+              paymentMethod: event.paymentMethod,
+              paymentEventId: event.providerEventId,
+            } as any);
+          }
+        } catch (err: any) {
+          console.warn('[payments/asaas] email notification failed:', err.message);
+        }
+      }
     } catch (err: any) {
       console.error('[payments/asaas] processing error:', err);
       // Response already sent — Asaas will retry if we haven't acked 200,

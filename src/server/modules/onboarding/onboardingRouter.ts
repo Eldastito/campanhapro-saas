@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { subscribeCampaign } from '../billing/billingService';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { sendWelcomeEmail } from '../email/emailService';
 
 /**
  * Onboarding for new tenants.
@@ -127,6 +128,20 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
       severity: 'info',
       metadata: { campaignName, candidateName, party },
     });
+
+    // 5. Welcome email (non-blocking, never throws)
+    if (email) {
+      const userName = (req.body.name as string | undefined)
+        ?? email.split('@')[0]
+        ?? 'Novo usuário';
+      sendWelcomeEmail(supabase, {
+        campaignId,
+        userId,
+        email,
+        name: userName,
+        campaignName: campaignName.trim(),
+      }).catch(err => console.warn('[onboarding] welcome email failed:', err.message));
+    }
 
     res.status(201).json({
       bootstrapped: true,
