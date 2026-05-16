@@ -28,6 +28,7 @@ import { createBillingRouter } from './src/server/modules/billing/billingRouter'
 import { createPaymentWebhookRouter } from './src/server/modules/billing/paymentWebhookRouter';
 import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
 import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
+import { createTeamInvitesRouter, createTeamInvitesPublicRouter } from './src/server/modules/team/teamInvitesRouter';
 import { requireAiBudget } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
@@ -206,6 +207,13 @@ async function startServer() {
     app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
     app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
     app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
+    app.use('/api/v1/team', requireAuth, mutationLimiter, createTeamInvitesRouter(supabaseAdmin));
+    // Token-based routes: GET is public so the email-link landing page can render
+    // before login; POST /accept is authed via per-route check inside the router.
+    app.use('/api/v1/team', mutationLimiter, (req, res, next) => {
+      if (req.method === 'GET') return next();   // /invites/token/:token public
+      return requireAuth(req, res, next);        // /invites/token/:token/accept auth
+    }, createTeamInvitesPublicRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
     app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, createScenariosRouter(supabaseAdmin));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth

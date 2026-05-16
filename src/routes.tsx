@@ -6,6 +6,7 @@ import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import WelcomePage from './pages/WelcomePage';
+import InvitePage from './pages/InvitePage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import PublicChatPage from './pages/PublicChatPage';
 import PublicColinhaPage from './pages/PublicColinhaPage';
@@ -48,6 +49,7 @@ export const AppRoutes: React.FC = () => {
                     path="/welcome"
                     element={user ? <WelcomePage /> : <Navigate to="/login" replace />}
                 />
+                <Route path="/invite/:token" element={<InvitePage />} />
                 
                 <Route path="/forgot-password" element={<ForgotPasswordPage onNavigateToLogin={() => window.location.href = '/login'} />} />
                 <Route path="/chat" element={<PublicChatPage onBack={() => window.history.back()} />} />
