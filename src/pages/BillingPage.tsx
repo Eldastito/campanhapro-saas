@@ -7,6 +7,8 @@ import ErrorBoundary from '../components/dev/ErrorBoundary';
 import PlanCard, { Plan } from '../components/billing/PlanCard';
 import UsageDashboard from '../components/billing/UsageDashboard';
 import CheckoutDialog from '../components/billing/CheckoutDialog';
+import AdminPlansPanel from '../components/billing/AdminPlansPanel';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Subscription {
   id: string;
@@ -106,6 +108,8 @@ const HistoryTab: React.FC = () => {
 };
 
 const BillingPage: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = !!user?.isSupremeAdmin;
   const [plans, setPlans] = React.useState<Plan[]>([]);
   const [subscription, setSubscription] = React.useState<Subscription | null>(null);
   const [plan, setPlan] = React.useState<any | null>(null);
@@ -224,7 +228,12 @@ const BillingPage: React.FC = () => {
         </Card>
       )}
 
-      <Tabs tabs={['Planos', 'Uso', 'Histórico']} mode="state">
+      <Tabs
+        tabs={isAdmin
+          ? ['Planos', 'Uso', 'Histórico', 'Admin · Catálogo']
+          : ['Planos', 'Uso', 'Histórico']}
+        mode="state"
+      >
         <ErrorBoundary label="Planos">
           {loading
             ? <div className="flex justify-center py-8 text-slate-500"><Loader2 className="w-5 h-5 animate-spin" /></div>
@@ -238,6 +247,11 @@ const BillingPage: React.FC = () => {
         <ErrorBoundary label="Histórico">
           <HistoryTab />
         </ErrorBoundary>
+        {isAdmin && (
+          <ErrorBoundary label="Admin · Catálogo">
+            <AdminPlansPanel />
+          </ErrorBoundary>
+        )}
       </Tabs>
 
       <CheckoutDialog

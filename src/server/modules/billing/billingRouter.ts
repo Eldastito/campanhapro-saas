@@ -7,6 +7,69 @@ import {
 import { getPaymentGateway } from './paymentGateway';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { sendSubscriptionCanceledEmail } from '../email/emailService';
+import { requireSupremeAdmin } from '../../middleware/requireSupremeAdmin';
+
+interface PlanInput {
+  id: string;
+  name: string;
+  monthly_cents: number;
+  features: string[];
+  limits: Record<string, number>;
+  active?: boolean;
+}
+
+function validatePlanInput(
+  body: any,
+  opts: { requireId: boolean },
+): { value: PlanInput; error?: undefined } | { error: string; value?: undefined } {
+  if (!body || typeof body !== 'object') return { error: 'body_required' };
+
+  if (opts.requireId) {
+    if (typeof body.id !== 'string' || !/^[a-z0-9_-]{2,32}$/.test(body.id)) {
+      return { error: 'invalid_id (lowercase alphanumeric, 2-32 chars)' };
+    }
+  }
+
+  if (typeof body.name !== 'string' || body.name.trim().length === 0 || body.name.length > 80) {
+    return { error: 'invalid_name (1-80 chars)' };
+  }
+
+  if (!Number.isInteger(body.monthly_cents) || body.monthly_cents < 0 || body.monthly_cents > 100_000_000) {
+    return { error: 'invalid_monthly_cents (integer 0 to 100_000_000)' };
+  }
+
+  if (!Array.isArray(body.features) ||
+      !body.features.every((f: any) => typeof f === 'string' && /^[a-z0-9_]+$/.test(f))) {
+    return { error: 'invalid_features (array of lowercase identifiers)' };
+  }
+
+  if (!body.limits || typeof body.limits !== 'object' || Array.isArray(body.limits)) {
+    return { error: 'invalid_limits (object)' };
+  }
+  const allowedLimits = ['contacts', 'ai_budget_cents', 'team_users', 'messages_per_month'];
+  for (const k of Object.keys(body.limits)) {
+    if (!allowedLimits.includes(k)) return { error: `unknown_limit: ${k}` };
+    const v = body.limits[k];
+    if (!Number.isInteger(v) || v < -1 || v > 1_000_000_000) {
+      return { error: `invalid_limit_value: ${k}` };
+    }
+  }
+
+  if (body.active !== undefined && typeof body.active !== 'boolean') {
+    return { error: 'invalid_active (boolean)' };
+  }
+
+  return {
+    value: {
+      id: body.id,
+      name: body.name.trim(),
+      monthly_cents: body.monthly_cents,
+      features: body.features,
+      limits: body.limits,
+      ...(body.active !== undefined ? { active: body.active } : {}),
+    },
+  };
+}
 
 export function createBillingRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -234,6 +297,110 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
     res.json({ records: data ?? [] });
+  });
+
+  // -----------------------------------------------------------------------
+  // SUPREME ADMIN endpoints — plan catalogue CRUD
+  // -----------------------------------------------------------------------
+  // Only the SaaS operator (SUPREME_ADMIN_EMAIL or is_supreme_admin flag)
+  // can edit plans. Campaign-level Admins must NOT be allowed to change
+  // their own pricing.
+
+  // GET /admin/plans — list ALL plans (including inactive)
+  router.get('/admin/plans', requireSupremeAdmin(), async (_req, res) => {
+    const { data, error } = await supabase
+      .from('plans')
+      .select('*')
+      .order('monthly_cents', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ plans: data ?? [] });
+  });
+
+  // POST /admin/plans — create a new plan
+  router.post('/admin/plans', requireSupremeAdmin(), async (req, res) => {
+    const validation = validatePlanInput(req.body, { requireId: true });
+    if (validation.error || !validation.value) return res.status(400).json({ error: validation.error });
+
+    const { data, error } = await supabase
+      .from('plans')
+      .insert(validation.value)
+      .select('*')
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    await audit(supabase, {
+      ...actorFromRequest(req),
+      action: 'admin.plan.create',
+      resourceType: 'plan',
+      resourceId: data.id,
+      severity: 'warn',
+      metadata: { name: data.name, monthly_cents: data.monthly_cents },
+    });
+
+    res.status(201).json({ plan: data });
+  });
+
+  // PUT /admin/plans/:id — update an existing plan
+  // NOTE: Existing subscriptions snapshot features at subscribe time, so
+  // changes here only apply to NEW subscriptions and renewals. This is
+  // industry standard — never mutate active customer pricing retroactively.
+  router.put('/admin/plans/:id', requireSupremeAdmin(), async (req, res) => {
+    const validation = validatePlanInput(req.body, { requireId: false });
+    if (validation.error || !validation.value) return res.status(400).json({ error: validation.error });
+
+    const updateFields = { ...validation.value };
+    delete (updateFields as any).id;
+
+    const { data, error } = await supabase
+      .from('plans')
+      .update(updateFields)
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'plan_not_found' });
+
+    await audit(supabase, {
+      ...actorFromRequest(req),
+      action: 'admin.plan.update',
+      resourceType: 'plan',
+      resourceId: req.params.id,
+      severity: 'warn',
+      metadata: { changes: Object.keys(updateFields) },
+    });
+
+    res.json({ plan: data });
+  });
+
+  // DELETE /admin/plans/:id — soft-delete (sets active=false)
+  router.delete('/admin/plans/:id', requireSupremeAdmin(), async (req, res) => {
+    // Refuse if any active subscription still references the plan
+    const { count } = await supabase
+      .from('subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('plan_id', req.params.id)
+      .in('status', ['active', 'trialing', 'past_due']);
+    if ((count ?? 0) > 0) {
+      return res.status(409).json({
+        error: 'plan_in_use',
+        activeSubscriptions: count,
+      });
+    }
+
+    const { error } = await supabase
+      .from('plans')
+      .update({ active: false })
+      .eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+
+    await audit(supabase, {
+      ...actorFromRequest(req),
+      action: 'admin.plan.deactivate',
+      resourceType: 'plan',
+      resourceId: req.params.id,
+      severity: 'warn',
+    });
+
+    res.json({ ok: true });
   });
 
   return router;
