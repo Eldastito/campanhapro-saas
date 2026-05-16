@@ -5,6 +5,7 @@ import App from './App';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import WelcomePage from './pages/WelcomePage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import PublicChatPage from './pages/PublicChatPage';
 import PublicColinhaPage from './pages/PublicColinhaPage';
@@ -29,14 +30,23 @@ export const AppRoutes: React.FC = () => {
                 {/* Rotas Públicas */}
                 <Route path="/" element={<LandingPage />} />
                 
-                {/* Se o usuário já está logado, redireciona do Login/Registro para o App */}
-                <Route 
-                    path="/login" 
-                    element={user ? <Navigate to="/app" replace /> : <LoginPage />} 
+                {/* Se o usuário já está logado, redireciona do Login/Registro para o App
+                    ou para Welcome (se ainda não bootstrappou a campanha) */}
+                <Route
+                    path="/login"
+                    element={user
+                        ? <Navigate to={user.campaignId ? '/app' : '/welcome'} replace />
+                        : <LoginPage />}
                 />
-                <Route 
-                    path="/register" 
-                    element={user ? <Navigate to="/app" replace /> : <RegisterPage />} 
+                <Route
+                    path="/register"
+                    element={user
+                        ? <Navigate to={user.campaignId ? '/app' : '/welcome'} replace />
+                        : <RegisterPage />}
+                />
+                <Route
+                    path="/welcome"
+                    element={user ? <WelcomePage /> : <Navigate to="/login" replace />}
                 />
                 
                 <Route path="/forgot-password" element={<ForgotPasswordPage onNavigateToLogin={() => window.location.href = '/login'} />} />
@@ -47,10 +57,16 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/casos-de-uso" element={<UseCasesPage />} />
                 <Route path="/demonstracao" element={<UseCasesPage />} />
 
-                {/* Rota Privada (Main App) */}
-                <Route 
-                    path="/app/*" 
-                    element={user ? <App /> : <Navigate to="/login" replace />} 
+                {/* Rota Privada (Main App) — força onboarding se ainda não houver campaignId */}
+                <Route
+                    path="/app/*"
+                    element={
+                        !user
+                            ? <Navigate to="/login" replace />
+                            : !user.campaignId
+                                ? <Navigate to="/welcome" replace />
+                                : <App />
+                    }
                 />
 
                 {/* Fallback */}

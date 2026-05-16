@@ -90,6 +90,11 @@ export async function subscribeCampaign(
   supabase: SupabaseClient,
   campaignId: string,
   planId: string,
+  providerInfo?: {
+    provider: string;
+    providerCustomerId?: string;
+    providerSubscriptionId?: string;
+  },
 ): Promise<Subscription> {
   const { data: plan, error: planErr } = await supabase
     .from('plans').select('*').eq('id', planId).eq('active', true).single();
@@ -97,6 +102,18 @@ export async function subscribeCampaign(
 
   const periodStart = new Date().toISOString();
   const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const providerColumns: Record<string, any> = {};
+  if (providerInfo) {
+    providerColumns.payment_provider = providerInfo.provider;
+    if (providerInfo.provider === 'asaas') {
+      if (providerInfo.providerCustomerId) providerColumns.asaas_customer_id = providerInfo.providerCustomerId;
+      if (providerInfo.providerSubscriptionId) providerColumns.asaas_subscription_id = providerInfo.providerSubscriptionId;
+    } else if (providerInfo.provider === 'stripe') {
+      if (providerInfo.providerCustomerId) providerColumns.stripe_customer_id = providerInfo.providerCustomerId;
+      if (providerInfo.providerSubscriptionId) providerColumns.stripe_subscription_id = providerInfo.providerSubscriptionId;
+    }
+  }
 
   // Try to update an existing active subscription; otherwise insert
   const existing = await getActiveSubscription(supabase, campaignId);
@@ -110,6 +127,7 @@ export async function subscribeCampaign(
         current_period_end: periodEnd,
         status: 'active',
         updated_at: new Date().toISOString(),
+        ...providerColumns,
       })
       .eq('id', existing.id)
       .select('*')
@@ -127,6 +145,7 @@ export async function subscribeCampaign(
       current_period_start: periodStart,
       current_period_end: periodEnd,
       status: 'active',
+      ...providerColumns,
     })
     .select('*')
     .single();

@@ -26,7 +26,7 @@ CREATE POLICY "audit_logs_campaign_isolation"
   USING (
     campaign_id IS NULL OR
     campaign_id IN (
-      SELECT campaign_id FROM profiles WHERE id = auth.uid()
+      SELECT campaign_id FROM users WHERE id = auth.uid()
     )
   );
 
@@ -62,7 +62,7 @@ CREATE POLICY "webhook_events_campaign_isolation"
   USING (
     campaign_id IS NULL OR
     campaign_id IN (
-      SELECT campaign_id FROM profiles WHERE id = auth.uid()
+      SELECT campaign_id FROM users WHERE id = auth.uid()
     )
   );
 

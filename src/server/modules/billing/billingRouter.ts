@@ -4,6 +4,7 @@ import {
   listPlans, getActiveSubscription, subscribeCampaign, cancelSubscription,
   getUsageForCurrentPeriod, isWithinAiBudget,
 } from './billingService';
+import { getPaymentGateway } from './paymentGateway';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
 export function createBillingRouter(supabase: SupabaseClient): Router {
@@ -37,18 +38,92 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
   });
 
   // POST /api/v1/billing/checkout
-  // Body: { planId }
-  // Stub: when STRIPE_SECRET_KEY is unset, immediately activates the subscription.
-  // When set, this would create a Stripe Checkout Session and return the URL.
+  // Body: { planId, name?, email?, cpfCnpj?, phone?, method? }
+  //
+  // Drives the configured PaymentGateway (asaas / stripe / stub).
+  // For Asaas: creates a customer if needed, then a subscription, and returns
+  // the checkout URL (Asaas customer area) that the user is redirected to.
   router.post('/checkout', async (req, res) => {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { planId } = req.body as { planId: string };
+    const { planId, name, email, cpfCnpj, phone, method } = req.body as {
+      planId: string;
+      name?: string;
+      email?: string;
+      cpfCnpj?: string;
+      phone?: string;
+      method?: 'pix' | 'credit_card' | 'debit_card' | 'boleto' | 'undefined';
+    };
     if (!planId) return res.status(400).json({ error: 'planId obrigatório' });
 
     try {
-      const sub = await subscribeCampaign(supabase, campaignId, planId);
+      // Look up plan price
+      const { data: plan, error: planErr } = await supabase
+        .from('plans').select('id, name, monthly_cents').eq('id', planId).eq('active', true).single();
+      if (planErr || !plan) return res.status(404).json({ error: 'plan_not_found' });
+
+      const gateway = getPaymentGateway();
+      let checkoutUrl: string | null = null;
+      let providerCustomerId: string | undefined;
+      let providerSubscriptionId: string | undefined;
+
+      // Free plan or stub gateway: skip the external HTTP round-trip
+      if (gateway.providerName === 'stub' || plan.monthly_cents === 0) {
+        const sub = await subscribeCampaign(supabase, campaignId, planId, {
+          provider: gateway.providerName === 'stub' ? 'stub' : gateway.providerName,
+        });
+        await audit(supabase, {
+          ...actorFromRequest(req),
+          action: 'billing.subscribe',
+          resourceType: 'subscription',
+          resourceId: sub.id,
+          severity: 'info',
+          metadata: { planId, provider: gateway.providerName, free: plan.monthly_cents === 0 },
+        });
+        return res.json({ subscription: sub, checkoutUrl: null, provider: gateway.providerName });
+      }
+
+      // Real gateway path
+      if (!name || !email) {
+        return res.status(400).json({ error: 'name e email obrigatórios para gateways de pagamento' });
+      }
+
+      // Re-use the gateway customer id if we already have one for this campaign
+      const existingSub = await getActiveSubscription(supabase, campaignId);
+      if (existingSub?.id) {
+        const { data: existingRow } = await supabase
+          .from('subscriptions').select('asaas_customer_id, stripe_customer_id')
+          .eq('id', existingSub.id).maybeSingle();
+        if (existingRow?.asaas_customer_id && gateway.providerName === 'asaas') {
+          providerCustomerId = existingRow.asaas_customer_id;
+        }
+      }
+      if (!providerCustomerId) {
+        const customer = await gateway.createCustomer({
+          campaignId, name, email, cpfCnpj, phone,
+        });
+        providerCustomerId = customer.providerCustomerId;
+      }
+
+      const subResult = await gateway.createSubscription({
+        campaignId,
+        providerCustomerId,
+        planId,
+        amountCents: plan.monthly_cents,
+        cycle: 'monthly',
+        description: `Assinatura CampanhaPro — plano ${plan.name}`,
+        allowedMethods: method ? [method] : ['undefined'],
+      });
+
+      providerSubscriptionId = subResult.providerSubscriptionId;
+      checkoutUrl = subResult.checkoutUrl;
+
+      const sub = await subscribeCampaign(supabase, campaignId, planId, {
+        provider: gateway.providerName,
+        providerCustomerId,
+        providerSubscriptionId,
+      });
 
       await audit(supabase, {
         ...actorFromRequest(req),
@@ -56,16 +131,18 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
         resourceType: 'subscription',
         resourceId: sub.id,
         severity: 'info',
-        metadata: { planId, mode: process.env.STRIPE_SECRET_KEY ? 'stripe' : 'stub' },
+        metadata: { planId, provider: gateway.providerName, providerSubscriptionId },
       });
 
-      if (process.env.STRIPE_SECRET_KEY) {
-        // Real Stripe path would go here — create Checkout Session, return URL
-        return res.json({ subscription: sub, checkoutUrl: null, mode: 'stripe' });
-      }
-
-      return res.json({ subscription: sub, mode: 'stub' });
+      return res.json({
+        subscription: sub,
+        checkoutUrl,
+        pixQrCode: subResult.pixQrCode,
+        pixCopyPaste: subResult.pixCopyPaste,
+        provider: gateway.providerName,
+      });
     } catch (err: any) {
+      console.error('[billing] checkout failed:', err);
       return res.status(400).json({ error: err.message });
     }
   });
@@ -74,6 +151,27 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
   router.post('/cancel', async (req, res) => {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Look up the provider subscription id before flipping our row to canceled
+    const existing = await getActiveSubscription(supabase, campaignId);
+    if (existing?.id) {
+      const { data } = await supabase.from('subscriptions')
+        .select('payment_provider, asaas_subscription_id, stripe_subscription_id')
+        .eq('id', existing.id).maybeSingle();
+      const gateway = getPaymentGateway();
+      const providerSubId =
+        gateway.providerName === 'asaas' ? data?.asaas_subscription_id :
+        gateway.providerName === 'stripe' ? data?.stripe_subscription_id :
+        null;
+      if (providerSubId) {
+        try {
+          await gateway.cancelSubscription({ providerSubscriptionId: providerSubId });
+        } catch (err: any) {
+          console.error('[billing] gateway cancel failed:', err.message);
+          // continue — we still want to mark our row canceled
+        }
+      }
+    }
 
     await cancelSubscription(supabase, campaignId);
 
