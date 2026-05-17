@@ -39,7 +39,7 @@ export async function getLeaderConversionStats(campaignId: string): Promise<Lead
 
     // 3. Mapear estágios por contato para acesso rápido
     const stageMap: Record<string, string> = {};
-    journeys?.forEach(j => {
+    journeys?.forEach((j: any) => {
       stageMap[j.contactId] = j.currentStage;
     });
 
@@ -49,7 +49,7 @@ export async function getLeaderConversionStats(campaignId: string): Promise<Lead
     // Usar um Set para evitar contar o mesmo contato múltiplas vezes para o mesmo líder nas estatísticas de conversão
     const trackedPairs = new Set<string>();
 
-    visits?.forEach(v => {
+    visits?.forEach((v: any) => {
       if (!v.voterId) return;
       const leaderName = v.lider || 'Sem Líder';
       const pairKey = `${leaderName}-${v.voterId}`;
@@ -103,11 +103,11 @@ export async function generateEngagementTasks(campaignId: string): Promise<Engag
 
     // Filtrar contatos que têm uma NBA e não são multiplicadores ainda
     const tasks = data
-      ?.filter(c => {
+      ?.filter((c: any) => {
         const journey = c.voter_journey?.[0];
         return journey && journey.nextBestAction && journey.currentStage !== 'multiplicador';
       })
-      .map(c => ({
+      .map((c: any) => ({
         id: c.id,
         contact_name: c.name,
         contact_phone: c.phone,

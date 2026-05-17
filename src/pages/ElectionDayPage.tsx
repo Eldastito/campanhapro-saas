@@ -67,12 +67,12 @@ const ElectionDayPage: React.FC = () => {
     // Inscrição em tempo real para novos BUs e Incidentes
     const buSubscription = supabase
       .channel('election-updates')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'boletins_urna' }, (payload) => {
-        setBuResults(prev => [payload.new as BUData, ...prev]);
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'boletins_urna' }, (payload: { new: BUData }) => {
+        setBuResults(prev => [payload.new, ...prev]);
         fetchElectionData(); // Recarrega estatísticas
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'election_incidents' }, (payload) => {
-        setIncidents(prev => [payload.new as Incident, ...prev]);
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'election_incidents' }, (payload: { new: Incident }) => {
+        setIncidents(prev => [payload.new, ...prev]);
       })
       .subscribe();
 
@@ -183,7 +183,7 @@ const ElectionDayPage: React.FC = () => {
       const stats: any = contacts && contacts.length > 0 ? {} : initialStats;
       
       if (contacts && contacts.length > 0) {
-        contacts.forEach(c => {
+        contacts.forEach((c: any) => {
           if (c.neighborhood) {
             if (!stats[c.neighborhood]) stats[c.neighborhood] = { count: 0, alert: false };
             stats[c.neighborhood].count++;
@@ -192,7 +192,7 @@ const ElectionDayPage: React.FC = () => {
       }
 
       // Marcar bairros com incidentes abertos
-      incs?.filter(i => i.status === 'open').forEach(i => {
+      incs?.filter((i: any) => i.status === 'open').forEach((i: any) => {
         Object.keys(NEIGHBORHOOD_MAP).forEach(name => {
           if (i.description.includes(name)) {
             if (!stats[name]) stats[name] = { count: 0, alert: true };

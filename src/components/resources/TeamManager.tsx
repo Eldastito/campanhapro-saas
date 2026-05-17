@@ -10,10 +10,10 @@ import Input from '../ui/Input';
 import { RefreshCw, Ban, CheckCircle, Lock } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
-const emptyMember: Omit<TeamMember, 'id'> = { 
+const emptyMember: Omit<TeamMember, 'id'> = {
     name: '', email: '', phone: '', role: 'Apoiador', password: '', cost: 0,
-    cpf: '', rg: '', voter_id: '', address: '', neighborhood: '', city: '', state: '', zip_code: '',
-    bank_name: '', bank_agency: '', bank_account: '', pix_key: ''
+    cpf: '', rg: '', voterId: '', address: '', neighborhood: '', city: '', state: '', zipcode: '',
+    bankName: '', bankAgency: '', bankAccount: '', pixKey: ''
 };
 
 const TeamMemberForm: React.FC<{ onSave: (member: Omit<TeamMember, 'id'> | TeamMember) => void, onCancel: () => void, initialData?: TeamMember | null }> = ({ onSave, onCancel, initialData }) => {
@@ -55,7 +55,7 @@ const TeamMemberForm: React.FC<{ onSave: (member: Omit<TeamMember, 'id'> | TeamM
                     <div className="grid grid-cols-3 gap-4">
                         <Input label="CPF" name="cpf" value={formData.cpf || ''} onChange={handleChange} />
                         <Input label="RG" name="rg" value={formData.rg || ''} onChange={handleChange} />
-                        <Input label="Título Eleitor" name="voter_id" value={formData.voter_id || ''} onChange={handleChange} />
+                        <Input label="Título Eleitor" name="voterId" value={formData.voterId || ''} onChange={handleChange} />
                     </div>
                     <div>
                         <label htmlFor="role" className="block text-sm font-medium text-slate-300 mb-1">Função</label>
@@ -68,7 +68,7 @@ const TeamMemberForm: React.FC<{ onSave: (member: Omit<TeamMember, 'id'> | TeamM
 
             {activeTab === 'endereco' && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <Input label="CEP" name="zip_code" value={formData.zip_code || ''} onChange={handleChange} />
+                    <Input label="CEP" name="zipcode" value={formData.zipcode || ''} onChange={handleChange} />
                     <Input label="Logradouro" name="address" value={formData.address || ''} onChange={handleChange} />
                     <Input label="Bairro" name="neighborhood" value={formData.neighborhood || ''} onChange={handleChange} />
                     <div className="grid grid-cols-2 gap-4">
@@ -80,12 +80,12 @@ const TeamMemberForm: React.FC<{ onSave: (member: Omit<TeamMember, 'id'> | TeamM
 
             {activeTab === 'banco' && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-                    <Input label="Nome do Banco" name="bank_name" value={formData.bank_name || ''} onChange={handleChange} placeholder="Ex: Itaú, Nubank" />
+                    <Input label="Nome do Banco" name="bankName" value={formData.bankName || ''} onChange={handleChange} placeholder="Ex: Itaú, Nubank" />
                     <div className="grid grid-cols-2 gap-4">
-                        <Input label="Agência" name="bank_agency" value={formData.bank_agency || ''} onChange={handleChange} />
-                        <Input label="Conta" name="bank_account" value={formData.bank_account || ''} onChange={handleChange} />
+                        <Input label="Agência" name="bankAgency" value={formData.bankAgency || ''} onChange={handleChange} />
+                        <Input label="Conta" name="bankAccount" value={formData.bankAccount || ''} onChange={handleChange} />
                     </div>
-                    <Input label="Chave PIX" name="pix_key" value={formData.pix_key || ''} onChange={handleChange} />
+                    <Input label="Chave PIX" name="pixKey" value={formData.pixKey || ''} onChange={handleChange} />
                 </div>
             )}
 

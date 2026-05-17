@@ -37,7 +37,7 @@ export const useDashboardMetrics = ({
     if (!user?.campaignId) return;
     const fetchEngagement = async () => {
       console.log("[DashboardMetrics] Buscando métricas de engajamento para:", user.campaignId);
-      const stats = await getLeaderConversionStats(user.campaignId);
+      const stats = await getLeaderConversionStats(user.campaignId!);
       console.log("[DashboardMetrics] Stats de Líderes:", stats.length);
       setLeaderRanking(stats);
       setEngagementLoading(false);

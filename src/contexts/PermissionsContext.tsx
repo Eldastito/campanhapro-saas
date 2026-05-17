@@ -149,7 +149,7 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'campaign_configs', filter: `id=eq.${user.campaignId}` },
-                (_payload) => fetchConfig()
+                (_payload: unknown) => fetchConfig()
             )
             .subscribe();
 

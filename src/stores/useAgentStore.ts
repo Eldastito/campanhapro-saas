@@ -4,6 +4,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 interface AgentMessage {
   role: 'user' | 'agent';
   content: string;
+  id?: string;
   metadata?: any;
 }
 

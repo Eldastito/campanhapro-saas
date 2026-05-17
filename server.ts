@@ -8,13 +8,28 @@ import fs from 'fs';
 import fsPromises from 'fs/promises';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { createServer as createHttpServer } from 'http';
-import { supabase } from './src/lib/supabaseClient';
 import { createAuthMiddleware } from './src/middleware/authMiddleware';
 import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
+import { createIntelligenceRouter } from './src/server/modules/intelligence/intelligenceRouter';
+import { createPaperclipRouter } from './src/server/modules/paperclip/paperclipRouter';
+import { createChannelsRouter } from './src/server/modules/channels/channelsRouter';
+import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
+import { createRagRouter } from './src/server/modules/rag/ragRouter';
+import { createScenariosRouter } from './src/server/modules/scenarios/scenariosRouter';
+import { createObservabilityRouter } from './src/server/modules/observability/observabilityRouter';
+import { requestTracer } from './src/server/modules/observability/requestTracer';
+import {
+  expensiveLimiter, messagingLimiter, mutationLimiter, webhookLimiter,
+} from './src/server/middleware/perCampaignRateLimit';
+import { createBillingRouter } from './src/server/modules/billing/billingRouter';
+import { createPaymentWebhookRouter } from './src/server/modules/billing/paymentWebhookRouter';
+import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
+import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
+import { createTeamInvitesRouter, createTeamInvitesPublicRouter } from './src/server/modules/team/teamInvitesRouter';
+import { requireAiBudget } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
@@ -24,7 +39,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Configuração centralizada
-const SUPREME_ADMIN_EMAIL = process.env.SUPREME_ADMIN_EMAIL || 'eldastito@gmail.com';
+// SUPREME_ADMIN_EMAIL available via process.env.SUPREME_ADMIN_EMAIL when needed
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'http://localhost:5173'];
 const GEMINI_MODEL_NAME = "gemini-1.5-flash"; 
 
@@ -169,15 +184,48 @@ async function startServer() {
 
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
-  app.use(express.json());
-  
+  app.use(express.json({
+    verify: (req: any, _res, buf) => { req.rawBody = buf; },
+  }));
+
+  // Structured request tracing — assigns trace_id, logs request lines
+  app.use(requestTracer());
+
   // Middleware de diagnóstico de versão
-  app.use((req, res, next) => {
+  app.use((_req, res, next) => {
       res.setHeader('X-App-Version', '1.0.3');
       next();
   });
 
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+  // --- Intelligence v1 (Snapshot → CampanhaProCenarios) ---
+  if (supabaseAdmin) {
+    app.use('/api/v1/intelligence', requireAuth, mutationLimiter, createIntelligenceRouter(supabaseAdmin));
+    app.use('/api/v1/paperclip', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createPaperclipRouter(supabaseAdmin));
+    app.use('/api/v1/channels', requireAuth, messagingLimiter, createChannelsRouter(supabaseAdmin));
+    app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
+    app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
+    app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
+    app.use('/api/v1/team', requireAuth, mutationLimiter, createTeamInvitesRouter(supabaseAdmin));
+    // Token-based routes: GET is public so the email-link landing page can render
+    // before login; POST /accept is authed via per-route check inside the router.
+    app.use('/api/v1/team', mutationLimiter, (req, res, next) => {
+      if (req.method === 'GET') return next();   // /invites/token/:token public
+      return requireAuth(req, res, next);        // /invites/token/:token/accept auth
+    }, createTeamInvitesPublicRouter(supabaseAdmin));
+    // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
+    app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, createScenariosRouter(supabaseAdmin));
+    // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
+    const obsRouter = createObservabilityRouter(supabaseAdmin);
+    app.use('/api/v1/observability', (req, res, next) => {
+      if (req.path === '/health') return next();
+      return requireAuth(req, res, next);
+    }, obsRouter);
+    app.use('/webhooks', webhookLimiter, createWebhookRouter(supabaseAdmin));
+    // Payment provider webhooks (Asaas / Stripe / Pagar.me) — token-validated by gateway
+    app.use('/webhooks/payments', webhookLimiter, createPaymentWebhookRouter(supabaseAdmin));
+  }
 
   // --- OAuth Social (Simulação) ---
   app.get('/api/auth/meta/url', async (req, res) => {
@@ -916,7 +964,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
 
   app.post('/api/external/v1/visits', validateApiKey, async (req: any, res) => {
     try {
-      const { contactId, type, notes, status, gps, duration } = req.body;
+      const { contactId, notes, status, gps, duration } = req.body;
       const { data, error } = await supabaseAdmin.from('visits').insert({
         campaignId: req.campaignId,
         leaderId: contactId,
@@ -944,7 +992,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     if (fs.existsSync(distPath)) {
         console.log(`[Production] Servindo arquivos estáticos de: ${distPath}`);
         app.use(express.static(distPath));
-        app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+        app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
     } else {
         console.error(`[CRÍTICO] Pasta de build não encontrada: ${distPath}`);
     }
@@ -956,6 +1004,9 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     // todas as campanhas vêm com proactive_monitoring_enabled=false, então
     // o monitor só dispara IA pra quem opt-in.
     startProactiveMonitor(supabaseAdmin);
+    // Phase 11 — billing lifecycle: pre-renewal reminders + auto-downgrade
+    // after grace period. Disable via LIFECYCLE_ENABLED=false in tests.
+    if (supabaseAdmin) startLifecycleSweeper(supabaseAdmin);
   });
 }
 

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { AuthenticatedUser, Plan } from '../types/user';
 import { ensureCampaignConfig } from '../utils/planUtils';
@@ -33,9 +34,27 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
       .single();
 
     if (userError && userError.code === 'PGRST116') {
-      const autoCampaignId = crypto.randomUUID();
       const isVip = VIP_EMAILS.includes(session.user.email || '');
-      const initialPlan: Plan = isVip ? Plan.TOTAL : Plan.ESSENCIAL;
+
+      // Phase 9: only VIPs get auto-bootstrap (backward compat for existing onboarding).
+      // Regular new signups go through /welcome → backend onboarding/bootstrap endpoint
+      // which creates campaign + free subscription explicitly. We return a placeholder
+      // user (no campaign_id) so the router can redirect to /welcome.
+      if (!isVip) {
+        return {
+          id: session.user.id,
+          email: session.user.email,
+          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Novo Usuário',
+          type: null,
+          plan: null,
+          role: 'active',
+          campaign_id: null,
+          is_supreme_admin: false,
+        };
+      }
+
+      const autoCampaignId = crypto.randomUUID();
+      const initialPlan: Plan = Plan.TOTAL;
       const { data: newUser, error: insertError } = await supabase.from('users').insert({
         id: session.user.id,
         name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Novo Usuário',
@@ -50,7 +69,6 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
       if (insertError) return null;
       userData = newUser;
 
-      // Cria registro correspondente em campaign_configs com features/limits corretas
       try {
         await ensureCampaignConfig(supabase, autoCampaignId, initialPlan);
       } catch (err) {
@@ -77,7 +95,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     // mesmo se onAuthStateChange falhar silenciosamente.
     const safetyTimeout = setTimeout(() => setIsInitializing(false), 2000);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
       clearTimeout(safetyTimeout);
       try {
         if (session?.user) {
