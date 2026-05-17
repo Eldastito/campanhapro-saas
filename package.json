@@ -5,9 +5,9 @@
   "type": "module",
   "main": "server.ts",
   "scripts": {
-    "start": "tsx server.ts",
+    "start": "tsx --tsconfig tsconfig.server.json server.ts",
     "dev": "vite",
-    "server": "tsx server.ts",
+    "server": "tsx --tsconfig tsconfig.server.json server.ts",
     "build": "vite build",
     "lint": "tsc --noEmit"
   },

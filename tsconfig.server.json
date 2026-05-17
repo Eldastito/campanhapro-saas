@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["server.ts", "src/lib/**/*.ts", "src/middleware/**/*.ts", "src/services/**/*.ts", "src/utils/**/*.ts", "src/types/**/*.ts"]
+}
