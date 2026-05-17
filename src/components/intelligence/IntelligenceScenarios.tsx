@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { GitBranch, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import Card from '../ui/Card';
@@ -83,7 +84,7 @@ const IntelligenceScenarios: React.FC = () => {
 
   React.useEffect(() => {
     if (!user?.campaignId) return;
-    fetch('/api/v1/intelligence/scenarios')
+    authedFetch('/api/v1/intelligence/scenarios')
       .then(r => r.ok ? r.json() : { scenarios: [] })
       .then(json => setScenarios(json.scenarios || []))
       .catch(() => setScenarios([]))

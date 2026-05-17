@@ -1,3 +1,4 @@
+import { authedFetch } from '../lib/authedFetch';
 import * as React from 'react';
 import { Inbox as InboxIcon, RefreshCw } from 'lucide-react';
 import ConversationList, { Conversation } from '../components/inbox/ConversationList';
@@ -21,7 +22,7 @@ const InboxPage: React.FC = () => {
     if (!user?.campaignId) return;
     setLoadingConvos(true);
     try {
-      const res = await fetch('/api/v1/channels/conversations');
+      const res = await authedFetch('/api/v1/channels/conversations');
       if (res.ok) {
         const json = await res.json();
         setConversations(json.conversations ?? []);
@@ -36,7 +37,7 @@ const InboxPage: React.FC = () => {
   const fetchMessages = React.useCallback(async (conversationId: string) => {
     setLoadingMessages(true);
     try {
-      const res = await fetch(`/api/v1/channels/conversations/${conversationId}/messages`);
+      const res = await authedFetch(`/api/v1/channels/conversations/${conversationId}/messages`);
       if (res.ok) {
         const json = await res.json();
         setMessages(json.messages ?? []);

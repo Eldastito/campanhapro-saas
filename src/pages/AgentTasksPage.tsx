@@ -1,3 +1,4 @@
+import { authedFetch } from '../lib/authedFetch';
 import * as React from 'react';
 import { Cpu, Plus, Loader2 } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -25,7 +26,7 @@ const AgentTasksPage: React.FC = () => {
     setDispatching(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/paperclip/tasks', {
+      const res = await authedFetch('/api/v1/paperclip/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

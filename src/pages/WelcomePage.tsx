@@ -1,3 +1,4 @@
+import { authedFetch } from '../lib/authedFetch';
 import * as React from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { Sparkles, Loader2, CheckCircle, ArrowRight } from 'lucide-react';
@@ -52,7 +53,7 @@ const WelcomePage: React.FC = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) throw new Error('Sessão expirada');
 
-      const res = await fetch('/api/v1/onboarding/bootstrap', {
+      const res = await authedFetch('/api/v1/onboarding/bootstrap', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

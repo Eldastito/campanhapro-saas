@@ -1,3 +1,4 @@
+import { authedFetch } from '../lib/authedFetch';
 import * as React from 'react';
 import { CreditCard, Loader2 } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -68,7 +69,7 @@ const HistoryTab: React.FC = () => {
   React.useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/v1/billing/usage?limit=200');
+        const res = await authedFetch('/api/v1/billing/usage?limit=200');
         if (res.ok) {
           const json = await res.json();
           setRecords(json.records ?? []);
@@ -123,8 +124,8 @@ const BillingPage: React.FC = () => {
     setLoading(true);
     try {
       const [plansRes, subRes] = await Promise.all([
-        fetch('/api/v1/billing/plans'),
-        fetch('/api/v1/billing/subscription'),
+        authedFetch('/api/v1/billing/plans'),
+        authedFetch('/api/v1/billing/subscription'),
       ]);
       if (plansRes.ok) {
         const j = await plansRes.json();
@@ -162,7 +163,7 @@ const BillingPage: React.FC = () => {
 
   const postCheckout = async (body: any) => {
     try {
-      const res = await fetch('/api/v1/billing/checkout', {
+      const res = await authedFetch('/api/v1/billing/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -185,7 +186,7 @@ const BillingPage: React.FC = () => {
     if (!confirm('Cancelar a assinatura atual? Você perderá acesso a recursos pagos no fim do período.')) return;
     setError(null);
     try {
-      const res = await fetch('/api/v1/billing/cancel', { method: 'POST' });
+      const res = await authedFetch('/api/v1/billing/cancel', { method: 'POST' });
       if (!res.ok) throw new Error('Erro ao cancelar');
       await refresh();
     } catch (err: any) {

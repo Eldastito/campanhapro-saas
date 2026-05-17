@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { History, Loader2, RefreshCw } from 'lucide-react';
 import Card from '../ui/Card';
@@ -29,7 +30,7 @@ export const SimulationHistory: React.FC = () => {
   const fetchRuns = React.useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/scenarios/simulate');
+      const res = await authedFetch('/api/v1/scenarios/simulate');
       if (res.ok) {
         const json = await res.json();
         setRuns(json.runs ?? []);

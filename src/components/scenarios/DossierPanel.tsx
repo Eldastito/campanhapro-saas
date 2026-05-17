@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { FileText, Plus, Play, XCircle, Loader2, AlertTriangle, ShieldAlert, CheckCircle } from 'lucide-react';
 import Card from '../ui/Card';
@@ -65,7 +66,7 @@ export const DossierPanel: React.FC = () => {
   const fetchDossiers = React.useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/scenarios/dossiers');
+      const res = await authedFetch('/api/v1/scenarios/dossiers');
       if (res.ok) {
         const json = await res.json();
         setDossiers(json.dossiers ?? []);
@@ -82,7 +83,7 @@ export const DossierPanel: React.FC = () => {
   const handleAction = async (id: string, action: 'approve' | 'reject') => {
     setActionLoading(id);
     try {
-      await fetch(`/api/v1/scenarios/dossiers/${id}/${action}`, { method: 'POST' });
+      await authedFetch(`/api/v1/scenarios/dossiers/${id}/${action}`, { method: 'POST' });
       await fetchDossiers();
     } finally {
       setActionLoading(null);
@@ -97,7 +98,7 @@ export const DossierPanel: React.FC = () => {
     setSubmitting(true);
     setFormError(null);
     try {
-      const res = await fetch('/api/v1/scenarios/dossiers', {
+      const res = await authedFetch('/api/v1/scenarios/dossiers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subjectName: subjectName.trim(), subjectType, content: content.trim() }),

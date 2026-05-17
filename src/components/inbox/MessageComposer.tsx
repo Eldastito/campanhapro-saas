@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { Send, AlertCircle } from 'lucide-react';
 import Button from '../ui/Button';
@@ -19,7 +20,7 @@ const MessageComposer: React.FC<Props> = ({ channel, to, contactId, onSent }) =>
     setSending(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/channels/send', {
+      const res = await authedFetch('/api/v1/channels/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel, to, contactId, text }),

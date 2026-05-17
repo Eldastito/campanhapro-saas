@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { TrendingUp, AlertTriangle } from 'lucide-react';
 import Card from '../ui/Card';
@@ -110,7 +111,7 @@ export const MonteCarloChart: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/scenarios/simulate', {
+      const res = await authedFetch('/api/v1/scenarios/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ candidates, iterations }),

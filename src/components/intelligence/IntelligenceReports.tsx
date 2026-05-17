@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { Download, FileText, RefreshCw } from 'lucide-react';
 import Card from '../ui/Card';
@@ -88,7 +89,7 @@ const IntelligenceReports: React.FC = () => {
 
   React.useEffect(() => {
     if (!user?.campaignId) return;
-    fetch('/api/v1/intelligence/factors')
+    authedFetch('/api/v1/intelligence/factors')
       .then(r => r.ok ? r.json() : null)
       .then(json => {
         if (json) {

@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { RefreshCw, Activity, Users, ClipboardList } from 'lucide-react';
 import Card from '../ui/Card';
@@ -72,7 +73,7 @@ const IntelligenceOverview: React.FC<IntelligenceOverviewProps> = ({ onSyncCompl
   const fetchData = React.useCallback(async () => {
     if (!user?.campaignId) return;
     try {
-      const res = await fetch('/api/v1/intelligence/factors');
+      const res = await authedFetch('/api/v1/intelligence/factors');
       if (res.ok) {
         const json = await res.json();
         setState({ factors: json.factors, lastSync: json.lastSync });
@@ -91,7 +92,7 @@ const IntelligenceOverview: React.FC<IntelligenceOverviewProps> = ({ onSyncCompl
     setIsSyncing(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/intelligence/sync', {
+      const res = await authedFetch('/api/v1/intelligence/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: user.campaignId }),

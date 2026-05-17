@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import {
   Loader2, Plus, Pencil, Trash2, ShieldAlert, Save, X, AlertTriangle,
@@ -82,7 +83,7 @@ const AdminPlansPanel: React.FC = () => {
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/billing/admin/plans', { headers: await authHeaders() });
+      const res = await authedFetch('/api/v1/billing/admin/plans', { headers: await authHeaders() });
       if (res.status === 403) {
         setError('Acesso restrito: somente Supreme Admin pode editar o catálogo de planos.');
         setPlans([]);
@@ -137,7 +138,7 @@ const AdminPlansPanel: React.FC = () => {
     if (!confirm(`Desativar o plano "${planId}"? Ele não aparecerá mais para novos clientes.`)) return;
     setError(null);
     try {
-      const res = await fetch(`/api/v1/billing/admin/plans/${planId}`, {
+      const res = await authedFetch(`/api/v1/billing/admin/plans/${planId}`, {
         method: 'DELETE', headers: await authHeaders(),
       });
       const json = await res.json();

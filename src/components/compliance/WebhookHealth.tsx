@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { Webhook, CheckCircle, XCircle, RefreshCw, Loader2 } from 'lucide-react';
 import Card from '../ui/Card';
@@ -20,7 +21,7 @@ export const WebhookHealth: React.FC = () => {
   const fetchEvents = React.useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/observability/webhooks');
+      const res = await authedFetch('/api/v1/observability/webhooks');
       if (res.ok) {
         const json = await res.json();
         setEvents(json.events ?? []);

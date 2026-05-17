@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { Network, Plus, Trash2, Save, Loader2 } from 'lucide-react';
 import Card from '../ui/Card';
@@ -139,7 +140,7 @@ export const PoliticalGraph: React.FC = () => {
   const fetchHistory = React.useCallback(async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch('/api/v1/scenarios/graphs');
+      const res = await authedFetch('/api/v1/scenarios/graphs');
       if (res.ok) {
         const json = await res.json();
         setHistory(json.graphs ?? []);
@@ -172,7 +173,7 @@ export const PoliticalGraph: React.FC = () => {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/scenarios/graphs', {
+      const res = await authedFetch('/api/v1/scenarios/graphs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodes, edges, label: graphLabel }),

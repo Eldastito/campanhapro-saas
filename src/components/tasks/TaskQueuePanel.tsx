@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import {
   Clock, CheckCircle, XCircle, AlertTriangle, Play,
@@ -133,7 +134,7 @@ const TaskQueuePanel: React.FC = () => {
     if (!user?.campaignId) return;
     setIsLoading(true);
     try {
-      const res = await fetch('/api/v1/paperclip/tasks');
+      const res = await authedFetch('/api/v1/paperclip/tasks');
       if (res.ok) {
         const json = await res.json();
         setTasks(json.tasks ?? []);
@@ -150,7 +151,7 @@ const TaskQueuePanel: React.FC = () => {
   const callAction = async (taskId: string, action: 'approve' | 'reject' | 'retry') => {
     setActionLoading(taskId);
     try {
-      await fetch(`/api/v1/paperclip/tasks/${taskId}/${action}`, { method: 'POST' });
+      await authedFetch(`/api/v1/paperclip/tasks/${taskId}/${action}`, { method: 'POST' });
       await fetchTasks();
     } finally {
       setActionLoading(null);

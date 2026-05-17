@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import {
   ShieldCheck, AlertTriangle, CheckCircle, Activity,
@@ -72,8 +73,8 @@ export const ComplianceOverview: React.FC = () => {
     setLoading(true);
     try {
       const [s, h] = await Promise.all([
-        fetch('/api/v1/observability/compliance').then(r => r.ok ? r.json() : null),
-        fetch('/api/v1/observability/health').then(r => r.ok ? r.json() : null),
+        authedFetch('/api/v1/observability/compliance').then(r => r.ok ? r.json() : null),
+        authedFetch('/api/v1/observability/health').then(r => r.ok ? r.json() : null),
       ]);
       setSummary(s);
       setHealth(h);

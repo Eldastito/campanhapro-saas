@@ -1,3 +1,4 @@
+import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import { RefreshCw, TrendingUp, AlertCircle, Zap, ShieldAlert } from 'lucide-react';
 import Card from '../ui/Card';
@@ -74,7 +75,7 @@ const IntelligencePanel: React.FC = () => {
   const fetchFactors = React.useCallback(async () => {
     if (!user?.campaignId) return;
     try {
-      const res = await fetch('/api/v1/intelligence/factors', {
+      const res = await authedFetch('/api/v1/intelligence/factors', {
         headers: { 'Content-Type': 'application/json' },
       });
       if (res.ok) {
@@ -95,7 +96,7 @@ const IntelligencePanel: React.FC = () => {
     setIsSyncing(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/intelligence/sync', {
+      const res = await authedFetch('/api/v1/intelligence/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaignId: user.campaignId }),
