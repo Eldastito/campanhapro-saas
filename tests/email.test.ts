@@ -116,8 +116,8 @@ describe('emailService — provider integration', () => {
     assert.equal(rows[0].template, 'welcome');
     assert.equal(rows[0].status, 'sent');
     assert.equal(rows[0].provider, 'stub');
-    assert.equal(rows[0].campaign_id, CAMPAIGN);
-    assert.equal(rows[0].idempotency_key, `welcome:${CAMPAIGN}`);
+    assert.equal(rows[0].campaignId, CAMPAIGN);
+    assert.equal(rows[0].idempotencyKey, `welcome:${CAMPAIGN}`);
   });
 
   test('idempotency: second send with same key skips delivery', async () => {
@@ -170,7 +170,7 @@ describe('emailService — provider integration', () => {
       subscriptionId: 'sub_1',
     });
     const rows = (sb as any)._store.get('email_log');
-    assert.equal(rows[0].idempotency_key, 'subscription_canceled:sub_1');
+    assert.equal(rows[0].idempotencyKey, 'subscription_canceled:sub_1');
   });
 
   test('provider error is logged with status=failed (never throws)', async () => {

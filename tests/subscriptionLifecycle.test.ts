@@ -17,9 +17,9 @@ const days = (d: number) => d * 24 * 60 * 60 * 1000;
 function freshSupabase(overrides: Record<string, any[]> = {}) {
   return createMockSupabase({
     plans: [
-      { id: 'free', name: 'Gratuito', monthly_cents: 0, active: true,
+      { id: 'free', name: 'Gratuito', monthlyCents: 0, active: true,
         features: ['dashboard', 'crm'], limits: {} },
-      { id: 'pro', name: 'Pro', monthly_cents: 29900, active: true,
+      { id: 'pro', name: 'Pro', monthlyCents: 29900, active: true,
         features: ['dashboard', 'crm', 'ai_agents'], limits: {} },
     ],
     subscriptions: [],
@@ -41,12 +41,12 @@ describe('runLifecycleSweep — reminders', () => {
     const dueIn3 = new Date(NOW.getTime() + days(3)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'active',
-        current_period_start: NOW.toISOString(),
-        current_period_end: dueIn3,
-        updated_at: NOW.toISOString(),
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'active',
+        currentPeriodStart: NOW.toISOString(),
+        currentPeriodEnd: dueIn3,
+        updatedAt: NOW.toISOString(),
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
 
     const result = await runLifecycleSweep(sb, config, NOW);
@@ -56,19 +56,19 @@ describe('runLifecycleSweep — reminders', () => {
     const reminder = emails.find((e: any) => e.template === 'payment_upcoming');
     assert.ok(reminder, 'reminder email logged');
     assert.equal(reminder.status, 'sent');
-    assert.match(reminder.idempotency_key, /^payment_upcoming:s1:/);
+    assert.match(reminder.idempotencyKey, /^payment_upcoming:s1:/);
   });
 
   test('sends reminder 1 day before current_period_end', async () => {
     const dueIn1 = new Date(NOW.getTime() + days(1)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'active',
-        current_period_start: NOW.toISOString(),
-        current_period_end: dueIn1,
-        updated_at: NOW.toISOString(),
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'active',
+        currentPeriodStart: NOW.toISOString(),
+        currentPeriodEnd: dueIn1,
+        updatedAt: NOW.toISOString(),
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
 
     const result = await runLifecycleSweep(sb, config, NOW);
@@ -79,11 +79,11 @@ describe('runLifecycleSweep — reminders', () => {
     const dueIn3 = new Date(NOW.getTime() + days(3)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'free', status: 'active',
-        current_period_start: NOW.toISOString(),
-        current_period_end: dueIn3, updated_at: NOW.toISOString(),
+        id: 's1', campaignId: 'c1', planId: 'free', status: 'active',
+        currentPeriodStart: NOW.toISOString(),
+        currentPeriodEnd: dueIn3, updatedAt: NOW.toISOString(),
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
     const result = await runLifecycleSweep(sb, config, NOW);
     assert.equal(result.remindersSent, 0, 'free plans never trigger reminders');
@@ -93,11 +93,11 @@ describe('runLifecycleSweep — reminders', () => {
     const dueIn5 = new Date(NOW.getTime() + days(5)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'active',
-        current_period_start: NOW.toISOString(),
-        current_period_end: dueIn5, updated_at: NOW.toISOString(),
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'active',
+        currentPeriodStart: NOW.toISOString(),
+        currentPeriodEnd: dueIn5, updatedAt: NOW.toISOString(),
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
     const result = await runLifecycleSweep(sb, config, NOW);
     assert.equal(result.remindersSent, 0);
@@ -107,11 +107,11 @@ describe('runLifecycleSweep — reminders', () => {
     const dueIn3 = new Date(NOW.getTime() + days(3)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'active',
-        current_period_start: NOW.toISOString(),
-        current_period_end: dueIn3, updated_at: NOW.toISOString(),
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'active',
+        currentPeriodStart: NOW.toISOString(),
+        currentPeriodEnd: dueIn3, updatedAt: NOW.toISOString(),
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
 
     await runLifecycleSweep(sb, config, NOW);
@@ -128,27 +128,27 @@ describe('runLifecycleSweep — auto-downgrade', () => {
     const longAgo = new Date(NOW.getTime() - days(10)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'past_due',
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'past_due',
         features: ['dashboard', 'crm', 'ai_agents'],
-        current_period_start: longAgo,
-        current_period_end: longAgo,
-        updated_at: longAgo,
+        currentPeriodStart: longAgo,
+        currentPeriodEnd: longAgo,
+        updatedAt: longAgo,
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
 
     const result = await runLifecycleSweep(sb, config, NOW);
     assert.equal(result.downgraded, 1);
 
     const sub = (sb as any)._store.get('subscriptions')[0];
-    assert.equal(sub.plan_id, 'free', 'plan id changed to free');
+    assert.equal(sub.planId, 'free', 'plan id changed to free');
     assert.equal(sub.status, 'active', 'status flipped back to active on free plan');
     assert.deepEqual(sub.features, ['dashboard', 'crm']);
 
     const emails = (sb as any)._store.get('email_log');
     const downgrade = emails.find((e: any) => e.template === 'subscription_downgraded');
     assert.ok(downgrade, 'downgrade email sent');
-    assert.match(downgrade.idempotency_key, /^subscription_downgraded:s1/);
+    assert.match(downgrade.idempotencyKey, /^subscription_downgraded:s1/);
 
     const audits = (sb as any)._store.get('audit_logs');
     assert.ok(audits.find((a: any) => a.action === 'lifecycle.downgrade'));
@@ -158,30 +158,30 @@ describe('runLifecycleSweep — auto-downgrade', () => {
     const recent = new Date(NOW.getTime() - days(3)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'past_due',
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'past_due',
         features: ['dashboard', 'crm', 'ai_agents'],
-        current_period_start: recent, current_period_end: recent,
-        updated_at: recent,
+        currentPeriodStart: recent, currentPeriodEnd: recent,
+        updatedAt: recent,
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
 
     const result = await runLifecycleSweep(sb, config, NOW);
     assert.equal(result.downgraded, 0);
     const sub = (sb as any)._store.get('subscriptions')[0];
-    assert.equal(sub.plan_id, 'pro', 'plan unchanged within grace period');
+    assert.equal(sub.planId, 'pro', 'plan unchanged within grace period');
   });
 
   test('downgrade is idempotent across re-runs', async () => {
     const longAgo = new Date(NOW.getTime() - days(10)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'past_due',
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'past_due',
         features: ['dashboard', 'crm', 'ai_agents'],
-        current_period_start: longAgo, current_period_end: longAgo,
-        updated_at: longAgo,
+        currentPeriodStart: longAgo, currentPeriodEnd: longAgo,
+        updatedAt: longAgo,
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com', name: 'Admin' }],
     });
 
     const r1 = await runLifecycleSweep(sb, config, NOW);
@@ -200,19 +200,19 @@ describe('runLifecycleSweep — expired canceled', () => {
     const expired = new Date(NOW.getTime() - days(2)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'canceled',
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'canceled',
         features: ['dashboard', 'crm', 'ai_agents'],
-        current_period_start: expired, current_period_end: expired,
-        updated_at: expired,
+        currentPeriodStart: expired, currentPeriodEnd: expired,
+        updatedAt: expired,
       }],
-      users: [{ id: 'u1', campaign_id: 'c1', type: 'Admin', email: 'admin@c1.com' }],
+      users: [{ id: 'u1', campaignId: 'c1', type: 'Admin', email: 'admin@c1.com' }],
     });
 
     const result = await runLifecycleSweep(sb, config, NOW);
     assert.equal(result.canceledExpired, 1);
 
     const sub = (sb as any)._store.get('subscriptions')[0];
-    assert.equal(sub.plan_id, 'free');
+    assert.equal(sub.planId, 'free');
     assert.equal(sub.status, 'active');
   });
 
@@ -220,9 +220,9 @@ describe('runLifecycleSweep — expired canceled', () => {
     const future = new Date(NOW.getTime() + days(2)).toISOString();
     const sb = freshSupabase({
       subscriptions: [{
-        id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'canceled',
-        features: [], current_period_start: NOW.toISOString(),
-        current_period_end: future, updated_at: NOW.toISOString(),
+        id: 's1', campaignId: 'c1', planId: 'pro', status: 'canceled',
+        features: [], currentPeriodStart: NOW.toISOString(),
+        currentPeriodEnd: future, updatedAt: NOW.toISOString(),
       }],
     });
 
@@ -241,7 +241,7 @@ describe('runLifecycleSweep — overall', () => {
     const audits = (sb as any)._store.get('audit_logs');
     const sweep = audits.find((a: any) => a.action === 'lifecycle.sweep');
     assert.ok(sweep);
-    assert.equal(sweep.actor_type, 'system');
+    assert.equal(sweep.actorType, 'system');
   });
 });
 

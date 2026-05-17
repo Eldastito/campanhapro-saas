@@ -13,17 +13,17 @@ function freshSupabase() {
   return createMockSupabase({
     plans: [
       {
-        id: 'free', name: 'Gratuito', monthly_cents: 0, active: true,
+        id: 'free', name: 'Gratuito', monthlyCents: 0, active: true,
         features: ['dashboard', 'crm'],
         limits: { contacts: 100, ai_budget_cents: 0, team_users: 2, messages_per_month: 0 },
       },
       {
-        id: 'pro', name: 'Pro', monthly_cents: 29900, active: true,
+        id: 'pro', name: 'Pro', monthlyCents: 29900, active: true,
         features: ['dashboard', 'crm', 'ai_agents'],
         limits: { contacts: 10000, ai_budget_cents: 50000, team_users: 25, messages_per_month: 5000 },
       },
       {
-        id: 'enterprise', name: 'Enterprise', monthly_cents: 99900, active: true,
+        id: 'enterprise', name: 'Enterprise', monthlyCents: 99900, active: true,
         features: ['dashboard', 'crm', 'ai_agents', 'scenarios'],
         limits: { contacts: -1, ai_budget_cents: -1, team_users: -1, messages_per_month: -1 },
       },

@@ -57,8 +57,8 @@ describe('Cross-campaign isolation', () => {
   test('GET /scenarios/dossiers returns only own-campaign rows', async () => {
     const supabase = createMockSupabase({
       dossiers: [
-        { id: 'd1', campaign_id: CAMPAIGN_A, subject_name: 'A', subject_type: 'opponent', status: 'pending_approval', content: 'x', created_at: '2026-05-15' },
-        { id: 'd2', campaign_id: CAMPAIGN_B, subject_name: 'B', subject_type: 'opponent', status: 'pending_approval', content: 'x', created_at: '2026-05-15' },
+        { id: 'd1', campaignId: CAMPAIGN_A, subjectName: 'A', subjectType: 'opponent', status: 'pending_approval', content: 'x', createdAt: '2026-05-15' },
+        { id: 'd2', campaignId: CAMPAIGN_B, subjectName: 'B', subjectType: 'opponent', status: 'pending_approval', content: 'x', createdAt: '2026-05-15' },
       ],
     });
     const app = buildAppWithUser(CAMPAIGN_A, supabase);
@@ -71,7 +71,7 @@ describe('Cross-campaign isolation', () => {
   test('approve dossier from another campaign is a no-op (no leak)', async () => {
     const supabase = createMockSupabase({
       dossiers: [
-        { id: 'foreign', campaign_id: CAMPAIGN_B, subject_name: 'B', subject_type: 'opponent', status: 'pending_approval', content: 'x' },
+        { id: 'foreign', campaignId: CAMPAIGN_B, subjectName: 'B', subjectType: 'opponent', status: 'pending_approval', content: 'x' },
       ],
     });
     const app = buildAppWithUser(CAMPAIGN_A, supabase);
@@ -85,8 +85,8 @@ describe('Cross-campaign isolation', () => {
   test('GET /scenarios/simulate (history) returns only own-campaign runs', async () => {
     const supabase = createMockSupabase({
       simulation_runs: [
-        { id: 's1', campaign_id: CAMPAIGN_A, iterations: 1000, candidates_input: [], results_summary: [], created_at: '2026-05-15' },
-        { id: 's2', campaign_id: CAMPAIGN_B, iterations: 1000, candidates_input: [], results_summary: [], created_at: '2026-05-15' },
+        { id: 's1', campaignId: CAMPAIGN_A, iterations: 1000, candidatesInput: [], resultsSummary: [], createdAt: '2026-05-15' },
+        { id: 's2', campaignId: CAMPAIGN_B, iterations: 1000, candidatesInput: [], resultsSummary: [], createdAt: '2026-05-15' },
       ],
     });
     const app = buildAppWithUser(CAMPAIGN_A, supabase);
@@ -99,8 +99,8 @@ describe('Cross-campaign isolation', () => {
   test('observability /audit returns only own-campaign log lines', async () => {
     const supabase = createMockSupabase({
       audit_logs: [
-        { id: 'a1', campaign_id: CAMPAIGN_A, action: 'dossier.approve', actor_id: 'u1', actor_type: 'user', resource_type: 'dossier', resource_id: 'd1', severity: 'warn', metadata: {}, trace_id: 't1', created_at: '2026-05-15' },
-        { id: 'a2', campaign_id: CAMPAIGN_B, action: 'dossier.approve', actor_id: 'u2', actor_type: 'user', resource_type: 'dossier', resource_id: 'd2', severity: 'warn', metadata: {}, trace_id: 't2', created_at: '2026-05-15' },
+        { id: 'a1', campaignId: CAMPAIGN_A, action: 'dossier.approve', actorId: 'u1', actorType: 'user', resourceType: 'dossier', resourceId: 'd1', severity: 'warn', metadata: {}, traceId: 't1', createdAt: '2026-05-15' },
+        { id: 'a2', campaignId: CAMPAIGN_B, action: 'dossier.approve', actorId: 'u2', actorType: 'user', resourceType: 'dossier', resourceId: 'd2', severity: 'warn', metadata: {}, traceId: 't2', createdAt: '2026-05-15' },
       ],
       campaigns: [],
     });

@@ -46,10 +46,10 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       const inserted = state.insertRows.map(r => ({
         id: r.id ?? cryptoRandomId(),
         // simulate DB defaults — only set if caller didn't provide
-        created_at: r.created_at ?? nowIso,
-        updated_at: r.updated_at ?? nowIso,
-        recorded_at: r.recorded_at ?? nowIso,
-        received_at: r.received_at ?? nowIso,
+        createdAt: r.createdAt ?? nowIso,
+        updatedAt: r.updatedAt ?? nowIso,
+        recordedAt: r.recordedAt ?? nowIso,
+        receivedAt: r.receivedAt ?? nowIso,
         ...r,
       }));
       store.set(table, [...rows, ...inserted]);

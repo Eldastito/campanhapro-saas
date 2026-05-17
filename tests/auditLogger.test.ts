@@ -4,7 +4,7 @@ import { audit, actorFromRequest } from '../src/server/modules/observability/aud
 import { createMockSupabase } from './helpers/mockSupabase';
 
 describe('auditLogger', () => {
-  test('writes to audit_logs with snake_case columns and defaults', async () => {
+  test('writes to audit_logs with camelCase columns and defaults', async () => {
     const supabase = createMockSupabase({ audit_logs: [] });
     await audit(supabase, {
       campaignId: 'c1',
@@ -17,11 +17,11 @@ describe('auditLogger', () => {
     });
     const rows = (supabase as any)._store.get('audit_logs');
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].campaign_id, 'c1');
-    assert.equal(rows[0].actor_id, 'u1');
-    assert.equal(rows[0].actor_type, 'user');
+    assert.equal(rows[0].campaignId, 'c1');
+    assert.equal(rows[0].actorId, 'u1');
+    assert.equal(rows[0].actorType, 'user');
     assert.equal(rows[0].action, 'dossier.approve');
-    assert.equal(rows[0].resource_type, 'dossier');
+    assert.equal(rows[0].resourceType, 'dossier');
     assert.equal(rows[0].severity, 'warn');
     assert.deepEqual(rows[0].metadata, { foo: 'bar' });
   });
