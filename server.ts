@@ -29,6 +29,8 @@ import { createPaymentWebhookRouter } from './src/server/modules/billing/payment
 import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
 import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
 import { createTeamInvitesRouter, createTeamInvitesPublicRouter } from './src/server/modules/team/teamInvitesRouter';
+import { createGoalsRouter } from './src/server/modules/goals/goalsRouter';
+import { createRoutinesRouter } from './src/server/modules/routines/routinesRouter';
 import { requireAiBudget } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
@@ -216,6 +218,8 @@ async function startServer() {
     }, createTeamInvitesPublicRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
     app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, createScenariosRouter(supabaseAdmin));
+    app.use('/api/v1/goals', requireAuth, mutationLimiter, createGoalsRouter(supabaseAdmin));
+    app.use('/api/v1/routines', requireAuth, mutationLimiter, createRoutinesRouter(supabaseAdmin));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
     const obsRouter = createObservabilityRouter(supabaseAdmin);
     app.use('/api/v1/observability', (req, res, next) => {
