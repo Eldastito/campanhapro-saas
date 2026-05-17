@@ -69,7 +69,7 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
     }
   }, [isLoading]);
 
-  const totalVotosReais = buData.reduce((acc, b) => acc + (b.votos_candidato || 0), 0);
+  const totalVotosReais = buData.reduce((acc, b) => acc + (b.votosCandidato || 0), 0);
   const totalSecoesApuradas = buData.length;
   const totalVotosProjetados = kpis.votos;
   const divergencia = totalVotosReais - totalVotosProjetados;
@@ -107,10 +107,10 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
   });
 
   const zonas = buData.reduce<Record<string, { secoes: BUData[]; votos: number }>>((acc, bu) => {
-    const zona = bu.station_id?.split('-')[0] || 'Zona Não Identificada';
+    const zona = bu.stationId?.split('-')[0] || 'Zona Não Identificada';
     if (!acc[zona]) acc[zona] = { secoes: [], votos: 0 };
     acc[zona].secoes.push(bu);
-    acc[zona].votos += bu.votos_candidato || 0;
+    acc[zona].votos += bu.votosCandidato || 0;
     return acc;
   }, {});
 
@@ -276,13 +276,13 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                   <tbody className="divide-y divide-slate-200">
                     {buData.slice(0, 20).map((bu, i) => (
                       <tr key={bu.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                        <td className="px-6 py-4 font-bold text-slate-700">{bu.station_id}</td>
-                        <td className="px-6 py-4 text-center font-mono font-black text-sky-700">{bu.votos_candidato}</td>
-                        <td className="px-6 py-4 text-center font-mono text-slate-600">{bu.votos_total_secao}</td>
+                        <td className="px-6 py-4 font-bold text-slate-700">{bu.stationId}</td>
+                        <td className="px-6 py-4 text-center font-mono font-black text-sky-700">{bu.votosCandidato}</td>
+                        <td className="px-6 py-4 text-center font-mono text-slate-600">{bu.votosTotalSecao}</td>
                         <td className="px-6 py-4 text-center">
                           <span className="font-bold text-emerald-700">
-                            {bu.votos_total_secao > 0
-                              ? `${((bu.votos_candidato / bu.votos_total_secao) * 100).toFixed(1)}%`
+                            {bu.votosTotalSecao > 0
+                              ? `${((bu.votosCandidato / bu.votosTotalSecao) * 100).toFixed(1)}%`
                               : '—'}
                           </span>
                         </td>
@@ -297,11 +297,11 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                       <td className="px-6 py-4 uppercase text-xs tracking-wider">{totalSecoesApuradas} seções</td>
                       <td className="px-6 py-4 text-center font-mono text-sky-700">{totalVotosReais}</td>
                       <td className="px-6 py-4 text-center font-mono">
-                        {buData.reduce((s, b) => s + b.votos_total_secao, 0)}
+                        {buData.reduce((s, b) => s + b.votosTotalSecao, 0)}
                       </td>
                       <td className="px-6 py-4 text-center font-bold text-emerald-700">
-                        {buData.reduce((s, b) => s + b.votos_total_secao, 0) > 0
-                          ? `${((totalVotosReais / buData.reduce((s, b) => s + b.votos_total_secao, 0)) * 100).toFixed(1)}%`
+                        {buData.reduce((s, b) => s + b.votosTotalSecao, 0) > 0
+                          ? `${((totalVotosReais / buData.reduce((s, b) => s + b.votosTotalSecao, 0)) * 100).toFixed(1)}%`
                           : '—'}
                       </td>
                       <td className="px-6 py-4"></td>
@@ -501,13 +501,13 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                     <tbody className="divide-y divide-slate-200">
                       {data.secoes.map((bu, i) => (
                         <tr key={bu.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                          <td className="px-6 py-3 font-bold text-slate-700">{bu.station_id}</td>
-                          <td className="px-6 py-3 text-center font-mono font-black text-sky-700">{bu.votos_candidato}</td>
-                          <td className="px-6 py-3 text-center font-mono">{bu.votos_total_secao}</td>
+                          <td className="px-6 py-3 font-bold text-slate-700">{bu.stationId}</td>
+                          <td className="px-6 py-3 text-center font-mono font-black text-sky-700">{bu.votosCandidato}</td>
+                          <td className="px-6 py-3 text-center font-mono">{bu.votosTotalSecao}</td>
                           <td className="px-6 py-3 text-center">
-                            <span className={`font-bold ${bu.votos_total_secao > 0 && (bu.votos_candidato / bu.votos_total_secao) >= 0.5 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                              {bu.votos_total_secao > 0
-                                ? `${((bu.votos_candidato / bu.votos_total_secao) * 100).toFixed(1)}%`
+                            <span className={`font-bold ${bu.votosTotalSecao > 0 && (bu.votosCandidato / bu.votosTotalSecao) >= 0.5 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                              {bu.votosTotalSecao > 0
+                                ? `${((bu.votosCandidato / bu.votosTotalSecao) * 100).toFixed(1)}%`
                                 : '—'}
                             </span>
                           </td>
@@ -728,13 +728,13 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                     {buData.map((bu, i) => (
                       <tr key={bu.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                         <td className="px-6 py-3 text-slate-400 font-mono text-xs">{i + 1}</td>
-                        <td className="px-6 py-3 font-bold text-slate-700 font-mono">{bu.station_id}</td>
-                        <td className="px-6 py-3 text-center font-mono font-black text-sky-700">{bu.votos_candidato}</td>
-                        <td className="px-6 py-3 text-center font-mono text-slate-600">{bu.votos_total_secao}</td>
+                        <td className="px-6 py-3 font-bold text-slate-700 font-mono">{bu.stationId}</td>
+                        <td className="px-6 py-3 text-center font-mono font-black text-sky-700">{bu.votosCandidato}</td>
+                        <td className="px-6 py-3 text-center font-mono text-slate-600">{bu.votosTotalSecao}</td>
                         <td className="px-6 py-3 text-center">
-                          {bu.votos_total_secao > 0 ? (
-                            <span className={`font-bold ${(bu.votos_candidato / bu.votos_total_secao) >= 0.5 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                              {((bu.votos_candidato / bu.votos_total_secao) * 100).toFixed(1)}%
+                          {bu.votosTotalSecao > 0 ? (
+                            <span className={`font-bold ${(bu.votosCandidato / bu.votosTotalSecao) >= 0.5 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                              {((bu.votosCandidato / bu.votosTotalSecao) * 100).toFixed(1)}%
                             </span>
                           ) : '—'}
                         </td>
@@ -864,7 +864,7 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                           </span>
                         </td>
                         <td className="px-6 py-3 text-center font-mono font-bold text-sky-700">
-                          {f.votes_confirmed ?? '—'}
+                          {f.votesConfirmed ?? '—'}
                         </td>
                       </tr>
                     ))}

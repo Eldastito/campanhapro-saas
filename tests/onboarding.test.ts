@@ -55,13 +55,13 @@ describe('Onboarding', () => {
 
   test('GET /status returns bootstrapped=true when user has campaign', async () => {
     const sb = createMockSupabase({
-      users: [{ id: USER_A, campaign_id: 'c1', type: 'Admin', name: 'A', email: 'a@b.c' }],
+      users: [{ id: USER_A, campaignId: 'c1', type: 'Admin', name: 'A', email: 'a@b.c' }],
       campaigns: [],
     });
     const app = appWith(USER_A, sb);
     const res = await req(app, 'GET', '/api/v1/onboarding/status');
     assert.equal(res.body.bootstrapped, true);
-    assert.equal(res.body.user.campaign_id, 'c1');
+    assert.equal(res.body.user.campaignId, 'c1');
   });
 
   test('POST /bootstrap rejects empty campaignName', async () => {
@@ -77,7 +77,7 @@ describe('Onboarding', () => {
       users: [],
       campaigns: [],
       plans: [{
-        id: 'free', name: 'Gratuito', monthly_cents: 0, active: true,
+        id: 'free', name: 'Gratuito', monthlyCents: 0, active: true,
         features: ['dashboard', 'crm'],
         limits: { contacts: 100, ai_budget_cents: 0, team_users: 2, messages_per_month: 0 },
       }],
@@ -96,25 +96,25 @@ describe('Onboarding', () => {
     const campaigns = (sb as any)._store.get('campaigns');
     assert.equal(campaigns.length, 1);
     assert.equal(campaigns[0].name, 'Campanha Teste 2026');
-    assert.equal(campaigns[0].candidate_name, 'João Silva');
-    assert.equal(campaigns[0].created_by, USER_A);
+    assert.equal(campaigns[0].candidateName, 'João Silva');
+    assert.equal(campaigns[0].createdBy, USER_A);
 
     const users = (sb as any)._store.get('users');
     assert.equal(users.length, 1);
     assert.equal(users[0].type, 'Admin');
-    assert.equal(users[0].campaign_id, campaigns[0].id);
+    assert.equal(users[0].campaignId, campaigns[0].id);
 
     const subs = (sb as any)._store.get('subscriptions');
     assert.equal(subs.length, 1);
-    assert.equal(subs[0].plan_id, 'free');
+    assert.equal(subs[0].planId, 'free');
   });
 
   test('POST /bootstrap is idempotent — second call returns alreadyBootstrapped', async () => {
     const sb = createMockSupabase({
-      users: [{ id: USER_A, campaign_id: 'existing-campaign', type: 'Admin', name: 'A', email: 'a@b.c' }],
+      users: [{ id: USER_A, campaignId: 'existing-campaign', type: 'Admin', name: 'A', email: 'a@b.c' }],
       campaigns: [{ id: 'existing-campaign', name: 'Existing' }],
       plans: [{
-        id: 'free', name: 'Gratuito', monthly_cents: 0, active: true,
+        id: 'free', name: 'Gratuito', monthlyCents: 0, active: true,
         features: [], limits: {},
       }],
       subscriptions: [],
@@ -133,7 +133,7 @@ describe('Onboarding', () => {
   test('two different users get isolated campaigns', async () => {
     const sb = createMockSupabase({
       users: [], campaigns: [], subscriptions: [],
-      plans: [{ id: 'free', name: 'Gratuito', monthly_cents: 0, active: true, features: [], limits: {} }],
+      plans: [{ id: 'free', name: 'Gratuito', monthlyCents: 0, active: true, features: [], limits: {} }],
     });
 
     const r1 = await req(appWith(USER_A, sb), 'POST', '/api/v1/onboarding/bootstrap', { campaignName: 'A' });
@@ -141,7 +141,7 @@ describe('Onboarding', () => {
 
     assert.notEqual(r1.body.campaignId, r2.body.campaignId);
     const users = (sb as any)._store.get('users');
-    assert.equal(users.find((u: any) => u.id === USER_A).campaign_id, r1.body.campaignId);
-    assert.equal(users.find((u: any) => u.id === USER_B).campaign_id, r2.body.campaignId);
+    assert.equal(users.find((u: any) => u.id === USER_A).campaignId, r1.body.campaignId);
+    assert.equal(users.find((u: any) => u.id === USER_B).campaignId, r2.body.campaignId);
   });
 });

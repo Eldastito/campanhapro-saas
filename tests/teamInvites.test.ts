@@ -21,7 +21,7 @@ const INVITEE = {
 function freshSupabase(overrides: Record<string, any[]> = {}) {
   return createMockSupabase({
     users: [
-      { id: ADMIN.id, email: 'admin@c1.com', campaign_id: 'c1', type: 'Admin', name: 'Admin João' },
+      { id: ADMIN.id, email: 'admin@c1.com', campaignId: 'c1', type: 'Admin', name: 'Admin João' },
     ],
     campaigns: [{ id: 'c1', name: 'Campanha Teste 2026' }],
     team_invites: [],
@@ -100,8 +100,8 @@ describe('POST /invites — create', () => {
   test('rejects when target email is already a member of this campaign', async () => {
     const sb = freshSupabase({
       users: [
-        { id: ADMIN.id, email: 'admin@c1.com', campaign_id: 'c1', type: 'Admin', name: 'Admin' },
-        { id: 'u2', email: 'membro@c1.com', campaign_id: 'c1', type: 'Apoiador', name: 'Já é membro' },
+        { id: ADMIN.id, email: 'admin@c1.com', campaignId: 'c1', type: 'Admin', name: 'Admin' },
+        { id: 'u2', email: 'membro@c1.com', campaignId: 'c1', type: 'Apoiador', name: 'Já é membro' },
       ],
     });
     const res = await req(authedApp(ADMIN, sb), 'POST', '/api/v1/team/invites', {
@@ -123,9 +123,9 @@ describe('POST /invites — create', () => {
     const invites = (sb as any)._store.get('team_invites');
     assert.equal(invites.length, 1);
     assert.equal(invites[0].status, 'pending');
-    assert.equal(invites[0].campaign_id, 'c1');
+    assert.equal(invites[0].campaignId, 'c1');
     assert.ok(invites[0].token);
-    assert.ok(invites[0].expires_at);
+    assert.ok(invites[0].expiresAt);
 
     const audits = (sb as any)._store.get('audit_logs');
     assert.ok(audits.find((a: any) => a.action === 'team.invite.create'));
@@ -136,12 +136,12 @@ describe('GET /invites — list', () => {
   test('returns own-campaign invites only', async () => {
     const sb = freshSupabase({
       team_invites: [
-        { id: 'i1', campaign_id: 'c1', email: 'a@c1.com', role: 'Líder', status: 'pending',
-          token: 't1', expires_at: new Date(Date.now() + 3600000).toISOString(),
-          invited_by_name: 'Admin', created_at: new Date().toISOString() },
-        { id: 'i2', campaign_id: 'OTHER', email: 'x@other.com', role: 'Líder', status: 'pending',
-          token: 't2', expires_at: new Date(Date.now() + 3600000).toISOString(),
-          invited_by_name: 'Outro', created_at: new Date().toISOString() },
+        { id: 'i1', campaignId: 'c1', email: 'a@c1.com', role: 'Líder', status: 'pending',
+          token: 't1', expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          invitedByName: 'Admin', createdAt: new Date().toISOString() },
+        { id: 'i2', campaignId: 'OTHER', email: 'x@other.com', role: 'Líder', status: 'pending',
+          token: 't2', expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          invitedByName: 'Outro', createdAt: new Date().toISOString() },
       ],
     });
     const res = await req(authedApp(ADMIN, sb), 'GET', '/api/v1/team/invites');
@@ -155,8 +155,8 @@ describe('DELETE /invites/:id — revoke', () => {
   test('Admin revokes a pending invite', async () => {
     const sb = freshSupabase({
       team_invites: [
-        { id: 'i1', campaign_id: 'c1', email: 'a@c1.com', role: 'Líder', status: 'pending',
-          token: 't1', expires_at: new Date(Date.now() + 3600000).toISOString() },
+        { id: 'i1', campaignId: 'c1', email: 'a@c1.com', role: 'Líder', status: 'pending',
+          token: 't1', expiresAt: new Date(Date.now() + 3600000).toISOString() },
       ],
     });
     const res = await req(authedApp(ADMIN, sb), 'DELETE', '/api/v1/team/invites/i1');
@@ -168,8 +168,8 @@ describe('DELETE /invites/:id — revoke', () => {
   test('cannot revoke invite from another campaign', async () => {
     const sb = freshSupabase({
       team_invites: [
-        { id: 'i1', campaign_id: 'OTHER', email: 'a@b.c', role: 'Líder', status: 'pending',
-          token: 't1', expires_at: new Date(Date.now() + 3600000).toISOString() },
+        { id: 'i1', campaignId: 'OTHER', email: 'a@b.c', role: 'Líder', status: 'pending',
+          token: 't1', expiresAt: new Date(Date.now() + 3600000).toISOString() },
       ],
     });
     const res = await req(authedApp(ADMIN, sb), 'DELETE', '/api/v1/team/invites/i1');
@@ -178,7 +178,7 @@ describe('DELETE /invites/:id — revoke', () => {
 
   test('Apoiador cannot revoke', async () => {
     const sb = freshSupabase({
-      team_invites: [{ id: 'i1', campaign_id: 'c1', status: 'pending' }],
+      team_invites: [{ id: 'i1', campaignId: 'c1', status: 'pending' }],
     });
     const res = await req(authedApp(APOIADOR, sb), 'DELETE', '/api/v1/team/invites/i1');
     assert.equal(res.status, 403);
@@ -189,9 +189,9 @@ describe('GET /invites/token/:token — public view', () => {
   test('returns public-safe view (no campaign_id, no token, no email)', async () => {
     const sb = freshSupabase({
       team_invites: [
-        { id: 'i1', campaign_id: 'c1', email: 'a@c1.com', role: 'Líder', status: 'pending',
-          token: 'abc123', expires_at: new Date(Date.now() + 3600000).toISOString(),
-          invited_by_name: 'Admin João' },
+        { id: 'i1', campaignId: 'c1', email: 'a@c1.com', role: 'Líder', status: 'pending',
+          token: 'abc123', expiresAt: new Date(Date.now() + 3600000).toISOString(),
+          invitedByName: 'Admin João' },
       ],
     });
     const res = await req(authedApp(null, sb), 'GET', '/api/v1/team/invites/token/abc123');
@@ -208,8 +208,8 @@ describe('GET /invites/token/:token — public view', () => {
   test('expired pending invite returns 410 + flips status to expired', async () => {
     const sb = freshSupabase({
       team_invites: [
-        { id: 'i1', campaign_id: 'c1', email: 'a@b.c', role: 'Líder', status: 'pending',
-          token: 'abc', expires_at: new Date(Date.now() - 3600000).toISOString() },
+        { id: 'i1', campaignId: 'c1', email: 'a@b.c', role: 'Líder', status: 'pending',
+          token: 'abc', expiresAt: new Date(Date.now() - 3600000).toISOString() },
       ],
     });
     const res = await req(authedApp(null, sb), 'GET', '/api/v1/team/invites/token/abc');
@@ -229,10 +229,10 @@ describe('POST /invites/token/:token/accept', () => {
   function ctxWithInvite(extra: any = {}) {
     return freshSupabase({
       team_invites: [{
-        id: 'i1', campaign_id: 'c1', email: 'novo@c1.com', role: 'Líder',
+        id: 'i1', campaignId: 'c1', email: 'novo@c1.com', role: 'Líder',
         status: 'pending', token: 'abc',
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
-        invited_by: ADMIN.id, invited_by_name: 'Admin João',
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        invitedBy: ADMIN.id, invitedByName: 'Admin João',
       }],
       ...extra,
     });
@@ -256,12 +256,12 @@ describe('POST /invites/token/:token/accept', () => {
     const users = (sb as any)._store.get('users');
     const member = users.find((u: any) => u.id === INVITEE.id);
     assert.ok(member);
-    assert.equal(member.campaign_id, 'c1');
+    assert.equal(member.campaignId, 'c1');
     assert.equal(member.type, 'Líder');
 
     const invite = (sb as any)._store.get('team_invites')[0];
     assert.equal(invite.status, 'accepted');
-    assert.equal(invite.accepted_by, INVITEE.id);
+    assert.equal(invite.acceptedBy, INVITEE.id);
   });
 
   test('double-accept returns 409 (CAS-style guard)', async () => {
@@ -275,8 +275,8 @@ describe('POST /invites/token/:token/accept', () => {
   test('user already in another campaign → 409', async () => {
     const sb = ctxWithInvite({
       users: [
-        { id: ADMIN.id, email: 'admin@c1.com', campaign_id: 'c1', type: 'Admin' },
-        { id: INVITEE.id, email: 'novo@c1.com', campaign_id: 'OTHER', type: 'Admin' },
+        { id: ADMIN.id, email: 'admin@c1.com', campaignId: 'c1', type: 'Admin' },
+        { id: INVITEE.id, email: 'novo@c1.com', campaignId: 'OTHER', type: 'Admin' },
       ],
     });
     const res = await req(authedApp(INVITEE, sb), 'POST', '/api/v1/team/invites/token/abc/accept');
@@ -286,8 +286,8 @@ describe('POST /invites/token/:token/accept', () => {
 
   test('expired token at accept time returns 410', async () => {
     const sb = ctxWithInvite();
-    // Manually flip expires_at to the past
-    (sb as any)._store.get('team_invites')[0].expires_at = new Date(Date.now() - 1000).toISOString();
+    // Manually flip expiresAt to the past
+    (sb as any)._store.get('team_invites')[0].expiresAt = new Date(Date.now() - 1000).toISOString();
     const res = await req(authedApp(INVITEE, sb), 'POST', '/api/v1/team/invites/token/abc/accept');
     assert.equal(res.status, 410);
     assert.equal(res.body.error, 'invite_expired');

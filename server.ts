@@ -472,7 +472,7 @@ async function startServer() {
 
   app.post('/api/agents/publish-social', requireAuth, async (req, res) => {
     try {
-      const { campaign_id: campaignIdBody, platforms, content, mediaUrl, agent_id: agentIdBody, ai_disclosure_required } = req.body;
+      const { campaign_id: campaignIdBody, platforms, content, agent_id: agentIdBody, ai_disclosure_required } = req.body;
       const userId = req.user?.id;
 
       // 1. Validar se o usuário pertence à campanha e tem permissão (Admin ou Líder)
@@ -964,7 +964,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
 
   app.post('/api/external/v1/visits', validateApiKey, async (req: any, res) => {
     try {
-      const { contactId, notes, status, gps, duration } = req.body;
+      const { contactId, notes } = req.body;
       const { data, error } = await supabaseAdmin.from('visits').insert({
         campaignId: req.campaignId,
         leaderId: contactId,

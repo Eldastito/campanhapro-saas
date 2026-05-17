@@ -43,8 +43,8 @@ async function req(app: express.Express, method: string, path: string, body?: an
 function freshSupabase(extra: Record<string, any[]> = {}) {
   return createMockSupabase({
     plans: [
-      { id: 'free', name: 'Gratuito', monthly_cents: 0, active: true, features: ['dashboard'], limits: {} },
-      { id: 'pro', name: 'Pro', monthly_cents: 29900, active: true, features: ['dashboard', 'crm'], limits: { contacts: 10000 } },
+      { id: 'free', name: 'Gratuito', monthlyCents: 0, active: true, features: ['dashboard'], limits: {} },
+      { id: 'pro', name: 'Pro', monthlyCents: 29900, active: true, features: ['dashboard', 'crm'], limits: { contacts: 10000 } },
     ],
     subscriptions: [],
     audit_logs: [],
@@ -78,8 +78,8 @@ describe('Supreme Admin · plan CRUD', () => {
   test('Supreme Admin lists all plans (including inactive)', async () => {
     const sb = freshSupabase({
       plans: [
-        { id: 'free', name: 'Gratuito', monthly_cents: 0, active: true, features: [], limits: {} },
-        { id: 'old', name: 'Legacy', monthly_cents: 100, active: false, features: [], limits: {} },
+        { id: 'free', name: 'Gratuito', monthlyCents: 0, active: true, features: [], limits: {} },
+        { id: 'old', name: 'Legacy', monthlyCents: 100, active: false, features: [], limits: {} },
       ],
     });
     const res = await req(buildApp(SUPREME, sb), 'GET', '/api/v1/billing/admin/plans');
@@ -92,13 +92,13 @@ describe('Supreme Admin · plan CRUD', () => {
     const res = await req(buildApp(SUPREME, sb), 'POST', '/api/v1/billing/admin/plans', {
       id: 'pro_anual',
       name: 'Pro Anual',
-      monthly_cents: 249900,
+      monthlyCents: 249900,
       features: ['dashboard', 'crm', 'ai_agents'],
       limits: { contacts: 10000, ai_budget_cents: 80000, team_users: 25, messages_per_month: 5000 },
     });
     assert.equal(res.status, 201);
     assert.equal(res.body.plan.id, 'pro_anual');
-    assert.equal(res.body.plan.monthly_cents, 249900);
+    assert.equal(res.body.plan.monthlyCents, 249900);
 
     // Audit row written
     const audits = (sb as any)._store.get('audit_logs');
@@ -111,7 +111,7 @@ describe('Supreme Admin · plan CRUD', () => {
     const sb = freshSupabase();
     const res = await req(buildApp(SUPREME, sb), 'POST', '/api/v1/billing/admin/plans', {
       id: 'PRO!ANUAL',
-      name: 'X', monthly_cents: 100, features: [], limits: {},
+      name: 'X', monthlyCents: 100, features: [], limits: {},
     });
     assert.equal(res.status, 400);
     assert.match(res.body.error, /invalid_id/);
@@ -120,16 +120,16 @@ describe('Supreme Admin · plan CRUD', () => {
   test('POST /admin/plans rejects negative price', async () => {
     const sb = freshSupabase();
     const res = await req(buildApp(SUPREME, sb), 'POST', '/api/v1/billing/admin/plans', {
-      id: 'cheap', name: 'X', monthly_cents: -1, features: [], limits: {},
+      id: 'cheap', name: 'X', monthlyCents: -1, features: [], limits: {},
     });
     assert.equal(res.status, 400);
-    assert.match(res.body.error, /invalid_monthly_cents/);
+    assert.match(res.body.error, /invalid_monthlyCents/);
   });
 
   test('POST /admin/plans rejects unknown limit key', async () => {
     const sb = freshSupabase();
     const res = await req(buildApp(SUPREME, sb), 'POST', '/api/v1/billing/admin/plans', {
-      id: 'evil', name: 'X', monthly_cents: 0, features: [],
+      id: 'evil', name: 'X', monthlyCents: 0, features: [],
       limits: { hacker_field: 999 },
     });
     assert.equal(res.status, 400);
@@ -140,16 +140,16 @@ describe('Supreme Admin · plan CRUD', () => {
     const sb = freshSupabase();
     const res = await req(buildApp(SUPREME, sb), 'PUT', '/api/v1/billing/admin/plans/pro', {
       name: 'Pro 2.0',
-      monthly_cents: 34900,
+      monthlyCents: 34900,
       features: ['dashboard', 'crm', 'ai_agents'],
       limits: { contacts: 15000 },
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.plan.name, 'Pro 2.0');
-    assert.equal(res.body.plan.monthly_cents, 34900);
+    assert.equal(res.body.plan.monthlyCents, 34900);
 
     const stored = (sb as any)._store.get('plans').find((p: any) => p.id === 'pro');
-    assert.equal(stored.monthly_cents, 34900);
+    assert.equal(stored.monthlyCents, 34900);
 
     const audits = (sb as any)._store.get('audit_logs');
     assert.equal(audits[0].action, 'admin.plan.update');
@@ -158,7 +158,7 @@ describe('Supreme Admin · plan CRUD', () => {
   test('DELETE /admin/plans/:id with active subscriptions returns 409', async () => {
     const sb = freshSupabase({
       subscriptions: [
-        { id: 's1', campaign_id: 'c1', plan_id: 'pro', status: 'active' },
+        { id: 's1', campaignId: 'c1', planId: 'pro', status: 'active' },
       ],
     });
     const res = await req(buildApp(SUPREME, sb), 'DELETE', '/api/v1/billing/admin/plans/pro');

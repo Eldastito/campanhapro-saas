@@ -181,6 +181,123 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
   });
 
   /**
+   * PATCH /api/v1/channels/conversations/:id
+   * Update Kanban stage, priority, or isOpen for a conversation.
+   */
+  router.patch('/conversations/:id', async (req: Request, res: Response) => {
+    try {
+      const campaignId = (req as any).user?.campaignId;
+      const { id } = req.params;
+      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const { data: convo } = await supabaseAdmin
+        .from('channel_conversations')
+        .select('id, campaignId')
+        .eq('id', id)
+        .single();
+
+      if (!convo || convo.campaignId !== campaignId) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const { stage, priority, isOpen } = req.body as Partial<{
+        stage: string; priority: string; isOpen: boolean;
+      }>;
+
+      const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+      if (stage !== undefined) updates.stage = stage;
+      if (priority !== undefined) updates.priority = priority;
+      if (isOpen !== undefined) updates.isOpen = isOpen;
+
+      const { error } = await supabaseAdmin
+        .from('channel_conversations')
+        .update(updates)
+        .eq('id', id);
+
+      if (error) throw error;
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error('[Channels] update conversation:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/v1/channels/conversations/:id/suggest
+   * AI response suggestion or thread summary — all AI calls server-side.
+   * mode: 'reply' (default) | 'summarize'
+   */
+  router.post('/conversations/:id/suggest', async (req: Request, res: Response) => {
+    try {
+      const campaignId = (req as any).user?.campaignId;
+      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      // Verify conversation belongs to this campaign before generating a suggestion
+      const { data: convo } = await supabaseAdmin
+        .from('channel_conversations')
+        .select('id, campaignId')
+        .eq('id', req.params.id)
+        .single();
+      if (!convo || convo.campaignId !== campaignId) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+      if (!OPENAI_API_KEY) return res.status(503).json({ error: 'AI não configurada' });
+
+      const { messages: msgHistory, contact, mode = 'reply' } = req.body as {
+        messages: Array<{ direction: string; body: string }>;
+        contact?: { name?: string; number?: string };
+        mode?: 'reply' | 'summarize';
+      };
+
+      const contactLabel = contact?.name || contact?.number || 'eleitor(a)';
+
+      let systemPrompt: string;
+      let userContent: string;
+
+      if (mode === 'summarize') {
+        systemPrompt = 'Você é um assistente político. Resuma o seguinte histórico de conversa em até 5 pontos objetivos em português do Brasil.';
+        userContent = (msgHistory ?? [])
+          .map(m => `[${m.direction === 'inbound' ? 'Eleitor' : 'Assessor'}]: ${m.body}`)
+          .join('\n');
+      } else {
+        systemPrompt = `Você é um assessor político respondendo mensagens de ${contactLabel} em nome da campanha. Seja cordial, objetivo e profissional. Responda em português do Brasil. Máximo 3 frases.`;
+        userContent = 'Sugira a próxima resposta baseada no histórico abaixo:\n' +
+          (msgHistory ?? []).slice(-8)
+            .map(m => `[${m.direction === 'inbound' ? 'Eleitor' : 'Assessor'}]: ${m.body}`)
+            .join('\n');
+      }
+
+      const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: process.env.AI_MODEL_CHAT_FAST || 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent },
+          ],
+          max_tokens: mode === 'summarize' ? 400 : 200,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!aiRes.ok) throw new Error(`OpenAI error ${aiRes.status}`);
+      const json = await aiRes.json() as any;
+      const suggestion = json.choices?.[0]?.message?.content ?? '';
+
+      return res.json({ suggestion });
+    } catch (err: any) {
+      console.error('[Channels] suggest:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
    * POST /api/v1/channels/consent
    * Records consent for outbound messaging (LGPD audit trail).
    */

@@ -37,7 +37,7 @@ async function sendAndLog(
       .from('email_log')
       .select('id, status')
       .eq('template', ctx.template)
-      .eq('idempotency_key', ctx.idempotencyKey)
+      .eq('idempotencyKey', ctx.idempotencyKey)
       .in('status', ['sent', 'delivered'])
       .maybeSingle();
     if (existing) {

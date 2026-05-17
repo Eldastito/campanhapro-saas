@@ -28,3 +28,4 @@ npm-debug.log*
 
 # MCP config (contém tokens sensíveis)
 .mcp.json
+paperclip/
