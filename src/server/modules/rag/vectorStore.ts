@@ -55,7 +55,7 @@ export async function search(
 
   const { data, error } = await supabase.rpc('match_knowledge_chunks', {
     query_embedding: vector,
-    campaign_id: campaignId,
+    campaignId: campaignId,
     match_count: limit,
   });
 

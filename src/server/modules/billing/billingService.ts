@@ -43,12 +43,12 @@ export async function listPlans(supabase: SupabaseClient): Promise<Plan[]> {
     .from('plans')
     .select('*')
     .eq('active', true)
-    .order('monthly_cents', { ascending: true });
+    .order('monthlyCents', { ascending: true });
   if (error) return [];
   return (data ?? []).map(row => ({
     id: row.id,
     name: row.name,
-    monthlyCents: row.monthly_cents,
+    monthlyCents: row.monthlyCents,
     features: row.features ?? [],
     limits: row.limits ?? {},
   }));
@@ -61,22 +61,22 @@ export async function getActiveSubscription(
   const { data } = await supabase
     .from('subscriptions')
     .select('*')
-    .eq('campaign_id', campaignId)
+    .eq('campaignId', campaignId)
     .in('status', ['active', 'trialing', 'past_due'])
-    .order('created_at', { ascending: false })
+    .order('createdAt', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (!data) return null;
   return {
     id: data.id,
-    campaignId: data.campaign_id,
-    planId: data.plan_id,
+    campaignId: data.campaignId,
+    planId: data.planId,
     status: data.status,
     features: data.features ?? [],
-    currentPeriodStart: data.current_period_start,
-    currentPeriodEnd: data.current_period_end,
-    stripeSubscriptionId: data.stripe_subscription_id,
-    stripeCustomerId: data.stripe_customer_id,
+    currentPeriodStart: data.currentPeriodStart,
+    currentPeriodEnd: data.currentPeriodEnd,
+    stripeSubscriptionId: data.stripeSubscriptionId,
+    stripeCustomerId: data.stripeCustomerId,
   };
 }
 
@@ -105,13 +105,13 @@ export async function subscribeCampaign(
 
   const providerColumns: Record<string, any> = {};
   if (providerInfo) {
-    providerColumns.payment_provider = providerInfo.provider;
+    providerColumns.paymentProvider = providerInfo.provider;
     if (providerInfo.provider === 'asaas') {
-      if (providerInfo.providerCustomerId) providerColumns.asaas_customer_id = providerInfo.providerCustomerId;
-      if (providerInfo.providerSubscriptionId) providerColumns.asaas_subscription_id = providerInfo.providerSubscriptionId;
+      if (providerInfo.providerCustomerId) providerColumns.asaasCustomerId = providerInfo.providerCustomerId;
+      if (providerInfo.providerSubscriptionId) providerColumns.asaasSubscriptionId = providerInfo.providerSubscriptionId;
     } else if (providerInfo.provider === 'stripe') {
-      if (providerInfo.providerCustomerId) providerColumns.stripe_customer_id = providerInfo.providerCustomerId;
-      if (providerInfo.providerSubscriptionId) providerColumns.stripe_subscription_id = providerInfo.providerSubscriptionId;
+      if (providerInfo.providerCustomerId) providerColumns.stripeCustomerId = providerInfo.providerCustomerId;
+      if (providerInfo.providerSubscriptionId) providerColumns.stripeSubscriptionId = providerInfo.providerSubscriptionId;
     }
   }
 
@@ -121,12 +121,12 @@ export async function subscribeCampaign(
     const { data, error } = await supabase
       .from('subscriptions')
       .update({
-        plan_id: planId,
+        planId: planId,
         features: plan.features,
-        current_period_start: periodStart,
-        current_period_end: periodEnd,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
         status: 'active',
-        updated_at: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         ...providerColumns,
       })
       .eq('id', existing.id)
@@ -139,11 +139,11 @@ export async function subscribeCampaign(
   const { data, error } = await supabase
     .from('subscriptions')
     .insert({
-      campaign_id: campaignId,
-      plan_id: planId,
+      campaignId: campaignId,
+      planId: planId,
       features: plan.features,
-      current_period_start: periodStart,
-      current_period_end: periodEnd,
+      currentPeriodStart: periodStart,
+      currentPeriodEnd: periodEnd,
       status: 'active',
       ...providerColumns,
     })
@@ -159,8 +159,8 @@ export async function cancelSubscription(
 ): Promise<void> {
   await supabase
     .from('subscriptions')
-    .update({ status: 'canceled', updated_at: new Date().toISOString() })
-    .eq('campaign_id', campaignId)
+    .update({ status: 'canceled', updatedAt: new Date().toISOString() })
+    .eq('campaignId', campaignId)
     .in('status', ['active', 'trialing', 'past_due']);
 }
 
@@ -177,10 +177,10 @@ export async function recordUsage(
 ): Promise<void> {
   try {
     await supabase.from('usage_records').insert({
-      campaign_id: params.campaignId,
+      campaignId: params.campaignId,
       metric: params.metric,
       quantity: params.quantity ?? 1,
-      cost_cents: params.costCents ?? 0,
+      costCents: params.costCents ?? 0,
       metadata: params.metadata ?? {},
     });
   } catch (err) {
@@ -198,9 +198,9 @@ export async function getUsageForCurrentPeriod(
 
   const { data } = await supabase
     .from('usage_records')
-    .select('metric, quantity, cost_cents')
-    .eq('campaign_id', campaignId)
-    .gte('recorded_at', periodStart);
+    .select('metric, quantity, "costCents"')
+    .eq('campaignId', campaignId)
+    .gte('recordedAt', periodStart);
 
   const rows = data ?? [];
   const aiRows = rows.filter(r => r.metric === 'ai_call');
@@ -208,7 +208,7 @@ export async function getUsageForCurrentPeriod(
     campaignId,
     periodStart,
     periodEnd,
-    aiCostCents: aiRows.reduce((s, r) => s + (r.cost_cents ?? 0), 0),
+    aiCostCents: aiRows.reduce((s, r) => s + (r.costCents ?? 0), 0),
     aiCalls: aiRows.reduce((s, r) => s + (r.quantity ?? 0), 0),
     messagesOutbound: rows.filter(r => r.metric === 'message_outbound').reduce((s, r) => s + (r.quantity ?? 0), 0),
     simulations: rows.filter(r => r.metric === 'simulation').reduce((s, r) => s + (r.quantity ?? 0), 0),
@@ -238,13 +238,13 @@ export async function isWithinAiBudget(
 function mapSubscription(row: any): Subscription {
   return {
     id: row.id,
-    campaignId: row.campaign_id,
-    planId: row.plan_id,
+    campaignId: row.campaignId,
+    planId: row.planId,
     status: row.status,
     features: row.features ?? [],
-    currentPeriodStart: row.current_period_start,
-    currentPeriodEnd: row.current_period_end,
-    stripeSubscriptionId: row.stripe_subscription_id,
-    stripeCustomerId: row.stripe_customer_id,
+    currentPeriodStart: row.currentPeriodStart,
+    currentPeriodEnd: row.currentPeriodEnd,
+    stripeSubscriptionId: row.stripeSubscriptionId,
+    stripeCustomerId: row.stripeCustomerId,
   };
 }

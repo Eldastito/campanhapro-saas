@@ -32,8 +32,8 @@ function publicInviteView(row: any) {
   return {
     campaignName: row._campaignName ?? null,
     role: row.role,
-    invitedByName: row.invited_by_name,
-    expiresAt: row.expires_at,
+    invitedByName: row.invitedByName,
+    expiresAt: row.expiresAt,
     status: row.status,
   };
 }
@@ -70,7 +70,7 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
       .from('users')
       .select('id')
       .eq('email', normalizedEmail)
-      .eq('campaign_id', campaignId)
+      .eq('campaignId', campaignId)
       .maybeSingle();
     if (existingMember) {
       return res.status(409).json({ error: 'already_a_member' });
@@ -90,16 +90,16 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
     const { data: created, error } = await supabase
       .from('team_invites')
       .insert({
-        campaign_id: campaignId,
+        campaignId: campaignId,
         email: normalizedEmail,
         role,
         token,
         status: 'pending',
-        invited_by: userId,
-        invited_by_name: inviterName,
-        expires_at: expiresAt,
+        invitedBy: userId,
+        invitedByName: inviterName,
+        expiresAt: expiresAt,
       })
-      .select('id, email, role, expires_at, status, created_at')
+      .select('id, email, role, "expiresAt", status, "createdAt"')
       .single();
 
     if (error) {
@@ -143,9 +143,9 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
 
     const { data, error } = await supabase
       .from('team_invites')
-      .select('id, email, role, status, expires_at, accepted_at, invited_by_name, created_at')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false })
+      .select('id, email, role, status, "expiresAt", "acceptedAt", "invitedByName", "createdAt"')
+      .eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false })
       .limit(200);
 
     if (error) return res.status(500).json({ error: error.message });
@@ -163,9 +163,9 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
 
     const { data: updated, error } = await supabase
       .from('team_invites')
-      .update({ status: 'revoked', updated_at: new Date().toISOString() })
+      .update({ status: 'revoked', updatedAt: new Date().toISOString() })
       .eq('id', req.params.id)
-      .eq('campaign_id', campaignId)
+      .eq('campaignId', campaignId)
       .eq('status', 'pending')
       .select('id')
       .maybeSingle();
@@ -198,13 +198,13 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
   router.get('/invites/token/:token', async (req: Request, res: Response) => {
     const { data: invite } = await supabase
       .from('team_invites')
-      .select('id, campaign_id, email, role, status, expires_at, invited_by_name')
+      .select('id, "campaignId", email, role, status, "expiresAt", "invitedByName"')
       .eq('token', req.params.token)
       .maybeSingle();
     if (!invite) return res.status(404).json({ error: 'invite_not_found' });
 
-    // Expire on read if past expires_at
-    if (invite.status === 'pending' && new Date(invite.expires_at).getTime() < Date.now()) {
+    // Expire on read if past expiresAt
+    if (invite.status === 'pending' && new Date(invite.expiresAt).getTime() < Date.now()) {
       await supabase.from('team_invites').update({ status: 'expired' }).eq('id', invite.id);
       invite.status = 'expired';
     }
@@ -217,7 +217,7 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
     const { data: campaign } = await supabase
       .from('campaigns')
       .select('name')
-      .eq('id', invite.campaign_id)
+      .eq('id', invite.campaignId)
       .maybeSingle();
 
     return res.json({
@@ -233,13 +233,13 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
 
     const { data: invite } = await supabase
       .from('team_invites')
-      .select('id, campaign_id, email, role, status, expires_at')
+      .select('id, "campaignId", email, role, status, "expiresAt"')
       .eq('token', req.params.token)
       .maybeSingle();
     if (!invite) return res.status(404).json({ error: 'invite_not_found' });
 
     if (invite.status !== 'pending') return res.status(410).json({ error: `invite_${invite.status}` });
-    if (new Date(invite.expires_at).getTime() < Date.now()) {
+    if (new Date(invite.expiresAt).getTime() < Date.now()) {
       await supabase.from('team_invites').update({ status: 'expired' }).eq('id', invite.id);
       return res.status(410).json({ error: 'invite_expired' });
     }
@@ -250,10 +250,10 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
     // Verify the user isn't already in another campaign
     const { data: existingUser } = await supabase
       .from('users')
-      .select('id, campaign_id')
+      .select('id, "campaignId"')
       .eq('id', userId)
       .maybeSingle();
-    if (existingUser?.campaign_id && existingUser.campaign_id !== invite.campaign_id) {
+    if (existingUser?.campaignId && existingUser.campaignId !== invite.campaignId) {
       return res.status(409).json({ error: 'already_in_another_campaign' });
     }
 
@@ -268,8 +268,8 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
           type: invite.role,
           plan: 'Básico',
           role: 'active',
-          campaign_id: invite.campaign_id,
-          is_supreme_admin: false,
+          campaignId: invite.campaignId,
+          isSupremeAdmin: false,
         },
         { onConflict: 'id' },
       );
@@ -281,9 +281,9 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
       .from('team_invites')
       .update({
         status: 'accepted',
-        accepted_at: new Date().toISOString(),
-        accepted_by: userId,
-        updated_at: new Date().toISOString(),
+        acceptedAt: new Date().toISOString(),
+        acceptedBy: userId,
+        updatedAt: new Date().toISOString(),
       })
       .eq('id', invite.id)
       .eq('status', 'pending')
@@ -293,7 +293,7 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
     if (inviteErr || !updated) return res.status(409).json({ error: 'invite_already_consumed' });
 
     await audit(supabase, {
-      campaignId: invite.campaign_id,
+      campaignId: invite.campaignId,
       actorId: userId,
       action: 'team.invite.accept',
       resourceType: 'team_invite',
@@ -302,7 +302,7 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
       metadata: { role: invite.role },
     });
 
-    return res.json({ campaignId: invite.campaign_id, role: invite.role });
+    return res.json({ campaignId: invite.campaignId, role: invite.role });
   });
 
   return router;

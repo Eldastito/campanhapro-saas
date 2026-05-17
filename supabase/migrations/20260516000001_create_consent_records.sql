@@ -19,7 +19,7 @@ ALTER TABLE consent_records ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Campaign members read consent"
   ON consent_records FOR SELECT
-  USING ("campaignId" IN (SELECT campaign_id::text FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId"::text FROM users WHERE id = auth.uid()));
 
 CREATE POLICY "Service role bypass consent"
   ON consent_records FOR ALL

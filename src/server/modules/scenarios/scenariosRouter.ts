@@ -44,10 +44,10 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
     const { data: run, error } = await supabase
       .from('simulation_runs')
       .insert({
-        campaign_id: campaignId,
+        campaignId: campaignId,
         iterations: result.iterations,
-        candidates_input: candidates,
-        results_summary: result.candidates,
+        candidatesInput: candidates,
+        resultsSummary: result.candidates,
       })
       .select('id')
       .single();
@@ -66,9 +66,9 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
 
     const { data, error } = await supabase
       .from('simulation_runs')
-      .select('id, iterations, candidates_input, results_summary, created_at')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false })
+      .select('id, iterations, "candidatesInput", "resultsSummary", "createdAt"')
+      .eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false })
       .limit(20);
 
     if (error) return res.status(500).json({ error: error.message });
@@ -92,7 +92,7 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
 
     const { data, error } = await supabase
       .from('political_graphs')
-      .insert({ campaign_id: campaignId, label: label ?? 'Graph', nodes, edges })
+      .insert({ campaignId: campaignId, label: label ?? 'Graph', nodes, edges })
       .select('id')
       .single();
 
@@ -107,9 +107,9 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
 
     const { data, error } = await supabase
       .from('political_graphs')
-      .select('id, label, nodes, edges, created_at')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false })
+      .select('id, label, nodes, edges, "createdAt"')
+      .eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false })
       .limit(10);
 
     if (error) return res.status(500).json({ error: error.message });
@@ -138,9 +138,9 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
     const { data, error } = await supabase
       .from('dossiers')
       .insert({
-        campaign_id: campaignId,
-        subject_name: subjectName,
-        subject_type: subjectType,
+        campaignId: campaignId,
+        subjectName: subjectName,
+        subjectType: subjectType,
         content,
         status: 'pending_approval',
       })
@@ -158,9 +158,9 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
 
     const { data, error } = await supabase
       .from('dossiers')
-      .select('id, subject_name, subject_type, status, content, created_at, updated_at')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false });
+      .select('id, "subjectName", "subjectType", status, content, "createdAt", "updatedAt"')
+      .eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ dossiers: data ?? [] });
@@ -173,9 +173,9 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
 
     const { error } = await supabase
       .from('dossiers')
-      .update({ status: 'approved', updated_at: new Date().toISOString() })
+      .update({ status: 'approved', updatedAt: new Date().toISOString() })
       .eq('id', req.params.id)
-      .eq('campaign_id', campaignId)
+      .eq('campaignId', campaignId)
       .eq('status', 'pending_approval');
 
     if (error) return res.status(500).json({ error: error.message });
@@ -197,9 +197,9 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
 
     const { error } = await supabase
       .from('dossiers')
-      .update({ status: 'rejected', updated_at: new Date().toISOString() })
+      .update({ status: 'rejected', updatedAt: new Date().toISOString() })
       .eq('id', req.params.id)
-      .eq('campaign_id', campaignId);
+      .eq('campaignId', campaignId);
 
     if (error) return res.status(500).json({ error: error.message });
 

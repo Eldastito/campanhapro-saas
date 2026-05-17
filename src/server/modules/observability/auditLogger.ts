@@ -24,15 +24,15 @@ export interface AuditEntry {
 export async function audit(supabase: SupabaseClient, entry: AuditEntry): Promise<void> {
   try {
     const row = {
-      campaign_id: entry.campaignId ?? null,
-      actor_id: entry.actorId ?? null,
-      actor_type: entry.actorType ?? 'user',
+      campaignId: entry.campaignId ?? null,
+      actorId: entry.actorId ?? null,
+      actorType: entry.actorType ?? 'user',
       action: entry.action,
-      resource_type: entry.resourceType ?? null,
-      resource_id: entry.resourceId ?? null,
-      ip_address: entry.ipAddress ?? null,
-      user_agent: entry.userAgent ?? null,
-      trace_id: entry.traceId ?? null,
+      resourceType: entry.resourceType ?? null,
+      resourceId: entry.resourceId ?? null,
+      ipAddress: entry.ipAddress ?? null,
+      userAgent: entry.userAgent ?? null,
+      traceId: entry.traceId ?? null,
       severity: entry.severity ?? 'info',
       metadata: entry.metadata ?? {},
     };

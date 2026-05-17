@@ -243,11 +243,11 @@ async function startServer() {
     
     if (supabaseAdmin && campaignId) {
         await supabaseAdmin.from('social_tokens').upsert({
-            campaign_id: campaignId,
+            campaignId,
             provider,
-            access_token: 'SIMULATED_TOKEN_' + Math.random().toString(36).substring(7),
-            updated_at: new Date().toISOString()
-        }, { onConflict: 'campaign_id,provider' });
+            token: 'SIMULATED_TOKEN_' + Math.random().toString(36).substring(7),
+            updatedAt: new Date().toISOString()
+        }, { onConflict: 'campaignId,provider' });
     }
 
     res.send(`
@@ -281,7 +281,7 @@ async function startServer() {
 
       if (supabaseAdmin && agentId) {
           await supabaseAdmin.from('agent_chat_history').insert({
-              campaign_id: campaignId, agent_id: agentId, role: 'user', content: prompt
+              campaignId, agentId, role: 'user', content: prompt
           });
       }
 
@@ -304,13 +304,12 @@ async function startServer() {
           if (tool.function.name === 'publish_war_room_insight') {
               if (supabaseAdmin) {
                   await supabaseAdmin.from('war_room_intelligence').insert({
-                      campaign_id: campaignId,
-                      source_agent: agentId,
+                      campaignId,
+                      sourceAgent: agentId,
                       category: args.category,
                       priority: args.priority,
-                      insight_text: args.insight_text,
+                      insightText: args.insight_text,
                       metadata: { neighborhood: args.neighborhood },
-                      created_at: new Date().toISOString()
                   });
               }
               toolOutput = { success: true, message: 'Insight publicado na Sala de Guerra.' };
@@ -318,12 +317,11 @@ async function startServer() {
               const stats = await getConversionFunnelStats(campaignId);
               if (supabaseAdmin) {
                   await supabaseAdmin.from('war_room_intelligence').insert({
-                      campaign_id: campaignId,
-                      source_agent: agentId,
+                      campaignId,
+                      sourceAgent: agentId,
                       category: 'Oportunidade',
                       priority: 'Media',
-                      insight_text: `Análise de Funil solicitada: ${stats.map(s => `${s.stage}: ${s.count}`).join(', ')}`,
-                      created_at: new Date().toISOString()
+                      insightText: `Análise de Funil solicitada: ${stats.map(s => `${s.stage}: ${s.count}`).join(', ')}`,
                   });
               }
               toolOutput = { funnel: stats };
@@ -332,13 +330,12 @@ async function startServer() {
               if (supabaseAdmin) {
                   for (const alert of alerts.slice(0, 3)) {
                       await supabaseAdmin.from('war_room_intelligence').insert({
-                          campaign_id: campaignId,
-                          source_agent: agentId,
+                          campaignId,
+                          sourceAgent: agentId,
                           category: 'Logística',
                           priority: alert.risk_level === 'Critical' ? 'CRÍTICO' : 'Alta',
-                          insight_text: `GAP TERRITORIAL em ${alert.neighborhood}: ${alert.gap_percentage.toFixed(1)}% de defasagem.`,
+                          insightText: `GAP TERRITORIAL em ${alert.neighborhood}: ${alert.gap_percentage.toFixed(1)}% de defasagem.`,
                           metadata: { neighborhood: alert.neighborhood, risk: alert.risk_level },
-                          created_at: new Date().toISOString()
                       });
                   }
               }
@@ -346,11 +343,11 @@ async function startServer() {
           } else if (tool.function.name === 'flag_fraudulent_data') {
               if (supabaseAdmin) {
                   await supabaseAdmin.from('fraud_audit_logs').insert({
-                      campaign_id: campaignId,
-                      entity_type: args.entity_type,
-                      entity_id: args.entity_id,
-                      detected_by: agentId,
-                      risk_level: args.risk_level,
+                      campaignId,
+                      entityType: args.entity_type,
+                      entityId: args.entity_id,
+                      detectedBy: agentId,
+                      riskLevel: args.risk_level,
                       description: args.reason,
                       metadata: { source: 'agent_tool', original_args: args },
                   });
@@ -384,19 +381,19 @@ async function startServer() {
 
       if (supabaseAdmin && agentId) {
           await supabaseAdmin.from('agent_chat_history').insert({
-              campaign_id: campaignId, agent_id: agentId, role: 'agent', content: textResult,
+              campaignId, agentId, role: 'agent', content: textResult,
               metadata: { tool_calls: aiResponse.toolCalls, run_id: aiResponse.runId, provider: aiResponse.provider, model: aiResponse.model }
           });
 
           await supabaseAdmin.from('ai_compliance_logs').insert({
-              campaign_id: campaignId,
-              agent_id: agentId,
-              action_type: 'chat_generation',
-              input_summary: prompt.substring(0, 200),
-              output_summary: textResult.substring(0, 200),
-              ai_disclosure_required: true,
-              human_approved: false,
-              created_by: userId
+              campaignId,
+              agentId,
+              actionType: 'chat_generation',
+              inputSummary: prompt.substring(0, 200),
+              outputSummary: textResult.substring(0, 200),
+              aiDisclosureRequired: true,
+              humanApproved: false,
+              createdBy: userId
           });
       }
 
@@ -436,8 +433,8 @@ async function startServer() {
     const { agentId } = req.params;
     const { campaignId } = req.query;
     const { data } = await supabaseAdmin.from('agent_chat_history')
-      .select('*').eq('campaign_id', campaignId).eq('agent_id', agentId)
-      .order('created_at', { ascending: true }).limit(50);
+      .select('*').eq('campaignId', campaignId).eq('agentId', agentId)
+      .order('createdAt', { ascending: true }).limit(50);
     res.json({ history: toCamel(data || []) });
   });
 
@@ -451,7 +448,7 @@ async function startServer() {
 
       const imageUrl = response.data.data[0].url;
       await supabaseAdmin.from('agent_chat_history').insert({
-          campaign_id: campaignId, agent_id: agentId, role: 'agent', content: `![ATIVO](${imageUrl})`, metadata: { type: 'image' }
+          campaignId, agentId, role: 'agent', content: `![ATIVO](${imageUrl})`, metadata: { type: 'image' }
       });
       res.json({ imageUrl });
     } catch (error) { res.status(500).json({ error: 'Erro DALL-E' }); }
@@ -461,7 +458,7 @@ async function startServer() {
   app.get('/api/war-room/feed', requireAuth, async (req, res) => {
     const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
     const { data } = await supabaseAdmin.from('war_room_intelligence')
-      .select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(10);
+      .select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false }).limit(10);
     res.json({ insights: toCamel(data || []) });
   });
 
@@ -469,24 +466,24 @@ async function startServer() {
   app.get('/api/fraud/logs', requireAuth, async (req, res) => {
     const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
     const { data } = await supabaseAdmin.from('fraud_audit_logs')
-      .select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false });
+      .select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false });
     res.json({ logs: toCamel(data || []) });
   });
 
   app.post('/api/agents/publish-social', requireAuth, async (req, res) => {
     try {
-      const { campaign_id, platforms, content, agent_id, ai_disclosure_required } = req.body;
-      const user_id = req.user?.id;
+      const { campaign_id: campaignIdBody, platforms, content, mediaUrl, agent_id: agentIdBody, ai_disclosure_required } = req.body;
+      const userId = req.user?.id;
 
       // 1. Validar se o usuário pertence à campanha e tem permissão (Admin ou Líder)
       if (supabaseAdmin) {
         const { data: userCampaign, error: campaignError } = await supabaseAdmin
           .from('users')
-          .select('campaign_id, type')
-          .eq('id', user_id)
+          .select('"campaignId", type')
+          .eq('id', userId)
           .single();
 
-        if (campaignError || !userCampaign || userCampaign.campaign_id !== campaign_id) {
+        if (campaignError || !userCampaign || userCampaign.campaignId !== campaignIdBody) {
           return res.status(403).json({ error: "Acesso negado: Usuário não pertence a esta campanha." });
         }
 
@@ -497,19 +494,19 @@ async function startServer() {
 
         // 2. Registrar log de compliance
         await supabaseAdmin.from('ai_compliance_logs').insert({
-          campaign_id,
-          agent_id: agent_id || 'manual_publish',
-          action_type: 'social_publication',
-          input_summary: content.substring(0, 200),
-          output_summary: `Publicado em: ${platforms.join(', ')}`,
-          ai_disclosure_required: ai_disclosure_required || true,
-          human_approved: true,
-          risk_level: 'baixo',
-          created_by: user_id
+          campaignId: campaignIdBody,
+          agentId: agentIdBody || 'manual_publish',
+          actionType: 'social_publication',
+          inputSummary: content.substring(0, 200),
+          outputSummary: `Publicado em: ${platforms.join(', ')}`,
+          aiDisclosureRequired: ai_disclosure_required || true,
+          humanApproved: true,
+          riskLevel: 'baixo',
+          createdBy: userId
         });
       }
 
-      console.log(`[SOCIAL PUBLISH] Campanha ${campaign_id} postando por usuário ${user_id} em: ${platforms.join(', ')}`);
+      console.log(`[SOCIAL PUBLISH] Campanha ${campaignIdBody} postando por usuário ${userId} em: ${platforms.join(', ')}`);
       
       // Simulação de processamento de rede social
       await new Promise(r => setTimeout(r, 1500));
@@ -591,12 +588,11 @@ async function startServer() {
 
       if (supabaseAdmin) {
           const { error } = await supabaseAdmin.from('agent_outputs').insert({
-            campaign_id: campaignId,
-            agent_type: 'war-room-pipeline',
-            output_type: 'pipeline_result',
+            campaignId,
+            agentType: 'war-room-pipeline',
+            outputType: 'pipeline_result',
             content: text,
             metadata: { input: { description: 'Full automated analysis' }, output: result, run_id: aiResponse.runId },
-            created_at: new Date().toISOString()
           });
           if (error) console.error("[Pipeline] Erro ao salvar:", error);
       }
@@ -651,7 +647,7 @@ async function startServer() {
 
       // SÓ persiste em confirm_save (o usuário deu OK explícito).
       let executed = false;
-      if (parsed.action === 'confirm_save' && parsed.event?.title && parsed.event?.starts_at) {
+      if (parsed.action === 'confirm_save' && parsed.event?.title && (parsed.event?.starts_at || parsed.event?.startsAt)) {
         const ev = parsed.event;
         // Validação dura: garante 5 campos obrigatórios mesmo se a IA escapulir.
         const required = ['title', 'starts_at', 'location', 'with_whom', 'priority'];
@@ -665,17 +661,17 @@ async function startServer() {
           const validPrios = ['critica','alta','media','baixa'];
           const prio = validPrios.includes(ev.priority) ? ev.priority : 'media';
           const { error: insErr } = await supabaseAdmin.from('agenda_events').insert({
-            campaign_id: campaignId,
+            campaignId,
             title: String(ev.title).slice(0, 200),
-            starts_at: ev.starts_at,
-            ends_at: ev.ends_at || null,
+            startsAt: ev.starts_at || ev.startsAt,
+            endsAt: ev.ends_at || ev.endsAt || null,
             location: String(ev.location).slice(0, 200),
-            with_whom: String(ev.with_whom).slice(0, 200),
+            withWhom: String(ev.with_whom || ev.withWhom).slice(0, 200),
             priority: prio,
             category: ev.category || 'outro',
             description: ev.description || null,
-            reminder_minutes_before: typeof ev.reminder_minutes_before === 'number' ? ev.reminder_minutes_before : 30,
-            created_by: userId,
+            reminderMinutesBefore: typeof ev.reminder_minutes_before === 'number' ? ev.reminder_minutes_before : 30,
+            createdBy: userId,
           });
           if (!insErr) executed = true;
           else { parsed.action = 'error'; parsed.error = insErr.message; }
@@ -709,10 +705,10 @@ async function startServer() {
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const { data: contacts, error: contactsErr } = await supabaseAdmin
         .from('contacts')
-        .select('id, name, phone, neighborhood, classification, tags, ai_notes, source, support_level, support_classified_at')
-        .eq('campaign_id', campaignId)
-        .or(`support_level.eq.desconhecido,support_classified_at.lt.${cutoff}`)
-        .order('created_at', { ascending: false })
+        .select('id, name, phone, neighborhood, classification, tags, "aiNotes", source, "supportLevel", "supportClassifiedAt"')
+        .eq('campaignId', campaignId)
+        .or(`supportLevel.eq.desconhecido,supportClassifiedAt.lt.${cutoff}`)
+        .order('createdAt', { ascending: false })
         .limit(limit);
       if (contactsErr) throw contactsErr;
       if (!contacts || contacts.length === 0) {
@@ -721,7 +717,7 @@ async function startServer() {
 
       // Monta prompt em batch — mais barato que 1 chamada por contato.
       const lines = contacts.map((c: any, i: number) =>
-        `${i+1}. id=${c.id} | nome=${c.name} | bairro=${c.neighborhood||'?'} | classif_legado=${c.classification||'?'} | tags=${(c.tags||[]).join(',')||'?'} | notas=${(c.ai_notes||'').slice(0,80)||'?'} | origem=${c.source||'?'}`
+        `${i+1}. id=${c.id} | nome=${c.name} | bairro=${c.neighborhood||'?'} | classif_legado=${c.classification||'?'} | tags=${(c.tags||[]).join(',')||'?'} | notas=${(c.aiNotes||'').slice(0,80)||'?'} | origem=${c.source||'?'}`
       ).join('\n');
 
       const systemPrompt = `Você é o Classificador de Eleitores. Sua única tarefa: ler dados de cada contato e classificar em UM dos níveis:
@@ -756,12 +752,12 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
       for (const item of parsed) {
         if (!item?.id || !validLevels.has(item.support_level)) continue;
         const { error: upErr } = await supabaseAdmin.from('contacts').update({
-          support_level: item.support_level,
-          support_score: typeof item.support_score === 'number' ? Math.max(0, Math.min(100, item.support_score)) : null,
-          support_reasoning: (item.reasoning || '').slice(0, 500),
-          support_classified_at: new Date().toISOString(),
-          support_classified_by: 'ai_crm_agent',
-        }).eq('id', item.id).eq('campaign_id', campaignId);
+          supportLevel: item.support_level,
+          supportScore: typeof item.support_score === 'number' ? Math.max(0, Math.min(100, item.support_score)) : null,
+          supportReasoning: (item.reasoning || '').slice(0, 500),
+          supportClassifiedAt: new Date().toISOString(),
+          supportClassifiedBy: 'ai_crm_agent',
+        }).eq('id', item.id).eq('campaignId', campaignId);
         if (!upErr) classified++;
       }
 
@@ -830,9 +826,9 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
       const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
       if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
       const { data } = await supabaseAdmin.from('manager_runs')
-          .select('id, intent, final_summary, total_cost_cents_usd, iterations, status, started_at, finished_at')
-          .eq('campaign_id', campaignId)
-          .order('started_at', { ascending: false })
+          .select('id, intent, "finalSummary", "totalCostCentsUsd", iterations, status, "startedAt", "finishedAt"')
+          .eq('campaignId', campaignId)
+          .order('startedAt', { ascending: false })
           .limit(20);
       res.json({ runs: data || [] });
     } catch (error: any) {
@@ -847,20 +843,20 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
       if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
       const startOfMonth = new Date(); startOfMonth.setUTCDate(1); startOfMonth.setUTCHours(0,0,0,0);
       const { data: runs } = await supabaseAdmin.from('agent_runs')
-          .select('agent_id, provider, model, status, cost_cents_usd, latency_ms, created_at')
-          .eq('campaign_id', campaignId)
-          .gte('created_at', startOfMonth.toISOString())
-          .order('created_at', { ascending: false })
+          .select('"agentId", provider, model, status, "costCentsUsd", "latencyMs", "createdAt"')
+          .eq('campaignId', campaignId)
+          .gte('createdAt', startOfMonth.toISOString())
+          .order('createdAt', { ascending: false })
           .limit(2000);
       const list = runs || [];
-      const totalCents = list.reduce((s: number, r: any) => s + (r.cost_cents_usd || 0), 0);
+      const totalCents = list.reduce((s: number, r: any) => s + (r.costCentsUsd || 0), 0);
       const errors = list.filter((r: any) => r.status !== 'ok').length;
       const byAgent: Record<string, { runs: number; cost_cents: number }> = {};
       for (const r of list) {
-          const a = (r as any).agent_id || 'unknown';
+          const a = (r as any).agentId || 'unknown';
           if (!byAgent[a]) byAgent[a] = { runs: 0, cost_cents: 0 };
           byAgent[a].runs += 1;
-          byAgent[a].cost_cents += (r as any).cost_cents_usd || 0;
+          byAgent[a].cost_cents += (r as any).costCentsUsd || 0;
       }
       res.json({
         month_total_cents_usd: totalCents,
@@ -882,9 +878,9 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     try {
       const { campaignId, originAgent, targetAgent, content } = req.body;
       const { data, error } = await supabaseAdmin.from('production_orders').insert({
-        campaign_id: campaignId,
-        origin_agent: originAgent,
-        target_agent: targetAgent,
+        campaignId,
+        originAgent,
+        targetAgent,
         content: typeof content === 'string' ? content : JSON.stringify(content ?? ''),
         status: 'pending'
       }).select().single();
@@ -897,7 +893,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     try {
       const { campaignId, targetAgent } = req.query;
       const { data } = await supabaseAdmin.from('production_orders')
-        .select('*').eq('campaign_id', campaignId).eq('target_agent', targetAgent).eq('status', 'pending');
+        .select('*').eq('campaignId', campaignId).eq('targetAgent', targetAgent).eq('status', 'pending');
       res.json({ orders: toCamel(data || []) });
     } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
@@ -910,21 +906,20 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
       if (!supabaseAdmin) return res.status(503).json({ error: 'Supabase admin indisponível.' });
 
       const { data: userRow, error: userErr } = await supabaseAdmin
-        .from('users').select('campaign_id, type, is_supreme_admin').eq('id', userId).single();
+        .from('users').select('"campaignId", type, "isSupremeAdmin"').eq('id', userId).single();
       if (userErr || !userRow) return res.status(403).json({ error: 'Usuário não encontrado.' });
 
-      const allowed = userRow.is_supreme_admin || (
-        userRow.campaign_id === campaignId && ['Admin', 'Líder', 'Candidato'].includes(userRow.type)
+      const allowed = userRow.isSupremeAdmin || (
+        userRow.campaignId === campaignId && ['Admin', 'Líder', 'Candidato'].includes(userRow.type)
       );
       if (!allowed) return res.status(403).json({ error: 'Permissão insuficiente para gerar chave da campanha.' });
 
       const newKey = `cp_${crypto.randomBytes(24).toString('base64url')}`;
       const { error: updErr } = await supabaseAdmin
-        .from('campaigns').update({ api_key: newKey, updated_at: new Date().toISOString() }).eq('id', campaignId);
+        .from('campaigns').update({ apiKey: newKey, updatedAt: new Date().toISOString() }).eq('id', campaignId);
       if (updErr) throw updErr;
 
-      // A chave em texto pleno é retornada apenas nesta resposta — não fica visível depois.
-      res.json({ api_key: newKey, campaign_id: campaignId });
+      res.json({ apiKey: newKey, campaignId });
     } catch (error: any) {
       console.error('[API Key] Erro ao gerar:', error.message);
       res.status(500).json({ error: error.message });
@@ -940,7 +935,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     const { data: campaign, error } = await supabaseAdmin
       .from('campaigns')
       .select('id')
-      .eq('api_key', apiKey)
+      .eq('apiKey', apiKey)
       .single();
 
     if (error || !campaign) return res.status(403).json({ error: 'API KEY inválida' });
@@ -952,16 +947,15 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     try {
       const { name, phone, email, neighborhood, city, observations, birthDate, gps } = req.body;
       const { data, error } = await supabaseAdmin.from('contacts').insert({
-        campaign_id: req.campaignId,
-        name: name,
-        phone: phone,
-        email: email,
-        neighborhood: neighborhood,
-        city: city,
-        ai_notes: observations,
-        birth_date: birthDate,
-        gps_coords: gps,
-        created_at: new Date().toISOString()
+        campaignId: req.campaignId,
+        name,
+        phone,
+        email,
+        neighborhood,
+        city,
+        aiNotes: observations,
+        birthDate,
+        gpsCoords: gps,
       }).select().single();
       if (error) throw error;
       res.status(201).json({ message: 'Eleitor importado com sucesso', id: data.id });
@@ -972,18 +966,10 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     try {
       const { contactId, notes, status, gps, duration } = req.body;
       const { data, error } = await supabaseAdmin.from('visits').insert({
-        campaign_id: req.campaignId,
-        leader_id: contactId, // Usando leader_id como fallback para associação de contato
-        resp: 'Importado via API',
-        bairro: 'API',
-        apoiador: 'Sistema',
-        votos: 0,
-        solicit: notes,
-        realizada: status === 'realizada' ? 'sim' : 'nao',
-        gps_coords: gps,
-        duracao_segundos: duration,
-        data: new Date().toISOString().split('T')[0],
-        created_at: new Date().toISOString()
+        campaignId: req.campaignId,
+        leaderId: contactId,
+        observacoesQualitativas: notes,
+        createdAt: new Date().toISOString()
       }).select().single();
       if (error) throw error;
       res.status(201).json({ message: 'Atendimento/Visita registrada via API', id: data.id });

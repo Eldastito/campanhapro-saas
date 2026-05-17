@@ -8,14 +8,14 @@
 DROP POLICY IF EXISTS "simulation_runs_campaign_isolation" ON simulation_runs;
 CREATE POLICY "simulation_runs_campaign_isolation"
   ON simulation_runs
-  USING (campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId" FROM users WHERE id = auth.uid()));
 
 DROP POLICY IF EXISTS "political_graphs_campaign_isolation" ON political_graphs;
 CREATE POLICY "political_graphs_campaign_isolation"
   ON political_graphs
-  USING (campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId" FROM users WHERE id = auth.uid()));
 
 DROP POLICY IF EXISTS "dossiers_campaign_isolation" ON dossiers;
 CREATE POLICY "dossiers_campaign_isolation"
   ON dossiers
-  USING (campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId" FROM users WHERE id = auth.uid()));

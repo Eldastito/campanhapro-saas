@@ -225,14 +225,14 @@ async function recordWebhookEvent(
     await supabase.from('webhook_events').upsert(
       {
         source: params.source,
-        signature_valid: params.signatureValid,
-        payload_hash: params.payloadHash,
-        campaign_id: params.campaignId ?? null,
-        event_type: params.eventType ?? null,
-        processed_at: params.processedAt ?? null,
+        signatureValid: params.signatureValid,
+        payloadHash: params.payloadHash,
+        campaignId: params.campaignId ?? null,
+        eventType: params.eventType ?? null,
+        processedAt: params.processedAt ?? null,
         error: params.error ?? null,
       },
-      { onConflict: 'source,payload_hash', ignoreDuplicates: true },
+      { onConflict: 'source,payloadHash', ignoreDuplicates: true },
     );
   } catch (err) {
     console.error('[Webhook] event log failed:', err);

@@ -43,8 +43,6 @@ export const SettingsProvider = ({ children }: { children?: React.ReactNode }) =
         if (!user?.campaignId) return;
 
         const fetchData = async () => {
-            // Filtro pela FK semântica (campaign_id), não pelo PK (id) — id e campaign_id
-            // não são garantidamente iguais; apenas a coluna campaign_id é UNIQUE por campanha.
             const { data, error } = await supabase
                 .from('settings')
                 .select('*')
@@ -72,7 +70,7 @@ export const SettingsProvider = ({ children }: { children?: React.ReactNode }) =
         channel
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'settings', filter: `campaign_id=eq.${user.campaignId}` },
+                { event: '*', schema: 'public', table: 'settings', filter: `campaignId=eq.${user.campaignId}` },
                 fetchData
             )
             .subscribe();
@@ -90,15 +88,13 @@ export const SettingsProvider = ({ children }: { children?: React.ReactNode }) =
     const updateSettings = async (updates: Record<string, any>) => {
         if (!user?.campaignId) return;
         try {
-            // onConflict: campaign_id (UNIQUE) — sem isso o supabase tenta conflict
-            // pelo PK (id), o que não é o que queremos pra esta tabela.
             const { error } = await supabase
                 .from('settings')
                 .upsert({
                     campaignId: user.campaignId,
                     ...sanitizeData(updates),
                     updatedAt: new Date().toISOString()
-                }, { onConflict: 'campaign_id' });
+                }, { onConflict: 'campaignId' });
 
             if (error) throw error;
         } catch (error) {

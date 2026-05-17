@@ -59,27 +59,27 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
       if (event.providerSubscriptionId) {
         const { data } = await supabase
           .from('subscriptions')
-          .select('id, campaign_id')
-          .eq('asaas_subscription_id', event.providerSubscriptionId)
+          .select('id, "campaignId"')
+          .eq('asaasSubscriptionId', event.providerSubscriptionId)
           .maybeSingle();
-        campaignId = data?.campaign_id ?? null;
+        campaignId = data?.campaignId ?? null;
         subscriptionRowId = data?.id ?? null;
       }
 
       // Idempotent insert — unique index on (provider, provider_event_id)
       await supabase.from('payment_events').upsert(
         {
-          campaign_id: campaignId,
-          subscription_id: subscriptionRowId,
+          campaignId: campaignId,
+          subscriptionId: subscriptionRowId,
           provider: 'asaas',
-          provider_event_id: event.providerEventId,
-          event_type: event.eventType,
+          providerEventId: event.providerEventId,
+          eventType: event.eventType,
           status: event.status,
-          amount_cents: event.amountCents,
-          payment_method: event.paymentMethod,
+          amountCents: event.amountCents,
+          paymentMethod: event.paymentMethod,
           metadata: event.raw,
         },
-        { onConflict: 'provider,provider_event_id', ignoreDuplicates: true },
+        { onConflict: 'provider,providerEventId', ignoreDuplicates: true },
       );
 
       // Side-effects on subscription status
@@ -92,7 +92,7 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
         if (nextStatus) {
           await supabase
             .from('subscriptions')
-            .update({ status: nextStatus, updated_at: new Date().toISOString() })
+            .update({ status: nextStatus, updatedAt: new Date().toISOString() })
             .eq('id', subscriptionRowId);
         }
       }
@@ -121,19 +121,19 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
           const { data: adminUser } = await supabase
             .from('users')
             .select('email, name')
-            .eq('campaign_id', campaignId)
+            .eq('campaignId', campaignId)
             .eq('type', 'Admin')
-            .order('created_at', { ascending: true })
+            .order('createdAt', { ascending: true })
             .limit(1)
             .maybeSingle();
 
           const { data: sub } = await supabase
             .from('subscriptions')
-            .select('plan_id')
+            .select('"planId"')
             .eq('id', subscriptionRowId)
             .maybeSingle();
-          const { data: plan } = sub?.plan_id
-            ? await supabase.from('plans').select('name').eq('id', sub.plan_id).maybeSingle()
+          const { data: plan } = sub?.planId
+            ? await supabase.from('plans').select('name').eq('id', sub.planId).maybeSingle()
             : { data: null };
 
           if (adminUser?.email && plan?.name && event.amountCents != null) {

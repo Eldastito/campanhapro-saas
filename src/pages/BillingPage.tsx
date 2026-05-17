@@ -131,7 +131,7 @@ const BillingPage: React.FC = () => {
         const j = await plansRes.json();
         setPlans((j.plans ?? []).map((p: any) => ({
           ...p,
-          monthlyCents: p.monthlyCents ?? p.monthly_cents ?? 0,
+          monthlyCents: p.monthlyCents ?? 0,
         })));
       }
       if (subRes.ok) {

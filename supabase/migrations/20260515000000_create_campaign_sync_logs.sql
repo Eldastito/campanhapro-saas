@@ -19,7 +19,7 @@ CREATE POLICY "Campaign members can read their sync log"
   ON campaign_sync_logs FOR SELECT
   USING (
     "campaignId" IN (
-      SELECT campaign_id::text FROM users WHERE id = auth.uid()
+      SELECT "campaignId"::text FROM users WHERE id = auth.uid()
     )
   );
 

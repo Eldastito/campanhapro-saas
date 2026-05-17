@@ -9,11 +9,11 @@ type SubjectType = 'candidate' | 'opponent' | 'ally';
 
 interface Dossier {
   id: string;
-  subject_name: string;
-  subject_type: SubjectType;
+  subjectName: string;
+  subjectType: SubjectType;
   status: DossierStatus;
   content: string;
-  created_at: string;
+  createdAt: string;
 }
 
 const STATUS_META: Record<DossierStatus, { label: string; icon: React.ReactNode; color: string }> = {
@@ -211,12 +211,12 @@ export const DossierPanel: React.FC = () => {
                   <div className="flex items-center gap-3 min-w-0">
                     <StatusBadge status={d.status} />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-200 truncate">{d.subject_name}</p>
-                      <p className="text-xs text-slate-500">{SUBJECT_LABELS[d.subject_type]}</p>
+                      <p className="text-sm font-medium text-slate-200 truncate">{d.subjectName}</p>
+                      <p className="text-xs text-slate-500">{SUBJECT_LABELS[d.subjectType]}</p>
                     </div>
                   </div>
                   <span className="text-xs text-slate-500 ml-3 shrink-0">
-                    {new Date(d.created_at).toLocaleDateString('pt-BR')}
+                    {new Date(d.createdAt).toLocaleDateString('pt-BR')}
                   </span>
                 </button>
 

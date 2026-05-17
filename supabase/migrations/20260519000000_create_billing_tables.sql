@@ -4,66 +4,66 @@
 CREATE TABLE IF NOT EXISTS plans (
   id              TEXT PRIMARY KEY,                -- 'free' | 'pro' | 'enterprise'
   name            TEXT NOT NULL,
-  monthly_cents   INTEGER NOT NULL DEFAULT 0,      -- price in BRL cents
+  "monthlyCents"  INTEGER NOT NULL DEFAULT 0,      -- price in BRL cents
   features        TEXT[] NOT NULL DEFAULT '{}',    -- e.g. ['ai_agents', 'visits', 'crm']
   limits          JSONB NOT NULL DEFAULT '{}',     -- e.g. { contacts: 1000, ai_budget_cents: 5000, team_users: 5 }
   active          BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  "createdAt"     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Subscriptions — one active subscription per campaign
 CREATE TABLE IF NOT EXISTS subscriptions (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  campaign_id           UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-  plan_id               TEXT NOT NULL REFERENCES plans(id),
-  status                TEXT NOT NULL DEFAULT 'active'
-                          CHECK (status IN ('trialing', 'active', 'past_due', 'canceled', 'paused')),
-  features              TEXT[] NOT NULL DEFAULT '{}',   -- snapshot from plan at subscription time
-  current_period_start  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  current_period_end    TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
-  stripe_subscription_id  TEXT,
-  stripe_customer_id    TEXT,
-  metadata              JSONB NOT NULL DEFAULT '{}',
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "campaignId"            UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  "planId"                TEXT NOT NULL REFERENCES plans(id),
+  status                  TEXT NOT NULL DEFAULT 'active'
+                            CHECK (status IN ('trialing', 'active', 'past_due', 'canceled', 'paused')),
+  features                TEXT[] NOT NULL DEFAULT '{}',   -- snapshot from plan at subscription time
+  "currentPeriodStart"    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "currentPeriodEnd"      TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
+  "stripeSubscriptionId"  TEXT,
+  "stripeCustomerId"      TEXT,
+  metadata                JSONB NOT NULL DEFAULT '{}',
+  "createdAt"             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "updatedAt"             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "subscriptions_campaign_isolation"
   ON subscriptions FOR SELECT
-  USING (campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId" FROM users WHERE id = auth.uid()));
 
 -- Only one active subscription per campaign
 CREATE UNIQUE INDEX IF NOT EXISTS uq_subscriptions_active_campaign
-  ON subscriptions (campaign_id)
+  ON subscriptions ("campaignId")
   WHERE status IN ('active', 'trialing', 'past_due');
 
 -- Usage records — one row per metered event (AI call, outbound message, etc)
 CREATE TABLE IF NOT EXISTS usage_records (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  campaign_id   UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  "campaignId"  UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
   metric        TEXT NOT NULL CHECK (metric IN ('ai_call', 'message_outbound', 'simulation', 'embedding')),
   quantity      INTEGER NOT NULL DEFAULT 1,
-  cost_cents    INTEGER NOT NULL DEFAULT 0,         -- accumulated cost in BRL cents
+  "costCents"   INTEGER NOT NULL DEFAULT 0,         -- accumulated cost in BRL cents
   metadata      JSONB NOT NULL DEFAULT '{}',         -- { model, provider, tokens_in, tokens_out, ... }
-  recorded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  "recordedAt"  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE usage_records ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "usage_records_campaign_isolation"
   ON usage_records FOR SELECT
-  USING (campaign_id IN (SELECT campaign_id FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId" FROM users WHERE id = auth.uid()));
 
 CREATE INDEX IF NOT EXISTS idx_usage_records_campaign_metric
-  ON usage_records (campaign_id, metric, recorded_at DESC);
+  ON usage_records ("campaignId", metric, "recordedAt" DESC);
 
 CREATE INDEX IF NOT EXISTS idx_usage_records_campaign_recent
-  ON usage_records (campaign_id, recorded_at DESC);
+  ON usage_records ("campaignId", "recordedAt" DESC);
 
 -- Seed default plans
-INSERT INTO plans (id, name, monthly_cents, features, limits) VALUES
+INSERT INTO plans (id, name, "monthlyCents", features, limits) VALUES
   (
     'free',
     'Gratuito',
@@ -90,6 +90,6 @@ INSERT INTO plans (id, name, monthly_cents, features, limits) VALUES
   )
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
-  monthly_cents = EXCLUDED.monthly_cents,
+  "monthlyCents" = EXCLUDED."monthlyCents",
   features = EXCLUDED.features,
   limits = EXCLUDED.limits;

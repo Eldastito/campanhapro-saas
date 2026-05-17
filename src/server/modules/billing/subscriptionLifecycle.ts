@@ -112,10 +112,10 @@ async function sendReminders(
 
   const { data: subs, error } = await supabase
     .from('subscriptions')
-    .select('id, campaign_id, plan_id, current_period_start, current_period_end, status')
+    .select('id, "campaignId", "planId", "currentPeriodStart", "currentPeriodEnd", status')
     .in('status', ['active', 'trialing'])
-    .gte('current_period_end', windowStart.toISOString())
-    .lt('current_period_end', windowEnd.toISOString());
+    .gte('currentPeriodEnd', windowStart.toISOString())
+    .lt('currentPeriodEnd', windowEnd.toISOString());
 
   if (error) {
     console.error('[lifecycle] reminder query error:', error.message);
@@ -124,33 +124,33 @@ async function sendReminders(
 
   let sent = 0;
   for (const sub of subs ?? []) {
-    if (!sub.campaign_id || !sub.plan_id) continue;
+    if (!sub.campaignId || !sub.planId) continue;
 
     const { data: plan } = await supabase
-      .from('plans').select('name, monthly_cents').eq('id', sub.plan_id).maybeSingle();
-    if (!plan || !plan.monthly_cents) continue; // skip free / unknown plans
+      .from('plans').select('name, "monthlyCents"').eq('id', sub.planId).maybeSingle();
+    if (!plan || !plan.monthlyCents) continue; // skip free / unknown plans
 
     const { data: admin } = await supabase
       .from('users')
       .select('email, name')
-      .eq('campaign_id', sub.campaign_id)
+      .eq('campaignId', sub.campaignId)
       .eq('type', 'Admin')
-      .order('created_at', { ascending: true })
+      .order('createdAt', { ascending: true })
       .limit(1)
       .maybeSingle();
 
     if (!admin?.email) continue;
 
     await sendPaymentUpcomingEmail(supabase, {
-      campaignId: sub.campaign_id,
+      campaignId: sub.campaignId,
       subscriptionId: sub.id,
-      periodStart: sub.current_period_start,
+      periodStart: sub.currentPeriodStart,
       email: admin.email,
       name: admin.name ?? admin.email.split('@')[0],
       planName: plan.name,
-      amountCents: plan.monthly_cents,
+      amountCents: plan.monthlyCents,
       daysUntilDue: daysAhead,
-      dueDate: sub.current_period_end,
+      dueDate: sub.currentPeriodEnd,
     });
     sent++;
   }
@@ -166,9 +166,9 @@ async function downgradeStalePastDue(
 
   const { data: subs, error } = await supabase
     .from('subscriptions')
-    .select('id, campaign_id, plan_id, current_period_end, asaas_subscription_id, payment_provider, updated_at')
+    .select('id, "campaignId", "planId", "currentPeriodEnd", "asaasSubscriptionId", "paymentProvider", "updatedAt"')
     .eq('status', 'past_due')
-    .lt('updated_at', cutoff.toISOString());
+    .lt('updatedAt', cutoff.toISOString());
 
   if (error) {
     console.error('[lifecycle] past_due query error:', error.message);
@@ -177,7 +177,7 @@ async function downgradeStalePastDue(
 
   let downgraded = 0;
   for (const sub of subs ?? []) {
-    if (!sub.campaign_id) continue;
+    if (!sub.campaignId) continue;
 
     // Look up the downgrade plan once
     const { data: downgradePlan } = await supabase
@@ -188,17 +188,17 @@ async function downgradeStalePastDue(
     }
 
     // Capture old plan name for the email BEFORE updating
-    const { data: oldPlan } = sub.plan_id
-      ? await supabase.from('plans').select('name').eq('id', sub.plan_id).maybeSingle()
+    const { data: oldPlan } = sub.planId
+      ? await supabase.from('plans').select('name').eq('id', sub.planId).maybeSingle()
       : { data: null };
-    const previousPlanName = oldPlan?.name ?? sub.plan_id ?? 'desconhecido';
+    const previousPlanName = oldPlan?.name ?? sub.planId ?? 'desconhecido';
 
     // Cancel the paid subscription on the upstream gateway (Asaas)
-    if (sub.payment_provider === 'asaas' && sub.asaas_subscription_id) {
+    if (sub.paymentProvider === 'asaas' && sub.asaasSubscriptionId) {
       try {
         const gateway = getPaymentGateway();
         if (gateway.providerName === 'asaas') {
-          await gateway.cancelSubscription({ providerSubscriptionId: sub.asaas_subscription_id });
+          await gateway.cancelSubscription({ providerSubscriptionId: sub.asaasSubscriptionId });
         }
       } catch (err: any) {
         // Non-fatal — we still proceed to downgrade locally
@@ -210,12 +210,12 @@ async function downgradeStalePastDue(
     const { data: updated, error: updateErr } = await supabase
       .from('subscriptions')
       .update({
-        plan_id: downgradePlan.id,
+        planId: downgradePlan.id,
         status: 'active',
         features: downgradePlan.features ?? [],
-        current_period_start: now.toISOString(),
-        current_period_end: new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString(),
-        updated_at: now.toISOString(),
+        currentPeriodStart: now.toISOString(),
+        currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString(),
+        updatedAt: now.toISOString(),
       })
       .eq('id', sub.id)
       .eq('status', 'past_due')        // CAS-style: skip if status already changed
@@ -228,14 +228,14 @@ async function downgradeStalePastDue(
     const { data: admin } = await supabase
       .from('users')
       .select('email, name')
-      .eq('campaign_id', sub.campaign_id)
+      .eq('campaignId', sub.campaignId)
       .eq('type', 'Admin')
-      .order('created_at', { ascending: true })
+      .order('createdAt', { ascending: true })
       .limit(1)
       .maybeSingle();
     if (admin?.email) {
       await sendSubscriptionDowngradedEmail(supabase, {
-        campaignId: sub.campaign_id,
+        campaignId: sub.campaignId,
         email: admin.email,
         name: admin.name ?? admin.email.split('@')[0],
         previousPlanName,
@@ -245,7 +245,7 @@ async function downgradeStalePastDue(
     }
 
     await audit(supabase, {
-      campaignId: sub.campaign_id,
+      campaignId: sub.campaignId,
       actorType: 'system',
       action: 'lifecycle.downgrade',
       resourceType: 'subscription',
@@ -268,35 +268,35 @@ async function confirmExpiredCanceled(
   // downgrade them to free so the user keeps access but loses paid features.
   const { data: subs, error } = await supabase
     .from('subscriptions')
-    .select('id, campaign_id, plan_id, current_period_end')
+    .select('id, "campaignId", "planId", "currentPeriodEnd"')
     .eq('status', 'canceled')
-    .lt('current_period_end', now.toISOString());
+    .lt('currentPeriodEnd', now.toISOString());
 
   if (error) return 0;
 
   let count = 0;
   for (const sub of subs ?? []) {
-    if (!sub.campaign_id) continue;
-    if (sub.plan_id === config.downgradePlanId) continue; // already free
+    if (!sub.campaignId) continue;
+    if (sub.planId === config.downgradePlanId) continue; // already free
 
     const { data: downgradePlan } = await supabase
       .from('plans').select('id, name, features').eq('id', config.downgradePlanId).maybeSingle();
     if (!downgradePlan) continue;
 
-    const { data: oldPlan } = sub.plan_id
-      ? await supabase.from('plans').select('name').eq('id', sub.plan_id).maybeSingle()
+    const { data: oldPlan } = sub.planId
+      ? await supabase.from('plans').select('name').eq('id', sub.planId).maybeSingle()
       : { data: null };
-    const previousPlanName = oldPlan?.name ?? sub.plan_id ?? 'desconhecido';
+    const previousPlanName = oldPlan?.name ?? sub.planId ?? 'desconhecido';
 
     const { data: updated } = await supabase
       .from('subscriptions')
       .update({
-        plan_id: downgradePlan.id,
+        planId: downgradePlan.id,
         status: 'active',
         features: downgradePlan.features ?? [],
-        current_period_start: now.toISOString(),
-        current_period_end: new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString(),
-        updated_at: now.toISOString(),
+        currentPeriodStart: now.toISOString(),
+        currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 3600 * 1000).toISOString(),
+        updatedAt: now.toISOString(),
       })
       .eq('id', sub.id)
       .eq('status', 'canceled')
@@ -305,7 +305,7 @@ async function confirmExpiredCanceled(
     if (!updated) continue;
 
     await audit(supabase, {
-      campaignId: sub.campaign_id,
+      campaignId: sub.campaignId,
       actorType: 'system',
       action: 'lifecycle.canceled_expired',
       resourceType: 'subscription',

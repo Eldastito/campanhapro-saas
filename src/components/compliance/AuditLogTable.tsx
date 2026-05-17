@@ -6,14 +6,14 @@ import Button from '../ui/Button';
 interface AuditEntry {
   id: string;
   action: string;
-  actor_id: string | null;
-  actor_type: 'user' | 'system' | 'webhook' | 'agent';
-  resource_type: string | null;
-  resource_id: string | null;
+  actorId: string | null;
+  actorType: 'user' | 'system' | 'webhook' | 'agent';
+  resourceType: string | null;
+  resourceId: string | null;
   severity: 'info' | 'warn' | 'error' | 'critical';
   metadata: Record<string, unknown>;
-  trace_id: string | null;
-  created_at: string;
+  traceId: string | null;
+  createdAt: string;
 }
 
 const severityColor: Record<AuditEntry['severity'], string> = {
@@ -23,7 +23,7 @@ const severityColor: Record<AuditEntry['severity'], string> = {
   critical: 'text-red-200 bg-red-600/30 border border-red-500/40',
 };
 
-const actorTypeColor: Record<AuditEntry['actor_type'], string> = {
+const actorTypeColor: Record<AuditEntry['actorType'], string> = {
   user: 'text-sky-300',
   system: 'text-slate-400',
   webhook: 'text-purple-300',
@@ -116,22 +116,22 @@ export const AuditLogTable: React.FC = () => {
                     {e.severity.toUpperCase()}
                   </span>
                   <span className="text-xs font-mono text-slate-200 min-w-[200px] truncate">{e.action}</span>
-                  <span className={`text-[10px] ${actorTypeColor[e.actor_type]} shrink-0`}>
-                    {e.actor_type}
+                  <span className={`text-[10px] ${actorTypeColor[e.actorType]} shrink-0`}>
+                    {e.actorType}
                   </span>
-                  {e.resource_type && (
+                  {e.resourceType && (
                     <span className="text-[10px] text-slate-500 truncate">
-                      {e.resource_type}{e.resource_id ? `:${e.resource_id.slice(0, 8)}` : ''}
+                      {e.resourceType}{e.resourceId ? `:${e.resourceId.slice(0, 8)}` : ''}
                     </span>
                   )}
                   <span className="text-[10px] text-slate-500 ml-auto shrink-0">
-                    {new Date(e.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    {new Date(e.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </span>
                 </button>
                 {isExpanded && hasMetadata && (
                   <pre className="text-[11px] text-slate-300 bg-slate-800 p-2 m-2 rounded whitespace-pre-wrap max-h-40 overflow-auto">
                     {JSON.stringify(e.metadata, null, 2)}
-                    {e.trace_id && `\n\ntrace_id: ${e.trace_id}`}
+                    {e.traceId && `\n\ntrace_id: ${e.traceId}`}
                   </pre>
                 )}
               </div>

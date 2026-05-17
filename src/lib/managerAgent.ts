@@ -181,11 +181,12 @@ export async function runManager({
 
     // 1. Cria a row do manager_run
     const { data: row, error: rowErr } = await supabaseAdmin.from('manager_runs').insert({
-        campaign_id: campaignId,
-        user_id: userId || null,
+        campaignId,
+        userId: userId || null,
         intent,
         status: 'running',
         plan: [],
+        startedAt: new Date().toISOString(),
     }).select('id').single();
     if (rowErr) throw new Error('Erro ao criar manager_run: ' + rowErr.message);
     const managerRunId: string = row.id;
@@ -325,14 +326,14 @@ export async function runManager({
     // Atualiza row do manager_run com resultado final
     await supabaseAdmin.from('manager_runs').update({
         plan,
-        final_summary: finalSummary,
-        total_cost_cents_usd: totalCost,
-        total_tokens_in: totalIn,
-        total_tokens_out: totalOut,
+        finalSummary,
+        totalCostCentsUsd: totalCost,
+        totalTokensIn: totalIn,
+        totalTokensOut: totalOut,
         iterations,
         status,
         error: errorMsg || null,
-        finished_at: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
     }).eq('id', managerRunId);
 
     return {

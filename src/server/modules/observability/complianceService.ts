@@ -50,20 +50,20 @@ export async function buildComplianceSummary(
     auditCritical,
     auditError,
   ] = await Promise.all([
-    countRows(supabase, 'consent_records', q => q.eq('campaign_id', campaignId)),
-    countRows(supabase, 'consent_records', q => q.eq('campaign_id', campaignId).eq('status', 'granted')),
-    countRows(supabase, 'consent_records', q => q.eq('campaign_id', campaignId).eq('status', 'revoked')),
-    countRows(supabase, 'consent_records', q => q.eq('campaign_id', campaignId).eq('status', 'expired')),
-    countRows(supabase, 'channel_messages', q => q.eq('campaign_id', campaignId).eq('direction', 'outbound').gte('created_at', since)),
-    countRows(supabase, 'audit_logs', q => q.eq('campaign_id', campaignId).eq('action', 'message.send.blocked').gte('created_at', since)),
-    countRows(supabase, 'dossiers', q => q.eq('campaign_id', campaignId).eq('status', 'pending_approval')),
-    countRows(supabase, 'agent_tasks', q => q.eq('campaign_id', campaignId).eq('status', 'awaiting_approval')),
-    countRows(supabase, 'webhook_events', q => q.eq('campaign_id', campaignId).gte('received_at', since)),
-    countRows(supabase, 'webhook_events', q => q.eq('campaign_id', campaignId).eq('signature_valid', false).gte('received_at', since)),
+    countRows(supabase, 'consent_records', q => q.eq('campaignId', campaignId)),
+    countRows(supabase, 'consent_records', q => q.eq('campaignId', campaignId).eq('status', 'granted')),
+    countRows(supabase, 'consent_records', q => q.eq('campaignId', campaignId).eq('status', 'revoked')),
+    countRows(supabase, 'consent_records', q => q.eq('campaignId', campaignId).eq('status', 'expired')),
+    countRows(supabase, 'channel_messages', q => q.eq('campaignId', campaignId).eq('direction', 'outbound').gte('createdAt', since)),
+    countRows(supabase, 'audit_logs', q => q.eq('campaignId', campaignId).eq('action', 'message.send.blocked').gte('createdAt', since)),
+    countRows(supabase, 'dossiers', q => q.eq('campaignId', campaignId).eq('status', 'pending_approval')),
+    countRows(supabase, 'agent_tasks', q => q.eq('campaignId', campaignId).eq('status', 'awaiting_approval')),
+    countRows(supabase, 'webhook_events', q => q.eq('campaignId', campaignId).gte('receivedAt', since)),
+    countRows(supabase, 'webhook_events', q => q.eq('campaignId', campaignId).eq('signatureValid', false).gte('receivedAt', since)),
     fetchLastWebhook(supabase, campaignId),
-    countRows(supabase, 'audit_logs', q => q.eq('campaign_id', campaignId).gte('created_at', since)),
-    countRows(supabase, 'audit_logs', q => q.eq('campaign_id', campaignId).eq('severity', 'critical').gte('created_at', since)),
-    countRows(supabase, 'audit_logs', q => q.eq('campaign_id', campaignId).eq('severity', 'error').gte('created_at', since)),
+    countRows(supabase, 'audit_logs', q => q.eq('campaignId', campaignId).gte('createdAt', since)),
+    countRows(supabase, 'audit_logs', q => q.eq('campaignId', campaignId).eq('severity', 'critical').gte('createdAt', since)),
+    countRows(supabase, 'audit_logs', q => q.eq('campaignId', campaignId).eq('severity', 'error').gte('createdAt', since)),
   ]);
 
   return {
@@ -99,12 +99,12 @@ async function fetchLastWebhook(supabase: SupabaseClient, campaignId: string): P
   try {
     const { data } = await supabase
       .from('webhook_events')
-      .select('received_at')
-      .eq('campaign_id', campaignId)
-      .order('received_at', { ascending: false })
+      .select('"receivedAt"')
+      .eq('campaignId', campaignId)
+      .order('receivedAt', { ascending: false })
       .limit(1)
       .maybeSingle();
-    return data?.received_at ?? null;
+    return data?.receivedAt ?? null;
   } catch {
     return null;
   }

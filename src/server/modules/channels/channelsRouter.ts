@@ -162,10 +162,10 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
         // Phase 8 — billing: meter outbound message
         try {
           await supabaseAdmin.from('usage_records').insert({
-            campaign_id: campaignId,
+            campaignId: campaignId,
             metric: 'message_outbound',
             quantity: 1,
-            cost_cents: 0,
+            costCents: 0,
             metadata: { channel, template: !!templateName },
           });
         } catch (e) {

@@ -26,12 +26,12 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
 
     const { data: user } = await supabase
       .from('users')
-      .select('id, campaign_id, type, name, email')
+      .select('id, "campaignId", type, name, email')
       .eq('id', userId)
       .maybeSingle();
 
     res.json({
-      bootstrapped: !!user?.campaign_id,
+      bootstrapped: !!user?.campaignId,
       user: user ?? null,
     });
   });
@@ -56,14 +56,14 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
     // Idempotency — if user already has a campaign, return it
     const { data: existing } = await supabase
       .from('users')
-      .select('id, campaign_id')
+      .select('id, "campaignId"')
       .eq('id', userId)
       .maybeSingle();
 
-    if (existing?.campaign_id) {
+    if (existing?.campaignId) {
       return res.json({
         alreadyBootstrapped: true,
-        campaignId: existing.campaign_id,
+        campaignId: existing.campaignId,
       });
     }
 
@@ -74,9 +74,9 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
       .insert({
         id: campaignId,
         name: campaignName.trim(),
-        candidate_name: candidateName?.trim() ?? null,
+        candidateName: candidateName?.trim() ?? null,
         party: party?.trim() ?? null,
-        created_by: userId,
+        createdBy: userId,
       });
 
     if (campaignErr) {
@@ -95,8 +95,8 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
           type: 'Admin',
           plan: 'Básico',
           role: 'active',
-          campaign_id: campaignId,
-          is_supreme_admin: false,
+          campaignId: campaignId,
+          isSupremeAdmin: false,
         },
         { onConflict: 'id' },
       );

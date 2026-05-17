@@ -25,7 +25,7 @@ ALTER TABLE agent_tasks ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Campaign members read own tasks"
   ON agent_tasks FOR SELECT
-  USING ("campaignId" IN (SELECT campaign_id::text FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId"::text FROM users WHERE id = auth.uid()));
 
 CREATE POLICY "Service role bypass agent_tasks"
   ON agent_tasks FOR ALL

@@ -49,9 +49,9 @@ export function createObservabilityRouter(supabase: SupabaseClient): Router {
 
     let q = supabase
       .from('audit_logs')
-      .select('id, action, actor_id, actor_type, resource_type, resource_id, severity, metadata, trace_id, created_at')
-      .eq('campaign_id', campaignId)
-      .order('created_at', { ascending: false })
+      .select('id, action, "actorId", "actorType", "resourceType", "resourceId", severity, metadata, "traceId", "createdAt"')
+      .eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false })
       .limit(limit);
 
     if (severity && ['info', 'warn', 'error', 'critical'].includes(severity)) {
@@ -71,9 +71,9 @@ export function createObservabilityRouter(supabase: SupabaseClient): Router {
 
     const { data, error } = await supabase
       .from('webhook_events')
-      .select('id, source, event_type, signature_valid, received_at, processed_at, error')
-      .eq('campaign_id', campaignId)
-      .order('received_at', { ascending: false })
+      .select('id, source, "eventType", "signatureValid", "receivedAt", "processedAt", error')
+      .eq('campaignId', campaignId)
+      .order('receivedAt', { ascending: false })
       .limit(50);
 
     if (error) return res.status(500).json({ error: error.message });

@@ -45,11 +45,11 @@ ALTER TABLE channel_phone_mappings ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Campaign members read conversations"
   ON channel_conversations FOR SELECT
-  USING ("campaignId" IN (SELECT campaign_id::text FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId"::text FROM users WHERE id = auth.uid()));
 
 CREATE POLICY "Campaign members read messages"
   ON channel_messages FOR SELECT
-  USING ("campaignId" IN (SELECT campaign_id::text FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId"::text FROM users WHERE id = auth.uid()));
 
 CREATE POLICY "Service role bypass conversations"
   ON channel_conversations FOR ALL

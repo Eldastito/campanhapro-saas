@@ -17,7 +17,7 @@ interface SimulationRun {
   iterations: number;
   candidates_input: Array<{ id: string; name: string; baseShare: number; margin: number }>;
   results_summary: BucketResult[];
-  created_at: string;
+  createdAt: string;
 }
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
@@ -87,7 +87,7 @@ export const SimulationHistory: React.FC = () => {
                     )}
                   </div>
                   <span className="text-xs text-slate-500 ml-3 shrink-0">
-                    {new Date(run.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {new Date(run.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </button>
 

@@ -23,7 +23,7 @@ interface GraphRecord {
   label: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
-  created_at: string;
+  createdAt: string;
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -306,7 +306,7 @@ export const PoliticalGraph: React.FC = () => {
               >
                 <span className="text-sm text-slate-300">{g.label}</span>
                 <span className="text-xs text-slate-500">
-                  {new Date(g.created_at).toLocaleDateString('pt-BR')} · {g.nodes.length} nós
+                  {new Date(g.createdAt).toLocaleDateString('pt-BR')} · {g.nodes.length} nós
                 </span>
               </button>
             ))}

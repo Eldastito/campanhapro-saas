@@ -25,7 +25,7 @@ ALTER TABLE knowledge_chunks ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Campaign members read knowledge"
   ON knowledge_chunks FOR SELECT
-  USING ("campaignId" IN (SELECT campaign_id::text FROM users WHERE id = auth.uid()));
+  USING ("campaignId" IN (SELECT "campaignId"::text FROM users WHERE id = auth.uid()));
 
 CREATE POLICY "Service role bypass knowledge"
   ON knowledge_chunks FOR ALL

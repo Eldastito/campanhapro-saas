@@ -13,7 +13,7 @@ import { runLifecycleSweep } from './subscriptionLifecycle';
 interface PlanInput {
   id: string;
   name: string;
-  monthly_cents: number;
+  monthlyCents: number;
   features: string[];
   limits: Record<string, number>;
   active?: boolean;
@@ -35,8 +35,8 @@ function validatePlanInput(
     return { error: 'invalid_name (1-80 chars)' };
   }
 
-  if (!Number.isInteger(body.monthly_cents) || body.monthly_cents < 0 || body.monthly_cents > 100_000_000) {
-    return { error: 'invalid_monthly_cents (integer 0 to 100_000_000)' };
+  if (!Number.isInteger(body.monthlyCents) || body.monthlyCents < 0 || body.monthlyCents > 100_000_000) {
+    return { error: 'invalid_monthlyCents (integer 0 to 100_000_000)' };
   }
 
   if (!Array.isArray(body.features) ||
@@ -64,7 +64,7 @@ function validatePlanInput(
     value: {
       id: body.id,
       name: body.name.trim(),
-      monthly_cents: body.monthly_cents,
+      monthlyCents: body.monthlyCents,
       features: body.features,
       limits: body.limits,
       ...(body.active !== undefined ? { active: body.active } : {}),
@@ -125,7 +125,7 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
     try {
       // Look up plan price
       const { data: plan, error: planErr } = await supabase
-        .from('plans').select('id, name, monthly_cents').eq('id', planId).eq('active', true).single();
+        .from('plans').select('id, name, "monthlyCents"').eq('id', planId).eq('active', true).single();
       if (planErr || !plan) return res.status(404).json({ error: 'plan_not_found' });
 
       const gateway = getPaymentGateway();
@@ -134,7 +134,7 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
       let providerSubscriptionId: string | undefined;
 
       // Free plan or stub gateway: skip the external HTTP round-trip
-      if (gateway.providerName === 'stub' || plan.monthly_cents === 0) {
+      if (gateway.providerName === 'stub' || plan.monthlyCents === 0) {
         const sub = await subscribeCampaign(supabase, campaignId, planId, {
           provider: gateway.providerName === 'stub' ? 'stub' : gateway.providerName,
         });
@@ -144,7 +144,7 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
           resourceType: 'subscription',
           resourceId: sub.id,
           severity: 'info',
-          metadata: { planId, provider: gateway.providerName, free: plan.monthly_cents === 0 },
+          metadata: { planId, provider: gateway.providerName, free: plan.monthlyCents === 0 },
         });
         return res.json({ subscription: sub, checkoutUrl: null, provider: gateway.providerName });
       }
@@ -158,10 +158,10 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
       const existingSub = await getActiveSubscription(supabase, campaignId);
       if (existingSub?.id) {
         const { data: existingRow } = await supabase
-          .from('subscriptions').select('asaas_customer_id, stripe_customer_id')
+          .from('subscriptions').select('"asaasCustomerId", "stripeCustomerId"')
           .eq('id', existingSub.id).maybeSingle();
-        if (existingRow?.asaas_customer_id && gateway.providerName === 'asaas') {
-          providerCustomerId = existingRow.asaas_customer_id;
+        if (existingRow?.asaasCustomerId && gateway.providerName === 'asaas') {
+          providerCustomerId = existingRow.asaasCustomerId;
         }
       }
       if (!providerCustomerId) {
@@ -175,7 +175,7 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
         campaignId,
         providerCustomerId,
         planId,
-        amountCents: plan.monthly_cents,
+        amountCents: plan.monthlyCents,
         cycle: 'monthly',
         description: `Assinatura CampanhaPro — plano ${plan.name}`,
         allowedMethods: method ? [method] : ['undefined'],
@@ -221,12 +221,12 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
     const existing = await getActiveSubscription(supabase, campaignId);
     if (existing?.id) {
       const { data } = await supabase.from('subscriptions')
-        .select('payment_provider, asaas_subscription_id, stripe_subscription_id')
+        .select('"paymentProvider", "asaasSubscriptionId", "stripeSubscriptionId"')
         .eq('id', existing.id).maybeSingle();
       const gateway = getPaymentGateway();
       const providerSubId =
-        gateway.providerName === 'asaas' ? data?.asaas_subscription_id :
-        gateway.providerName === 'stripe' ? data?.stripe_subscription_id :
+        gateway.providerName === 'asaas' ? data?.asaasSubscriptionId :
+        gateway.providerName === 'stripe' ? data?.stripeSubscriptionId :
         null;
       if (providerSubId) {
         try {
@@ -286,9 +286,9 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
 
     let q = supabase
       .from('usage_records')
-      .select('id, metric, quantity, cost_cents, metadata, recorded_at')
-      .eq('campaign_id', campaignId)
-      .order('recorded_at', { ascending: false })
+      .select('id, metric, quantity, "costCents", metadata, "recordedAt"')
+      .eq('campaignId', campaignId)
+      .order('recordedAt', { ascending: false })
       .limit(limit);
 
     if (metric && ['ai_call', 'message_outbound', 'simulation', 'embedding'].includes(metric)) {
@@ -312,7 +312,7 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
     const { data, error } = await supabase
       .from('plans')
       .select('*')
-      .order('monthly_cents', { ascending: true });
+      .order('monthlyCents', { ascending: true });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ plans: data ?? [] });
   });
@@ -335,7 +335,7 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
       resourceType: 'plan',
       resourceId: data.id,
       severity: 'warn',
-      metadata: { name: data.name, monthly_cents: data.monthly_cents },
+      metadata: { name: data.name, monthlyCents: data.monthlyCents },
     });
 
     res.status(201).json({ plan: data });
@@ -378,7 +378,7 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
     const { count } = await supabase
       .from('subscriptions')
       .select('id', { count: 'exact', head: true })
-      .eq('plan_id', req.params.id)
+      .eq('planId', req.params.id)
       .in('status', ['active', 'trialing', 'past_due']);
     if ((count ?? 0) > 0) {
       return res.status(409).json({

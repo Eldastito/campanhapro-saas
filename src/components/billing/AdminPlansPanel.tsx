@@ -10,7 +10,7 @@ import { supabase } from '../../lib/supabaseClient';
 interface Plan {
   id: string;
   name: string;
-  monthly_cents: number;
+  monthlyCents: number;
   features: string[];
   limits: {
     contacts?: number;
@@ -19,7 +19,7 @@ interface Plan {
     messages_per_month?: number;
   };
   active: boolean;
-  created_at?: string;
+  createdAt?: string;
 }
 
 const ALL_FEATURES = [
@@ -56,7 +56,7 @@ const LIMITS = [
 const emptyPlan: Plan = {
   id: '',
   name: '',
-  monthly_cents: 0,
+  monthlyCents: 0,
   features: ['dashboard'],
   limits: { contacts: 100, team_users: 1, messages_per_month: 0, ai_budget_cents: 0 },
   active: true,
@@ -117,7 +117,7 @@ const AdminPlansPanel: React.FC = () => {
       const body = JSON.stringify({
         id: editing.id,
         name: editing.name,
-        monthly_cents: editing.monthly_cents,
+        monthlyCents: editing.monthlyCents,
         features: editing.features,
         limits: editing.limits,
         active: editing.active,
@@ -200,7 +200,7 @@ const AdminPlansPanel: React.FC = () => {
               <tr key={p.id} className="border-b border-slate-800 hover:bg-slate-800/40">
                 <td className="py-2 px-2 font-mono text-xs text-slate-400">{p.id}</td>
                 <td className="py-2 px-2 text-slate-200 font-medium">{p.name}</td>
-                <td className="py-2 px-2 text-right font-mono text-slate-200">{formatBRL(p.monthly_cents)}</td>
+                <td className="py-2 px-2 text-right font-mono text-slate-200">{formatBRL(p.monthlyCents)}</td>
                 <td className="py-2 px-2 text-right text-xs text-slate-400">{p.features.length}</td>
                 <td className="py-2 px-2 text-center">
                   {p.active
@@ -267,10 +267,10 @@ const AdminPlansPanel: React.FC = () => {
                   min={0}
                   step={1}
                   className="w-full text-sm bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                  value={editing.monthly_cents}
-                  onChange={e => setEditing({ ...editing, monthly_cents: parseInt(e.target.value, 10) || 0 })}
+                  value={editing.monthlyCents}
+                  onChange={e => setEditing({ ...editing, monthlyCents: parseInt(e.target.value, 10) || 0 })}
                 />
-                <p className="text-[10px] text-slate-500 mt-1">{formatBRL(editing.monthly_cents)}/mês</p>
+                <p className="text-[10px] text-slate-500 mt-1">{formatBRL(editing.monthlyCents)}/mês</p>
               </div>
 
               <div>

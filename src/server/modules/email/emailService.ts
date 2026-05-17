@@ -59,15 +59,15 @@ async function sendAndLog(
 
   try {
     await supabase.from('email_log').insert({
-      campaign_id: ctx.campaignId ?? null,
-      recipient_id: ctx.recipientId ?? null,
-      recipient_email: ctx.recipientEmail,
+      campaignId: ctx.campaignId ?? null,
+      recipientId: ctx.recipientId ?? null,
+      recipientEmail: ctx.recipientEmail,
       template: ctx.template,
       subject: ctx.subject,
       status: result.ok ? 'sent' : 'failed',
       provider: provider.providerName,
-      provider_message_id: result.providerMessageId,
-      idempotency_key: ctx.idempotencyKey ?? null,
+      providerMessageId: result.providerMessageId,
+      idempotencyKey: ctx.idempotencyKey ?? null,
       error: result.error ?? null,
       metadata: ctx.metadata ?? {},
     });
