@@ -1,0 +1,445 @@
+import { Router, Request, Response } from 'express';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { callAgent } from '../../../lib/aiCallAgent';
+import { audit, actorFromRequest } from '../observability/auditLogger';
+
+type Bucket = 'recursos' | 'financeiro' | 'material' | 'pessoal' | 'redes_sociais' | 'outros' | 'reserva';
+
+/**
+ * Maps Expense.categoria (Portuguese labels stored in expenses table) onto the
+ * CEO's strategic buckets. Used to compute "spent per bucket".
+ */
+const CATEGORY_TO_BUCKET: Record<string, Bucket> = {
+  'Alimentação': 'pessoal',
+  'Combustível': 'recursos',
+  'Aluguel de Carro': 'recursos',
+  'Aluguel de Espaço': 'recursos',
+  'Material Gráfico': 'material',
+  'Pessoal (Ajuda de Custo)': 'pessoal',
+  'Pessoal (Salário)': 'pessoal',
+  'Advogado': 'financeiro',
+  'Contador': 'financeiro',
+  'Eventos': 'material',
+  'Marketing Digital': 'redes_sociais',
+  'Outra': 'outros',
+};
+
+const ALL_BUCKETS: Bucket[] = ['recursos', 'financeiro', 'material', 'pessoal', 'redes_sociais', 'outros', 'reserva'];
+
+function campaignIdOf(req: Request): string | undefined {
+  return (req as any).user?.campaignId ?? (req.query.campaignId as string | undefined);
+}
+
+interface CampaignBudgetContext {
+  totalBudgetCents: number;
+  electionDate: string | null;
+  daysUntilElection: number | null;
+}
+
+async function loadCampaignBudget(supabaseAdmin: SupabaseClient, campaignId: string): Promise<CampaignBudgetContext> {
+  // The campaign budget lives in the campaigns table's settings column or
+  // in a campaign_settings row depending on the deployment. Try both shapes.
+  let totalBudgetCents = 0;
+  let electionDate: string | null = null;
+
+  const { data: settings } = await supabaseAdmin
+    .from('campaign_settings')
+    .select('campaignDetails')
+    .eq('campaignId', campaignId)
+    .maybeSingle();
+
+  if (settings?.campaignDetails) {
+    const cd = settings.campaignDetails as Record<string, unknown>;
+    if (typeof cd.orcamento === 'number') {
+      totalBudgetCents = Math.round(cd.orcamento * 100);
+    }
+    if (typeof cd.electionDate === 'string') {
+      electionDate = cd.electionDate;
+    }
+  }
+
+  let daysUntilElection: number | null = null;
+  if (electionDate) {
+    const diff = new Date(electionDate).getTime() - Date.now();
+    daysUntilElection = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }
+
+  return { totalBudgetCents, electionDate, daysUntilElection };
+}
+
+async function loadSpentByBucket(supabaseAdmin: SupabaseClient, campaignId: string): Promise<Record<Bucket, number>> {
+  const result = Object.fromEntries(ALL_BUCKETS.map(b => [b, 0])) as Record<Bucket, number>;
+
+  const { data: expenses } = await supabaseAdmin
+    .from('expenses')
+    .select('categoria, valor')
+    .eq('campaignId', campaignId);
+
+  for (const ex of expenses ?? []) {
+    const bucket = CATEGORY_TO_BUCKET[ex.categoria as string] ?? 'outros';
+    const cents = Math.round(Number(ex.valor ?? 0) * 100);
+    result[bucket] += cents;
+  }
+  return result;
+}
+
+async function loadActiveAllocations(supabaseAdmin: SupabaseClient, campaignId: string): Promise<Record<Bucket, number>> {
+  const result = Object.fromEntries(ALL_BUCKETS.map(b => [b, 0])) as Record<Bucket, number>;
+
+  const { data: rows } = await supabaseAdmin
+    .from('budget_allocations')
+    .select('bucket, allocatedCents')
+    .eq('campaignId', campaignId)
+    .in('status', ['approved', 'active']);
+
+  for (const r of rows ?? []) {
+    const b = r.bucket as Bucket;
+    if (ALL_BUCKETS.includes(b)) {
+      result[b] += Number(r.allocatedCents ?? 0);
+    }
+  }
+  return result;
+}
+
+export function createBudgetRouter(supabaseAdmin: SupabaseClient) {
+  const router = Router();
+
+  // GET /summary — totals + per-bucket spent + allocated
+  router.get('/summary', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const [ctx, spent, allocated] = await Promise.all([
+        loadCampaignBudget(supabaseAdmin, cid),
+        loadSpentByBucket(supabaseAdmin, cid),
+        loadActiveAllocations(supabaseAdmin, cid),
+      ]);
+
+      const totalSpentCents = Object.values(spent).reduce((a, b) => a + b, 0);
+      const totalAllocatedCents = Object.values(allocated).reduce((a, b) => a + b, 0);
+
+      const buckets = ALL_BUCKETS.map(b => ({
+        bucket: b,
+        spentCents: spent[b],
+        allocatedCents: allocated[b],
+      }));
+
+      return res.json({
+        totalBudgetCents: ctx.totalBudgetCents,
+        totalSpentCents,
+        totalAllocatedCents,
+        remainingCents: Math.max(0, ctx.totalBudgetCents - totalSpentCents),
+        unallocatedCents: Math.max(0, ctx.totalBudgetCents - totalAllocatedCents),
+        electionDate: ctx.electionDate,
+        daysUntilElection: ctx.daysUntilElection,
+        buckets,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /allocations — list all (optionally filtered by status)
+  router.get('/allocations', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      let query = supabaseAdmin
+        .from('budget_allocations')
+        .select('*')
+        .eq('campaignId', cid)
+        .order('createdAt', { ascending: false });
+
+      if (req.query.status) {
+        query = query.eq('status', req.query.status as string);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return res.json({ allocations: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /allocations — create manual allocation (already approved if user creates it)
+  router.post('/allocations', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req) ?? req.body.campaignId;
+      const userId = (req as any).user?.id ?? null;
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const { bucket, allocatedCents, period, rationale, periodStart, periodEnd } = req.body;
+      if (!bucket || !ALL_BUCKETS.includes(bucket)) {
+        return res.status(400).json({ error: 'bucket inválido' });
+      }
+      if (typeof allocatedCents !== 'number' || allocatedCents < 0) {
+        return res.status(400).json({ error: 'allocatedCents inválido' });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('budget_allocations')
+        .insert({
+          campaignId: cid,
+          bucket,
+          allocatedCents,
+          period: period ?? 'campaign',
+          periodStart: periodStart ?? null,
+          periodEnd: periodEnd ?? null,
+          rationale: rationale ?? null,
+          status: 'approved',
+          approvedByUserId: userId,
+          approvedAt: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'budget.allocation_created',
+        resourceType: 'budget_allocation',
+        resourceId: data.id,
+        severity: 'info',
+        metadata: { bucket, allocatedCents },
+      });
+
+      return res.status(201).json({ allocation: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PATCH /allocations/:id/approve — human approves CEO proposal
+  router.patch('/allocations/:id/approve', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      const userId = (req as any).user?.id ?? null;
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const { data, error } = await supabaseAdmin
+        .from('budget_allocations')
+        .update({
+          status: 'approved',
+          approvedByUserId: userId,
+          approvedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .eq('id', req.params.id)
+        .eq('campaignId', cid)
+        .eq('status', 'proposed')
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'proposta não encontrada ou já processada' });
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'budget.allocation_approved',
+        resourceType: 'budget_allocation',
+        resourceId: data.id,
+        severity: 'warn',
+        metadata: { bucket: data.bucket, allocatedCents: data.allocatedCents },
+      });
+
+      return res.json({ allocation: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PATCH /allocations/:id/reject
+  router.patch('/allocations/:id/reject', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const { data, error } = await supabaseAdmin
+        .from('budget_allocations')
+        .update({ status: 'rejected', updatedAt: new Date().toISOString() })
+        .eq('id', req.params.id)
+        .eq('campaignId', cid)
+        .eq('status', 'proposed')
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'proposta não encontrada ou já processada' });
+      return res.json({ allocation: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /allocations/:id
+  router.delete('/allocations/:id', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const { error } = await supabaseAdmin
+        .from('budget_allocations')
+        .delete()
+        .eq('id', req.params.id)
+        .eq('campaignId', cid);
+
+      if (error) throw error;
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /ceo-plan — invoke CEO agent to propose a fresh allocation
+  // CEO produces proposed rows; nothing executes until a human approves.
+  router.post('/ceo-plan', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req) ?? req.body.campaignId;
+      const userId = (req as any).user?.id ?? null;
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const [ctx, spent, allocated] = await Promise.all([
+        loadCampaignBudget(supabaseAdmin, cid),
+        loadSpentByBucket(supabaseAdmin, cid),
+        loadActiveAllocations(supabaseAdmin, cid),
+      ]);
+
+      if (ctx.totalBudgetCents <= 0) {
+        return res.status(400).json({ error: 'Orçamento total não definido em Configurações' });
+      }
+
+      const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
+      const remaining = Math.max(0, ctx.totalBudgetCents - totalSpent);
+
+      const systemPrompt = [
+        'Você é o CEO de uma campanha eleitoral. Sua missão é VENCER a eleição respeitando o orçamento.',
+        'Sua única responsabilidade nesta chamada: ALOCAR o orçamento entre 7 buckets, retornando JSON estrito.',
+        'Regras:',
+        '- A soma dos buckets NÃO pode exceder o orçamento disponível (orçamento total - já gasto).',
+        '- Sempre reserve pelo menos 10% para o bucket "reserva" (imprevistos).',
+        '- Investimento em "redes_sociais" deve crescer conforme se aproxima a eleição (curva sigmoide).',
+        '- Em campanha brasileira típica: pessoal ~30%, material ~25%, recursos ~15%, redes_sociais 10-25%, financeiro ~5%, outros ~5%, reserva 10%.',
+        '- Quanto mais perto da eleição, mais peso em redes_sociais e material; menos em pessoal estrutural.',
+        'Buckets:',
+        '  recursos       — combustível, aluguel de carro, aluguel de espaço',
+        '  financeiro     — advogado, contador, taxas administrativas',
+        '  material       — material gráfico, eventos, comícios',
+        '  pessoal        — salários, ajuda de custo, alimentação',
+        '  redes_sociais  — marketing digital, impulsionamento, anúncios',
+        '  outros         — gastos não categorizados',
+        '  reserva        — fundo de imprevistos (mínimo 10%)',
+        'Retorne EXCLUSIVAMENTE um objeto JSON no formato:',
+        '{ "summary": "<resumo executivo em pt-BR, 2-3 frases>",',
+        '  "allocations": [ { "bucket": "<id>", "allocatedCents": <int>, "rationale": "<por que>" } ] }',
+        'Não inclua markdown, comentários, nem texto fora do JSON.',
+      ].join('\n');
+
+      const userPrompt = [
+        `Orçamento total: R$ ${(ctx.totalBudgetCents / 100).toFixed(2)}`,
+        `Já gasto: R$ ${(totalSpent / 100).toFixed(2)}`,
+        `Disponível para alocação: R$ ${(remaining / 100).toFixed(2)}`,
+        ctx.electionDate ? `Eleição em: ${ctx.electionDate} (${ctx.daysUntilElection} dias)` : 'Data de eleição não definida',
+        '',
+        'Gastos atuais por bucket (cents):',
+        ...ALL_BUCKETS.map(b => `  ${b}: ${spent[b]}`),
+        '',
+        'Alocações ativas atuais (cents):',
+        ...ALL_BUCKETS.map(b => `  ${b}: ${allocated[b]}`),
+        '',
+        'Proponha a alocação ótima para os centavos restantes (' + remaining + ' cents). Retorne o JSON.',
+      ].join('\n');
+
+      let aiResult;
+      try {
+        aiResult = await callAgent(supabaseAdmin, 'manager', userPrompt, {
+          campaignId: cid,
+          userId,
+          systemInstruction: systemPrompt,
+        });
+      } catch (err: any) {
+        return res.status(503).json({ error: `CEO indisponível: ${err.message}` });
+      }
+
+      // Parse JSON — tolerate code fences just in case
+      let parsed: any;
+      try {
+        const text = aiResult.text.trim();
+        const jsonStr = text.startsWith('```')
+          ? text.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '').trim()
+          : text;
+        parsed = JSON.parse(jsonStr);
+      } catch (err: any) {
+        return res.status(502).json({ error: 'CEO retornou JSON inválido', raw: aiResult.text });
+      }
+
+      if (!Array.isArray(parsed.allocations)) {
+        return res.status(502).json({ error: 'CEO sem alocações no retorno', raw: parsed });
+      }
+
+      // Validate bucket sum doesn't exceed remaining
+      const proposedTotal = parsed.allocations.reduce(
+        (sum: number, a: any) => sum + (Number(a.allocatedCents) || 0), 0
+      );
+      if (proposedTotal > remaining * 1.01) {
+        return res.status(422).json({
+          error: 'Proposta excede orçamento disponível',
+          proposedCents: proposedTotal,
+          availableCents: remaining,
+        });
+      }
+
+      // Insert proposed allocations (status='proposed' — waiting human approval)
+      const rows = parsed.allocations
+        .filter((a: any) => ALL_BUCKETS.includes(a.bucket) && Number(a.allocatedCents) > 0)
+        .map((a: any) => ({
+          campaignId: cid,
+          bucket: a.bucket,
+          allocatedCents: Math.round(Number(a.allocatedCents)),
+          period: 'campaign',
+          rationale: typeof a.rationale === 'string' ? a.rationale : null,
+          status: 'proposed',
+          createdByAgentId: 'manager',
+          metadata: { summary: parsed.summary ?? null, model: aiResult.model },
+        }));
+
+      if (rows.length === 0) {
+        return res.status(422).json({ error: 'Nenhuma alocação válida proposta' });
+      }
+
+      const { data: inserted, error } = await supabaseAdmin
+        .from('budget_allocations')
+        .insert(rows)
+        .select();
+
+      if (error) throw error;
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'budget.ceo_proposal',
+        resourceType: 'budget_allocation',
+        severity: 'info',
+        metadata: { count: rows.length, totalCents: proposedTotal, model: aiResult.model },
+      });
+
+      return res.status(201).json({
+        summary: parsed.summary ?? null,
+        allocations: inserted ?? [],
+        meta: {
+          totalProposedCents: proposedTotal,
+          availableCents: remaining,
+          model: aiResult.model,
+          costCentsUsd: aiResult.costCentsUsd,
+        },
+      });
+    } catch (err: any) {
+      console.error('[Budget] CEO plan error:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  return router;
+}
