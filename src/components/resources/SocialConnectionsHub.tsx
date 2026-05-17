@@ -83,14 +83,14 @@ export const SocialConnectionsHub: React.FC = () => {
 
       data?.forEach((token: any) => {
         if (token.provider === 'meta') {
-          newStatus.facebook = { provider: 'facebook', connected: true, lastUpdated: token.updated_at, settings: token.settings };
-          newStatus.instagram = { provider: 'instagram', connected: true, lastUpdated: token.updated_at, settings: token.settings };
-          newStatus.whatsapp = { provider: 'whatsapp', connected: true, lastUpdated: token.updated_at, settings: token.settings };
+          newStatus.facebook = { provider: 'facebook', connected: true, lastUpdated: token.updatedAt, settings: token.settings };
+          newStatus.instagram = { provider: 'instagram', connected: true, lastUpdated: token.updatedAt, settings: token.settings };
+          newStatus.whatsapp = { provider: 'whatsapp', connected: true, lastUpdated: token.updatedAt, settings: token.settings };
         } else if (newStatus[token.provider]) {
           newStatus[token.provider] = { 
             provider: token.provider, 
             connected: true, 
-            lastUpdated: token.updated_at,
+            lastUpdated: token.updatedAt,
             settings: token.settings
           };
         }
@@ -117,7 +117,7 @@ export const SocialConnectionsHub: React.FC = () => {
             accessToken: manualSettings.accessToken, 
             accountId: manualSettings.accountId 
           },
-          updated_at: new Date().toISOString()
+          updatedAt: new Date().toISOString()
         }, { onConflict: 'campaignId,provider' });
 
       if (error) throw error;
@@ -137,7 +137,7 @@ export const SocialConnectionsHub: React.FC = () => {
     try {
       const { error } = await supabase
         .from('social_tokens')
-        .update({ settings, updated_at: new Date().toISOString() })
+        .update({ settings, updatedAt: new Date().toISOString() })
         .eq('campaignId', user.campaignId)
         .eq('provider', provider === 'whatsapp' ? 'meta' : provider);
 

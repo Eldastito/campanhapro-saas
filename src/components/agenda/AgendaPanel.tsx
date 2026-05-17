@@ -72,7 +72,7 @@ const AgendaPanel: React.FC<AgendaPanelProps> = ({ voiceSlot }) => {
             .channel(`agenda-${user.campaignId}-${Date.now()}`)
             .on('postgres_changes', {
                 event: '*', schema: 'public', table: 'agenda_events',
-                filter: `campaign_id=eq.${user.campaignId}`,
+                filter: `campaignId=eq.${user.campaignId}`,
             }, () => fetchEvents())
             .subscribe();
         return () => { supabase.removeChannel(ch); };

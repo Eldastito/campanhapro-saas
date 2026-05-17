@@ -43,8 +43,8 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         type: 'Admin',
         plan: initialPlan,
         role: 'active',
-        campaign_id: autoCampaignId,
-        is_supreme_admin: false,
+        campaignId: autoCampaignId,
+        isSupremeAdmin: false,
       }).select().single();
 
       if (insertError) return null;
@@ -59,7 +59,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     } else if (userError) {
       return null;
     } else {
-      const resolvedCampaignId = userData?.campaign_id ?? userData?.campaignId;
+      const resolvedCampaignId = userData?.campaignId;
       if (resolvedCampaignId && userData?.plan) {
         // Garante que usuários existentes também tenham campaign_configs
         try {
@@ -83,10 +83,9 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
         if (session?.user) {
           const userData = await fetchOrCreateUser(session);
           if (userData) {
-            // Compatibilidade com banco em snake_case (com fallback p/ camelCase)
-            const dbCampaignId = userData.campaign_id ?? userData.campaignId;
-            const dbIsSupremeAdmin = !!(userData.is_supreme_admin ?? userData.isSupremeAdmin);
-            const dbAssignedLeaderId = userData.assigned_leader_id ?? userData.assignedLeaderId;
+            const dbCampaignId = userData.campaignId;
+            const dbIsSupremeAdmin = !!(userData.isSupremeAdmin);
+            const dbAssignedLeaderId = userData.assignedLeaderId;
 
             // isSupremeAdmin ONLY routes to SupremeAdminPage — keep it exclusive to eldastito
             const isSupremeAdmin = session.user.email === SUPREME_ADMIN_EMAIL || dbIsSupremeAdmin;

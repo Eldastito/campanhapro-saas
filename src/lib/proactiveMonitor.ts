@@ -22,23 +22,23 @@ let timer: NodeJS.Timeout | null = null;
 
 interface CampaignRow {
     id: string;
-    proactive_monitoring_interval_hours: number;
-    proactive_monitoring_last_run_at: string | null;
-    proactive_monitoring_keywords: string | null;
-    election_role: string | null;
-    election_state: string | null;
-    election_city: string | null;
-    candidate_number: string | null;
+    proactiveMonitoringIntervalHours: number;
+    proactiveMonitoringLastRunAt: string | null;
+    proactiveMonitoringKeywords: string | null;
+    electionRole: string | null;
+    electionState: string | null;
+    electionCity: string | null;
+    candidateNumber: string | null;
     name: string;
 }
 
 const buildIntent = (c: CampaignRow): string => {
     const target = c.name || '(candidato sem nome cadastrado)';
-    const cargo = c.election_role || '(cargo não cadastrado)';
-    const local = [c.election_city, c.election_state].filter(Boolean).join('/') || '(localização não cadastrada)';
-    const numero = c.candidate_number ? ` (nº ${c.candidate_number})` : '';
-    const extras = c.proactive_monitoring_keywords?.trim();
-    const horas = c.proactive_monitoring_interval_hours || 6;
+    const cargo = c.electionRole || '(cargo não cadastrado)';
+    const local = [c.electionCity, c.electionState].filter(Boolean).join('/') || '(localização não cadastrada)';
+    const numero = c.candidateNumber ? ` (nº ${c.candidateNumber})` : '';
+    const extras = c.proactiveMonitoringKeywords?.trim();
+    const horas = c.proactiveMonitoringIntervalHours || 6;
     return `MONITORAMENTO PROATIVO — DEFESA DE IMAGEM (rotina automática a cada ${horas}h).
 
 Faça uma busca web (use a ferramenta web_search) sobre menções, notícias e movimentos políticos relacionados ao candidato "${target}"${numero} para o cargo de ${cargo} em ${local}, considerando preferencialmente eventos das ÚLTIMAS ${horas} HORAS.
@@ -66,22 +66,22 @@ const runOnce = async (supabaseAdmin: any) => {
         // Busca campanhas com monitoramento ativo cuja janela de execução chegou.
         const { data: campaigns, error } = await supabaseAdmin
             .from('campaigns')
-            .select('id, name, election_role, election_state, election_city, candidate_number, proactive_monitoring_interval_hours, proactive_monitoring_last_run_at, proactive_monitoring_keywords')
-            .eq('proactive_monitoring_enabled', true);
+            .select('id, name, "electionRole", "electionState", "electionCity", "candidateNumber", "proactiveMonitoringIntervalHours", "proactiveMonitoringLastRunAt", "proactiveMonitoringKeywords"')
+            .eq('proactiveMonitoringEnabled', true);
 
         if (error || !campaigns || campaigns.length === 0) return;
 
         const now = Date.now();
         for (const c of campaigns as CampaignRow[]) {
-            const intervalMs = (c.proactive_monitoring_interval_hours || 6) * 60 * 60 * 1000;
-            const lastRun = c.proactive_monitoring_last_run_at ? new Date(c.proactive_monitoring_last_run_at).getTime() : 0;
+            const intervalMs = (c.proactiveMonitoringIntervalHours || 6) * 60 * 60 * 1000;
+            const lastRun = c.proactiveMonitoringLastRunAt ? new Date(c.proactiveMonitoringLastRunAt).getTime() : 0;
             const due = !lastRun || now - lastRun >= intervalMs;
             if (!due) continue;
 
-            console.log(`[ProactiveMonitor] Disparando monitoramento p/ campanha ${c.id} (último: ${c.proactive_monitoring_last_run_at || 'nunca'})`);
+            console.log(`[ProactiveMonitor] Disparando monitoramento p/ campanha ${c.id} (último: ${c.proactiveMonitoringLastRunAt || 'nunca'})`);
             // Marca timestamp ANTES de rodar (evita re-disparo se Manager demorar).
             await supabaseAdmin.from('campaigns')
-                .update({ proactive_monitoring_last_run_at: new Date().toISOString() })
+                .update({ proactiveMonitoringLastRunAt: new Date().toISOString() })
                 .eq('id', c.id);
 
             try {

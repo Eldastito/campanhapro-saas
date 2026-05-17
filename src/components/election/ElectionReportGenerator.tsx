@@ -15,10 +15,10 @@ interface ElectionReportGeneratorProps {
 
 interface BUData {
   id: string;
-  station_id: string;
-  votos_candidato: number;
-  votos_total_secao: number;
-  created_at: string;
+  stationId: string;
+  votosCandidato: number;
+  votosTotalSecao: number;
+  createdAt: string;
 }
 
 interface FiscalData {
@@ -27,8 +27,8 @@ interface FiscalData {
   zone: string;
   section: string;
   status: string;
-  votes_confirmed?: number;
-  created_at: string;
+  votesConfirmed?: number;
+  createdAt: string;
 }
 
 const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ reportId, reportTitle, onClose }) => {
@@ -48,8 +48,8 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
     const fetchElectionData = async () => {
       try {
         const [{ data: bus }, { data: fiscs }] = await Promise.all([
-          supabase.from('boletins_urna').select('*').order('created_at', { ascending: false }),
-          supabase.from('election_fiscais').select('*').order('created_at', { ascending: false }),
+          supabase.from('boletins_urna').select('*').order('createdAt', { ascending: false }),
+          supabase.from('election_fiscais').select('*').order('createdAt', { ascending: false }),
         ]);
         setBuData(bus || []);
         setFiscais(fiscs || []);
@@ -287,7 +287,7 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                           </span>
                         </td>
                         <td className="px-6 py-4 text-slate-500 text-xs">
-                          {new Date(bu.created_at).toLocaleString('pt-BR')}
+                          {new Date(bu.createdAt).toLocaleString('pt-BR')}
                         </td>
                       </tr>
                     ))}
@@ -512,7 +512,7 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                             </span>
                           </td>
                           <td className="px-6 py-3 text-slate-500 text-xs">
-                            {new Date(bu.created_at).toLocaleTimeString('pt-BR')}
+                            {new Date(bu.createdAt).toLocaleTimeString('pt-BR')}
                           </td>
                         </tr>
                       ))}
@@ -744,7 +744,7 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
                           </span>
                         </td>
                         <td className="px-6 py-3 text-slate-500 text-xs">
-                          {new Date(bu.created_at).toLocaleString('pt-BR')}
+                          {new Date(bu.createdAt).toLocaleString('pt-BR')}
                         </td>
                       </tr>
                     ))}

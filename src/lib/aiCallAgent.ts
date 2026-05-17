@@ -132,10 +132,10 @@ const getMonthSpentCents = async (supabaseAdmin: any, campaignId: string): Promi
     const startOfMonth = new Date(); startOfMonth.setUTCDate(1); startOfMonth.setUTCHours(0,0,0,0);
     const { data: rows } = await supabaseAdmin
         .from('agent_runs')
-        .select('cost_cents_usd')
-        .eq('campaign_id', campaignId)
-        .gte('created_at', startOfMonth.toISOString());
-    return (rows || []).reduce((s: number, r: any) => s + (r.cost_cents_usd || 0), 0);
+        .select('"costCentsUsd"')
+        .eq('campaignId', campaignId)
+        .gte('createdAt', startOfMonth.toISOString());
+    return (rows || []).reduce((s: number, r: any) => s + (r.costCentsUsd || 0), 0);
 };
 
 // ---------------------------------------------------------------------------
@@ -354,17 +354,17 @@ export async function callAgent(
         if (spent >= MONTHLY_CAP_CENTS_USD) {
             // Loga a tentativa bloqueada pra rastreabilidade
             await supabaseAdmin.from('agent_runs').insert({
-                campaign_id: opts.campaignId,
-                user_id: opts.userId || null,
-                manager_run_id: opts.managerRunId || null,
-                agent_id: agentId,
+                campaignId: opts.campaignId,
+                userId: opts.userId || null,
+                managerRunId: opts.managerRunId || null,
+                agentId,
                 provider: 'none',
                 model: 'none',
                 action: 'budget_blocked',
-                prompt_excerpt: prompt.slice(0, 500),
-                tokens_in: 0,
-                tokens_out: 0,
-                cost_cents_usd: 0,
+                promptExcerpt: prompt.slice(0, 500),
+                tokensIn: 0,
+                tokensOut: 0,
+                costCentsUsd: 0,
                 status: 'budget_exceeded',
                 error: `Mensal ${spent} cents >= cap ${MONTHLY_CAP_CENTS_USD}`,
             }).then(() => {}, (e: any) => console.error('[callAgent] log budget_exceeded falhou:', e));
@@ -396,19 +396,19 @@ export async function callAgent(
                 let runId = '';
                 if (supabaseAdmin) {
                     const { data } = await supabaseAdmin.from('agent_runs').insert({
-                        campaign_id: opts.campaignId,
-                        user_id: opts.userId || null,
-                        manager_run_id: opts.managerRunId || null,
-                        agent_id: agentId,
+                        campaignId: opts.campaignId,
+                        userId: opts.userId || null,
+                        managerRunId: opts.managerRunId || null,
+                        agentId,
                         provider,
                         model: raw.model,
                         action: 'chat',
-                        prompt_excerpt: prompt.slice(0, 500),
-                        response_excerpt: (raw.text || '').slice(0, 500),
-                        tokens_in: raw.tokensIn,
-                        tokens_out: raw.tokensOut,
-                        cost_cents_usd: costCents,
-                        latency_ms: latencyMs,
+                        promptExcerpt: prompt.slice(0, 500),
+                        responseExcerpt: (raw.text || '').slice(0, 500),
+                        tokensIn: raw.tokensIn,
+                        tokensOut: raw.tokensOut,
+                        costCentsUsd: costCents,
+                        latencyMs,
                         status: 'ok',
                         metadata: {
                             temperature: config.temperature,
@@ -444,18 +444,18 @@ export async function callAgent(
                 // Log de erro
                 if (supabaseAdmin) {
                     await supabaseAdmin.from('agent_runs').insert({
-                        campaign_id: opts.campaignId,
-                        user_id: opts.userId || null,
-                        manager_run_id: opts.managerRunId || null,
-                        agent_id: agentId,
+                        campaignId: opts.campaignId,
+                        userId: opts.userId || null,
+                        managerRunId: opts.managerRunId || null,
+                        agentId,
                         provider,
                         model: config.model?.[provider] || DEFAULT_MODELS[provider],
                         action: 'chat',
-                        prompt_excerpt: prompt.slice(0, 500),
-                        tokens_in: 0,
-                        tokens_out: 0,
-                        cost_cents_usd: 0,
-                        latency_ms: latencyMs,
+                        promptExcerpt: prompt.slice(0, 500),
+                        tokensIn: 0,
+                        tokensOut: 0,
+                        costCentsUsd: 0,
+                        latencyMs,
                         status: err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '') ? 'timeout' : 'error',
                         error: String(err?.message || err).slice(0, 500),
                         metadata: { attempt, willRetry, willFallbackProvider: isLastAttempt && provider !== providers[providers.length - 1] },

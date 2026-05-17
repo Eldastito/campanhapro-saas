@@ -43,7 +43,7 @@ const WarRoomFeed: React.FC = () => {
         event: 'INSERT',
         schema: 'public',
         table: 'war_room_intelligence',
-        filter: `campaign_id=eq.${user.campaignId}`
+        filter: `campaignId=eq.${user.campaignId}`
       }, (payload: any) => {
         setInsights(prev => [normalizeInsight(payload.new), ...prev]);
       })
