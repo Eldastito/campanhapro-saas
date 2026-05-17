@@ -230,8 +230,17 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
   router.post('/conversations/:id/suggest', async (req: Request, res: Response) => {
     try {
       const campaignId = (req as any).user?.campaignId;
-      const { id } = req.params;
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      // Verify conversation belongs to this campaign before generating a suggestion
+      const { data: convo } = await supabaseAdmin
+        .from('channel_conversations')
+        .select('id, campaignId')
+        .eq('id', req.params.id)
+        .single();
+      if (!convo || convo.campaignId !== campaignId) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
       if (!OPENAI_API_KEY) return res.status(503).json({ error: 'AI não configurada' });
