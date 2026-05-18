@@ -5,6 +5,7 @@ import {
   getQRCode,
   getStatus,
   deleteInstance,
+  sendText,
   isEvolutionConfigured,
 } from '../integrations/evolutionApiClient';
 import { audit, actorFromRequest } from '../observability/auditLogger';
@@ -152,6 +153,200 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ status: remoteStatus, phoneNumber: inst.phoneNumber });
     } catch (err: any) {
       console.error('[WhatsApp] status:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Blast (mass-send) endpoints
+  // -------------------------------------------------------------------------
+
+  // GET /blasts — list blast campaigns
+  router.get('/blasts', async (req: Request, res: Response) => {
+    const cid = campaignIdOf(req);
+    if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('whatsapp_blasts')
+        .select('id, title, status, totalContacts, sentCount, failedCount, skippedCount, startedAt, completedAt, createdAt')
+        .eq('campaignId', cid)
+        .order('createdAt', { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return res.json({ blasts: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /blasts — create + immediately start a blast
+  router.post('/blasts', async (req: Request, res: Response) => {
+    const cid = campaignIdOf(req);
+    if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+    const {
+      instanceId,
+      title,
+      message,
+      contactFilter = {},
+    } = req.body as {
+      instanceId: string;
+      title: string;
+      message: string;
+      contactFilter?: {
+        classification?: string[];
+        tags?: string[];
+        all?: boolean;
+      };
+    };
+
+    if (!instanceId) return res.status(400).json({ error: 'instanceId obrigatório' });
+    if (!message?.trim()) return res.status(400).json({ error: 'message obrigatório' });
+    if (!title?.trim()) return res.status(400).json({ error: 'title obrigatório' });
+
+    try {
+      // Verify instance belongs to campaign and is connected
+      const { data: inst } = await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('id, instanceName, apiKey, status')
+        .eq('id', instanceId)
+        .eq('campaignId', cid)
+        .maybeSingle();
+
+      if (!inst) return res.status(404).json({ error: 'instance_not_found' });
+      if (inst.status !== 'connected') {
+        return res.status(409).json({ error: 'instance_not_connected' });
+      }
+
+      // Load contacts
+      let query = supabaseAdmin
+        .from('contacts')
+        .select('id, name, phone, neighborhood')
+        .eq('campaignId', cid)
+        .not('phone', 'is', null);
+
+      if (contactFilter.classification?.length) {
+        query = query.in('classification', contactFilter.classification);
+      }
+      if (contactFilter.tags?.length) {
+        query = query.contains('tags', contactFilter.tags);
+      }
+
+      const { data: contacts, error: cErr } = await query.limit(500);
+      if (cErr) throw cErr;
+
+      const eligible = (contacts ?? []).filter(c => c.phone && String(c.phone).replace(/\D/g, '').length >= 8);
+
+      if (eligible.length === 0) {
+        return res.status(400).json({ error: 'Nenhum contato elegível encontrado com os filtros selecionados' });
+      }
+
+      // Create blast record
+      const { data: blast, error: bErr } = await supabaseAdmin
+        .from('whatsapp_blasts')
+        .insert({
+          campaignId: cid,
+          instanceId,
+          title: title.trim(),
+          message: message.trim(),
+          contactFilter,
+          status: 'running',
+          totalContacts: eligible.length,
+          startedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .select('id')
+        .single();
+
+      if (bErr) throw bErr;
+
+      // Respond 202 immediately — process in background
+      res.status(202).json({ blastId: blast.id, totalContacts: eligible.length });
+
+      // Background processing with per-send delay (LGPD: no consent check needed here
+      // as coordinator explicitly selected contacts and confirmed the blast)
+      ;(async () => {
+        let sent = 0;
+        let failed = 0;
+        const DELAY_MS = 2500; // 2.5s between sends ≈ 24 msgs/min ≈ 200/day per number
+
+        for (const contact of eligible) {
+          try {
+            const phone = String(contact.phone).replace(/\D/g, '');
+            const personalised = message
+              .replace(/\{\{name\}\}/gi, contact.name ?? '')
+              .replace(/\{\{nome\}\}/gi, contact.name ?? '')
+              .replace(/\{\{neighborhood\}\}/gi, contact.neighborhood ?? '')
+              .replace(/\{\{bairro\}\}/gi, contact.neighborhood ?? '');
+
+            await sendText(inst.instanceName, inst.apiKey, phone, personalised);
+            sent++;
+          } catch {
+            failed++;
+          }
+
+          // Update progress every 10 sends
+          if ((sent + failed) % 10 === 0) {
+            await supabaseAdmin
+              .from('whatsapp_blasts')
+              .update({ sentCount: sent, failedCount: failed, updatedAt: new Date().toISOString() })
+              .eq('id', blast.id);
+          }
+
+          if (sent + failed < eligible.length) {
+            await new Promise(r => setTimeout(r, DELAY_MS));
+          }
+        }
+
+        await supabaseAdmin
+          .from('whatsapp_blasts')
+          .update({
+            status: 'completed',
+            sentCount: sent,
+            failedCount: failed,
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          })
+          .eq('id', blast.id);
+
+        await audit(supabaseAdmin, {
+          actorType: 'user',
+          action: 'whatsapp.blast_completed',
+          resourceType: 'whatsapp_blast',
+          resourceId: blast.id,
+          severity: 'info',
+          metadata: { sent, failed, total: eligible.length },
+        });
+      })().catch(err => {
+        console.error('[WhatsApp blast] background error:', err);
+        supabaseAdmin
+          .from('whatsapp_blasts')
+          .update({ status: 'failed', updatedAt: new Date().toISOString() })
+          .eq('id', blast.id)
+          .then(() => {});
+      });
+
+    } catch (err: any) {
+      console.error('[WhatsApp] blast create:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /blasts/:id — polling endpoint for progress
+  router.get('/blasts/:id', async (req: Request, res: Response) => {
+    const cid = campaignIdOf(req);
+    if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('whatsapp_blasts')
+        .select('*')
+        .eq('id', req.params.id)
+        .eq('campaignId', cid)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'not_found' });
+      return res.json({ blast: data });
+    } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
   });

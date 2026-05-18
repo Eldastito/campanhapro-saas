@@ -36,9 +36,10 @@ const BillingPage = React.lazy(() => import('./pages/BillingPage'));
 const GoalsPage = React.lazy(() => import('./pages/GoalsPage'));
 const RoutinesPage = React.lazy(() => import('./pages/RoutinesPage'));
 const MeetingsPage = React.lazy(() => import('./pages/MeetingsPage'));
+const ContentStudioPage = React.lazy(() => import('./pages/ContentStudioPage'));
 
 // Import Icons for Tabs
-import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays } from 'lucide-react';
+import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays, Sparkles } from 'lucide-react';
 import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
     UsersGroupIcon, CurrencyDollarIcon, AcademicCapIcon, CogIcon,
@@ -74,7 +75,8 @@ const AdminApp: React.FC = () => {
                 'crm': ['CRM'],
                 'analytics': ['Analytics'],
                 'election_day': ['Dia das Eleições'],
-                'meetings': ['Reuniões']
+                'meetings': ['Reuniões'],
+                'content_studio': ['Estúdio']
             };
 
             const enabledTabs = ['Permissões', 'Configurações']; 
@@ -98,7 +100,7 @@ const AdminApp: React.FC = () => {
                 'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
                 'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
                 'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões'
+                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio'
             ];
             mandatory.forEach(tab => {
                 if (!allowedTabs.includes(tab)) allowedTabs.push(tab);
@@ -134,6 +136,7 @@ const AdminApp: React.FC = () => {
         'Objetivos': <Target className="h-5 w-5" />,
         'Rotinas': <RefreshCw className="h-5 w-5" />,
         'Reuniões': <CalendarDays className="h-5 w-5" />,
+        'Estúdio': <Sparkles className="h-5 w-5" />,
     };
 
     // Componentes mapeados para as abas (deve seguir a ordem lógica do ALL_TABS para o componente Tabs indexar corretamente)
@@ -163,6 +166,7 @@ const AdminApp: React.FC = () => {
         'Objetivos': <GoalsPage />,
         'Rotinas': <RoutinesPage />,
         'Reuniões': <MeetingsPage />,
+        'Estúdio': <ContentStudioPage />,
     };
 
     if (isLoading) {

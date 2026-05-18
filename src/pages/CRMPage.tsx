@@ -3,7 +3,7 @@ import {
   Users, UserPlus, Search, Calendar,
   MessageSquare, TrendingUp, Phone, MapPin,
   Sparkles, Target, Activity,
-  Award, Filter, MoreVertical, Send
+  Award, Filter, MoreVertical, Send, Upload, Zap
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer,
@@ -14,6 +14,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { askCrmSpecialist } from '../services/agentsClientService';
 import { logSubmissionGeo } from '../utils/geoTracking';
 import { Brain, Loader2 } from 'lucide-react';
+import CsvImportModal from '../components/crm/CsvImportModal';
+import WhatsAppBlastModal from '../components/crm/WhatsAppBlastModal';
 
 interface ClassifyContactsButtonProps {
   campaignId: string | undefined;
@@ -67,6 +69,8 @@ const CRMPage: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<any | null>(null);
   const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isCsvImportOpen, setIsCsvImportOpen] = useState(false);
+  const [isBlastOpen, setIsBlastOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [newContact, setNewContact] = useState({
     name: '',
@@ -232,6 +236,19 @@ const CRMPage: React.FC = () => {
             </button>
           </div>
           <ClassifyContactsButton campaignId={user?.campaignId} onDone={fetchContacts} />
+          <button
+            onClick={() => setIsBlastOpen(true)}
+            className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-emerald-700/20 transition-all text-sm"
+            title="Disparar mensagem em massa via WhatsApp"
+          >
+            <Zap className="w-4 h-4" /> Disparar WA
+          </button>
+          <button
+            onClick={() => setIsCsvImportOpen(true)}
+            className="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-indigo-700/20 transition-all text-sm"
+          >
+            <Upload className="w-4 h-4" /> Importar CSV
+          </button>
           <button
             onClick={() => setIsAddModalOpen(true)}
             className="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all"
@@ -723,6 +740,23 @@ const CRMPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* CSV Import Modal */}
+      {isCsvImportOpen && user?.campaignId && (
+        <CsvImportModal
+          campaignId={user.campaignId}
+          onDone={(_count) => { fetchContacts(); }}
+          onClose={() => setIsCsvImportOpen(false)}
+        />
+      )}
+
+      {/* WhatsApp Blast Modal */}
+      {isBlastOpen && user?.campaignId && (
+        <WhatsAppBlastModal
+          totalContactsAll={contacts.length}
+          onClose={() => setIsBlastOpen(false)}
+        />
       )}
     </div>
   );
