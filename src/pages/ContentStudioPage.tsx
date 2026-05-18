@@ -281,7 +281,7 @@ const PostDetailPanel: React.FC<{
     }
   };
 
-  const callAction = async (path: string, body?: any, successLabel = 'OK') => {
+  const callAction = async (path: string, body?: any) => {
     setBusy(path);
     try {
       const res = await authedFetch(`/api/v1/content/${post.id}/${path}`, {
