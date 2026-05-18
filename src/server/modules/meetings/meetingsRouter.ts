@@ -273,7 +273,7 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
   // -------------------------------------------------------------------------
   router.post(
     '/:id/transcribe',
-    express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '150mb' }),
+    express.raw({ type: ['audio/*', 'application/octet-stream'], limit: '25mb' }),
     async (req: Request, res: Response) => {
       const campaignId = campaignIdOf(req);
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
@@ -288,6 +288,11 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
       const audioBuffer = req.body as Buffer;
       if (!audioBuffer || audioBuffer.length < 100) {
         return res.status(400).json({ error: 'Áudio vazio ou inválido' });
+      }
+      // Whisper API hard-limits at 25MB. Reject early with a clear message
+      // instead of forwarding and surfacing a 413 from OpenAI.
+      if (audioBuffer.length > 25 * 1024 * 1024) {
+        return res.status(413).json({ error: 'Áudio excede 25MB. Reuniões longas devem ser divididas em segmentos menores.' });
       }
 
       try {
