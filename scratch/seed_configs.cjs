@@ -1,7 +1,13 @@
+require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
-const SUPABASE_URL = 'https://jvmtcsxoxgzepslxqtdy.supabase.co';
-const SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp2bXRjc3hveGd6ZXBzbHhxdGR5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjUxNjc3MywiZXhwIjoyMDkyMDkyNzczfQ.SvceskeyZRolCTJj8U-u_Ww28s7HlNCMmh2jZzyGiGA';
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+    console.error("Erro: VITE_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não encontrados no .env");
+    process.exit(1);
+}
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -13,7 +19,6 @@ const campaignIds = [
 async function seed() {
     console.log("Iniciando semeadura de dados...");
 
-    // 1. Platform Stats
     console.log("Semeando platform_stats...");
     await supabase.from('platform_stats').upsert({
         id: 'global',
@@ -21,7 +26,6 @@ async function seed() {
         totalCost: 0
     });
 
-    // 2. Campaign Configs
     console.log("Semeando campaign_configs...");
     for (const cid of campaignIds) {
         await supabase.from('campaign_configs').upsert({
