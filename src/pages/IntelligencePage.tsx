@@ -4,13 +4,13 @@ import IntelligenceOverview from '../components/intelligence/IntelligenceOvervie
 import IntelligenceFactors from '../components/intelligence/IntelligenceFactors';
 import IntelligenceScenarios from '../components/intelligence/IntelligenceScenarios';
 import IntelligenceReports from '../components/intelligence/IntelligenceReports';
+import ExaForgePanel from '../components/intelligence/ExaForgePanel';
 
-const SUBTABS = ['Visão Geral', 'Fatores', 'Cenários', 'Relatórios'];
+const SUBTABS = ['Visão Geral', 'Fatores', 'Cenários', 'Relatórios', 'Base de Conhecimento'];
 
 const IntelligencePage: React.FC = () => {
   const [syncKey, setSyncKey] = React.useState(0);
 
-  // Increment to signal child components that a new sync happened
   const handleSyncComplete = () => setSyncKey(k => k + 1);
 
   return (
@@ -20,6 +20,7 @@ const IntelligencePage: React.FC = () => {
         <IntelligenceFactors key={syncKey} />
         <IntelligenceScenarios key={syncKey} />
         <IntelligenceReports key={syncKey} />
+        <ExaForgePanel />
       </Tabs>
     </div>
   );
