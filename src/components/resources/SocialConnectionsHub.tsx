@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
+import WhatsAppInstancesPanel from './WhatsAppInstancesPanel';
 
 interface ConnectionStatus {
   provider: string;
@@ -211,6 +212,8 @@ export const SocialConnectionsHub: React.FC = () => {
           ONDE ENCONTRAR MEUS TOKENS?
         </button>
       </div>
+
+      <WhatsAppInstancesPanel />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {providers.map((p) => {

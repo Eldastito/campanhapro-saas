@@ -70,18 +70,24 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
    * POST /api/v1/channels/send
    * Sends an outbound message. Requires explicit consent unless replying
    * within an open conversation (24h window per Meta policy).
+   *
+   * Provider selection:
+   *   - If body.whatsappInstanceId is given → Evolution API
+   *   - Else if an existing conversation has provider='evolution' → reuse that instance
+   *   - Else → fall back to Meta Cloud API
    */
   router.post('/send', async (req: Request, res: Response) => {
     try {
       const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
       const userId = (req as any).user?.id ?? null;
-      const { channel, to, text, contactId, templateName, templateParams } = req.body as {
+      const { channel, to, text, contactId, templateName, templateParams, whatsappInstanceId } = req.body as {
         channel: Channel;
         to: string;
         text?: string;
         contactId?: string;
         templateName?: string;
         templateParams?: string[];
+        whatsappInstanceId?: string;
       };
 
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
@@ -89,15 +95,18 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
       if (!text && !templateName) return res.status(400).json({ error: 'text ou templateName obrigatório' });
 
       // Consent check (skipped only for replies to existing open conversations)
+      // Also: load existing conversation to inherit provider/instance routing
+      let existingConvo: { id?: string; lastInboundAt?: string | null; provider?: string; whatsappInstanceId?: string | null } | null = null;
       if (contactId) {
         const consent = await hasOutboundConsent(supabaseAdmin, campaignId, contactId, channel);
         const { data: openConvo } = await supabaseAdmin
           .from('channel_conversations')
-          .select('id, lastInboundAt')
+          .select('id, lastInboundAt, provider, whatsappInstanceId')
           .eq('campaignId', campaignId)
           .eq('contactId', contactId)
           .eq('channel', channel)
           .maybeSingle();
+        existingConvo = openConvo as any;
 
         const within24h =
           openConvo?.lastInboundAt &&
@@ -114,16 +123,36 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
           });
           return res.status(403).json({ error: 'no_consent_and_outside_24h_window' });
         }
+      } else {
+        // No contactId — look up conversation by externalId so we can still inherit provider
+        const { data: openConvo } = await supabaseAdmin
+          .from('channel_conversations')
+          .select('id, lastInboundAt, provider, whatsappInstanceId')
+          .eq('campaignId', campaignId)
+          .eq('channel', channel)
+          .eq('externalId', to)
+          .maybeSingle();
+        existingConvo = openConvo as any;
       }
 
-      const result = await sendMessage({
-        campaignId,
-        channel,
-        to,
-        text,
-        templateName,
-        templateParams,
-      });
+      // Provider routing
+      const resolvedInstanceId = whatsappInstanceId ?? existingConvo?.whatsappInstanceId ?? undefined;
+      const provider: 'meta' | 'evolution' =
+        resolvedInstanceId || existingConvo?.provider === 'evolution' ? 'evolution' : 'meta';
+
+      const result = await sendMessage(
+        {
+          campaignId,
+          channel,
+          to,
+          text,
+          templateName,
+          templateParams,
+          provider,
+          whatsappInstanceId: resolvedInstanceId,
+        },
+        supabaseAdmin,
+      );
 
       if (!result.success) {
         return res.status(502).json({ error: result.error ?? 'send_failed' });
@@ -137,6 +166,8 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
           {
             campaignId,
             channel,
+            provider,
+            whatsappInstanceId: resolvedInstanceId ?? null,
             contactId: contactId ?? null,
             externalId: to,
             lastMessageAt: now,
@@ -153,6 +184,8 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
           campaignId,
           direction: 'outbound',
           channel,
+          provider,
+          whatsappInstanceId: resolvedInstanceId ?? null,
           providerMessageId: result.messageId ?? null,
           body: text ?? `[template:${templateName}]`,
           sentByUserId: userId,
@@ -166,14 +199,14 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
             metric: 'message_outbound',
             quantity: 1,
             costCents: 0,
-            metadata: { channel, template: !!templateName },
+            metadata: { channel, template: !!templateName, provider },
           });
         } catch (e) {
           // never block sends on billing telemetry
         }
       }
 
-      return res.json({ ok: true, messageId: result.messageId });
+      return res.json({ ok: true, messageId: result.messageId, provider });
     } catch (err: any) {
       console.error('[Channels] send:', err);
       return res.status(500).json({ error: err.message });
