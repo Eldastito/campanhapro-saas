@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS whatsapp_blasts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "campaignId" text NOT NULL,
-  "instanceId" text NOT NULL REFERENCES whatsapp_instances(id) ON DELETE RESTRICT,
+  "instanceId" uuid NOT NULL REFERENCES whatsapp_instances(id) ON DELETE RESTRICT,
   title text NOT NULL,
   message text NOT NULL,        -- template with {{name}}, {{neighborhood}} variables
   "contactFilter" jsonb NOT NULL DEFAULT '{}', -- { classification?, tags?, all: true }

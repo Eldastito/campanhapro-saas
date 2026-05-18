@@ -21,19 +21,20 @@ CREATE INDEX IF NOT EXISTS meeting_records_campaign_created
 
 ALTER TABLE meeting_records ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "campaign_members_meetings" ON meeting_records
-  FOR ALL USING (
-    "campaignId" IN (
-      SELECT cp."campaignId"
-      FROM campaign_profiles cp
-      WHERE cp."userId" = auth.uid()
-    )
-  );
+CREATE POLICY "meeting_records_select_own" ON meeting_records
+  FOR SELECT USING ("campaignId" = get_user_campaign_id_text() OR is_supreme_admin());
 
-CREATE POLICY "supreme_admin_meetings" ON meeting_records
-  FOR ALL USING (
-    auth.jwt() ->> 'email' = current_setting('app.supreme_admin_email', true)
-  );
+CREATE POLICY "meeting_records_insert_own" ON meeting_records
+  FOR INSERT WITH CHECK ("campaignId" = get_user_campaign_id_text() OR is_supreme_admin());
+
+CREATE POLICY "meeting_records_update_own" ON meeting_records
+  FOR UPDATE USING ("campaignId" = get_user_campaign_id_text() OR is_supreme_admin());
+
+CREATE POLICY "meeting_records_delete_own" ON meeting_records
+  FOR DELETE USING ("campaignId" = get_user_campaign_id_text() OR is_supreme_admin());
+
+CREATE POLICY "meeting_records_service_role" ON meeting_records
+  FOR ALL USING (auth.role() = 'service_role');
 
 -- Add meetings feature to Pro and Enterprise plans
 UPDATE plans
