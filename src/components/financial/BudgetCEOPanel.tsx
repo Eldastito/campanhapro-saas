@@ -141,7 +141,7 @@ const BudgetCEOPanel: React.FC = () => {
     return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-slate-500 animate-spin" /></div>;
   }
 
-  if (!summary || summary.totalBudgetCents <= 0) {
+  if (!summary || !Array.isArray(summary.buckets) || summary.totalBudgetCents <= 0) {
     return (
       <Card>
         <div className="text-center py-10 space-y-2">
