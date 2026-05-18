@@ -2,11 +2,27 @@ import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getActiveSubscription, isWithinAiBudget } from '../modules/billing/billingService';
 
+const FREE_PLAN_ID = process.env.LIFECYCLE_DOWNGRADE_PLAN ?? 'free';
+
+async function resolveEffectiveFeatures(
+  supabase: SupabaseClient,
+  campaignId: string,
+): Promise<string[]> {
+  const sub = await getActiveSubscription(supabase, campaignId);
+  if (sub) return sub.features;
+  const { data: freePlan } = await supabase
+    .from('plans')
+    .select('features')
+    .eq('id', FREE_PLAN_ID)
+    .maybeSingle();
+  return (freePlan?.features as string[]) ?? [];
+}
+
 /**
  * Express middleware factory: rejects requests when the active subscription
- * does not include the named feature. Use sparingly — many features are
- * already gated by the tab visibility in CampaignWebApp; this is a
- * defense-in-depth check on the server.
+ * does not include the named feature. Campaigns without any subscription
+ * default to the Free plan's features (so paid features are blocked, but
+ * Free features stay accessible).
  */
 export function requireFeature(supabase: SupabaseClient, feature: string): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -14,21 +30,22 @@ export function requireFeature(supabase: SupabaseClient, feature: string): Reque
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
 
     try {
-      const sub = await getActiveSubscription(supabase, campaignId);
-      if (!sub) {
-        return res.status(402).json({ error: 'no_active_subscription', feature });
-      }
-      if (!sub.features.includes(feature)) {
-        return res.status(402).json({ error: 'feature_not_in_plan', feature, planId: sub.planId });
+      const features = await resolveEffectiveFeatures(supabase, campaignId);
+      if (!features.includes(feature)) {
+        return res.status(402).json({
+          error: 'feature_not_in_plan',
+          feature,
+          upgradeRequired: true,
+        });
       }
       next();
     } catch (err: any) {
-      // Fail-open during early bring-up: subscriptions table may not be populated yet.
-      // In production this should fail-closed — toggle via env var.
-      if (process.env.BILLING_FAIL_CLOSED === 'true') {
-        return res.status(500).json({ error: 'billing_check_failed' });
+      // Fail-closed by default; flip to fail-open via env for emergency bypass
+      if (process.env.BILLING_FAIL_OPEN === 'true') {
+        return next();
       }
-      next();
+      console.error('[requireFeature] check failed:', err.message);
+      return res.status(500).json({ error: 'billing_check_failed' });
     }
   };
 }

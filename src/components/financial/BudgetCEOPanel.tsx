@@ -66,6 +66,7 @@ const BudgetCEOPanel: React.FC = () => {
   const [active, setActive] = React.useState<Allocation[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [generating, setGenerating] = React.useState(false);
+  const [pendingTaskId, setPendingTaskId] = React.useState<string | null>(null);
   const [actingId, setActingId] = React.useState<string | null>(null);
   const [ceoSummary, setCeoSummary] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -96,6 +97,35 @@ const BudgetCEOPanel: React.FC = () => {
 
   React.useEffect(() => { load(); }, [load]);
 
+  // Poll task status while CEO plan is running
+  React.useEffect(() => {
+    if (!pendingTaskId || !user?.campaignId) return;
+    const poll = async () => {
+      try {
+        const res = await authedFetch(`/api/v1/budget/ceo-plan/status/${pendingTaskId}`);
+        const json = await res.json();
+        const status = json.task?.status as string | undefined;
+        if (status === 'completed') {
+          setPendingTaskId(null);
+          setGenerating(false);
+          try {
+            const parsed = typeof json.task.result === 'string'
+              ? JSON.parse(json.task.result)
+              : json.task.result;
+            if (parsed?.summary) setCeoSummary(parsed.summary);
+          } catch { /* summary fallback via load() */ }
+          await load();
+        } else if (status === 'failed') {
+          setPendingTaskId(null);
+          setGenerating(false);
+          setError(json.task?.errorMessage ?? 'Falha ao gerar plano do CEO');
+        }
+      } catch { /* ignore transient polling errors */ }
+    };
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, [pendingTaskId, user?.campaignId, load]);
+
   const generatePlan = async () => {
     if (!user?.campaignId || generating) return;
     setGenerating(true);
@@ -108,12 +138,13 @@ const BudgetCEOPanel: React.FC = () => {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erro ao gerar plano');
-      setCeoSummary(json.summary ?? null);
-      await load();
+      // 202 Accepted — task queued; polling effect will track completion
+      if (json.taskId) {
+        setPendingTaskId(json.taskId);
+      }
     } catch (err: any) {
-      setError(err.message);
-    } finally {
       setGenerating(false);
+      setError(err.message);
     }
   };
 
@@ -141,7 +172,7 @@ const BudgetCEOPanel: React.FC = () => {
     return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-slate-500 animate-spin" /></div>;
   }
 
-  if (!summary || summary.totalBudgetCents <= 0) {
+  if (!summary || !Array.isArray(summary.buckets) || summary.totalBudgetCents <= 0) {
     return (
       <Card>
         <div className="text-center py-10 space-y-2">
