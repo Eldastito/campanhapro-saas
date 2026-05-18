@@ -7,7 +7,7 @@ const BASE_URL = process.env.PAPERCLIP_URL;
 
 export interface AgentTask {
   campaignId: string;
-  type: 'strategic-plan' | 'engagement-analysis' | 'risk-report' | 'compliance-check' | 'budget-ceo-plan';
+  type: 'strategic-plan' | 'engagement-analysis' | 'risk-report' | 'compliance-check' | 'budget-ceo-plan' | 'meeting-action';
   payload: Record<string, unknown>;
   requiresApproval?: boolean;
 }

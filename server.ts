@@ -34,6 +34,7 @@ import { createTeamInvitesRouter, createTeamInvitesPublicRouter } from './src/se
 import { createGoalsRouter } from './src/server/modules/goals/goalsRouter';
 import { createRoutinesRouter } from './src/server/modules/routines/routinesRouter';
 import { createBudgetRouter } from './src/server/modules/budget/budgetRouter';
+import { createMeetingsRouter } from './src/server/modules/meetings/meetingsRouter';
 import { requireAiBudget, requireFeature } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
@@ -225,6 +226,7 @@ async function startServer() {
     app.use('/api/v1/goals', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'goals'), createGoalsRouter(supabaseAdmin));
     app.use('/api/v1/routines', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'routines'), createRoutinesRouter(supabaseAdmin));
     app.use('/api/v1/budget', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'budget_ceo'), createBudgetRouter(supabaseAdmin, requireAiBudget(supabaseAdmin)));
+    app.use('/api/v1/meetings', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'meetings'), createMeetingsRouter(supabaseAdmin));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
     const obsRouter = createObservabilityRouter(supabaseAdmin);
     app.use('/api/v1/observability', (req, res, next) => {
