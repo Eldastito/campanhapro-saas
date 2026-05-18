@@ -2,6 +2,7 @@ import { Router, Request, Response, RequestHandler } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { callAgent } from '../../../lib/aiCallAgent';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { enqueueTask, executeTask, registerLocalTaskHandler } from '../paperclip/taskQueue';
 
 type Bucket = 'recursos' | 'financeiro' | 'material' | 'pessoal' | 'redes_sociais' | 'outros' | 'reserva';
 
@@ -100,6 +101,124 @@ async function loadActiveAllocations(supabaseAdmin: SupabaseClient, campaignId: 
   }
   return result;
 }
+
+// CEO prompts kept at module level so they're shared between the local handler and tests
+const CEO_SYSTEM_PROMPT = [
+  'Você é o CEO de uma campanha eleitoral. Sua missão é VENCER a eleição respeitando o orçamento.',
+  'Sua única responsabilidade nesta chamada: ALOCAR o orçamento entre 7 buckets, retornando JSON estrito.',
+  'Regras:',
+  '- A soma dos buckets NÃO pode exceder o orçamento disponível (orçamento total - já gasto).',
+  '- Sempre reserve pelo menos 10% para o bucket "reserva" (imprevistos).',
+  '- Investimento em "redes_sociais" deve crescer conforme se aproxima a eleição (curva sigmoide).',
+  '- Em campanha brasileira típica: pessoal ~30%, material ~25%, recursos ~15%, redes_sociais 10-25%, financeiro ~5%, outros ~5%, reserva 10%.',
+  '- Quanto mais perto da eleição, mais peso em redes_sociais e material; menos em pessoal estrutural.',
+  'Buckets:',
+  '  recursos       — combustível, aluguel de carro, aluguel de espaço',
+  '  financeiro     — advogado, contador, taxas administrativas',
+  '  material       — material gráfico, eventos, comícios',
+  '  pessoal        — salários, ajuda de custo, alimentação',
+  '  redes_sociais  — marketing digital, impulsionamento, anúncios',
+  '  outros         — gastos não categorizados',
+  '  reserva        — fundo de imprevistos (mínimo 10%)',
+  'Retorne EXCLUSIVAMENTE um objeto JSON no formato:',
+  '{ "summary": "<resumo executivo em pt-BR, 2-3 frases>",',
+  '  "allocations": [ { "bucket": "<id>", "allocatedCents": <int>, "rationale": "<por que>" } ] }',
+  'Não inclua markdown, comentários, nem texto fora do JSON.',
+].join('\n');
+
+// Registered once at module load — runs in-process when PAPERCLIP_URL is not set
+registerLocalTaskHandler('budget-ceo-plan', async (supabase, task) => {
+  const { campaignId, payload } = task;
+  const userId = (payload.userId as string) ?? null;
+
+  const [ctx, spent, allocated] = await Promise.all([
+    loadCampaignBudget(supabase, campaignId),
+    loadSpentByBucket(supabase, campaignId),
+    loadActiveAllocations(supabase, campaignId),
+  ]);
+
+  if (ctx.totalBudgetCents <= 0) {
+    throw new Error('Orçamento total não definido em Configurações');
+  }
+
+  const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
+  const remaining = Math.max(0, ctx.totalBudgetCents - totalSpent);
+
+  const userPrompt = [
+    `Orçamento total: R$ ${(ctx.totalBudgetCents / 100).toFixed(2)}`,
+    `Já gasto: R$ ${(totalSpent / 100).toFixed(2)}`,
+    `Disponível para alocação: R$ ${(remaining / 100).toFixed(2)}`,
+    ctx.electionDate ? `Eleição em: ${ctx.electionDate} (${ctx.daysUntilElection} dias)` : 'Data de eleição não definida',
+    '',
+    'Gastos atuais por bucket (cents):',
+    ...ALL_BUCKETS.map(b => `  ${b}: ${spent[b]}`),
+    '',
+    'Alocações ativas atuais (cents):',
+    ...ALL_BUCKETS.map(b => `  ${b}: ${allocated[b]}`),
+    '',
+    'Proponha a alocação ótima para os centavos restantes (' + remaining + ' cents). Retorne o JSON.',
+  ].join('\n');
+
+  const aiResult = await callAgent(supabase, 'manager', userPrompt, {
+    campaignId,
+    userId,
+    systemInstruction: CEO_SYSTEM_PROMPT,
+  });
+
+  // Parse JSON — tolerate code fences
+  const text = aiResult.text.trim();
+  const jsonStr = text.startsWith('```')
+    ? text.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '').trim()
+    : text;
+  const parsed = JSON.parse(jsonStr);
+
+  if (!Array.isArray(parsed.allocations)) {
+    throw new Error('CEO retornou JSON sem array de alocações');
+  }
+
+  const proposedTotal = parsed.allocations.reduce(
+    (sum: number, a: any) => sum + (Number(a.allocatedCents) || 0), 0
+  );
+  if (proposedTotal > remaining * 1.01) {
+    throw new Error(`Proposta excede orçamento disponível: proposto ${proposedTotal}, disponível ${remaining}`);
+  }
+
+  // Supersede any previous proposed allocations before inserting new ones
+  await supabase
+    .from('budget_allocations')
+    .update({ status: 'superseded', updatedAt: new Date().toISOString() })
+    .eq('campaignId', campaignId)
+    .eq('status', 'proposed');
+
+  const rows = parsed.allocations
+    .filter((a: any) => ALL_BUCKETS.includes(a.bucket) && Number(a.allocatedCents) > 0)
+    .map((a: any) => ({
+      campaignId,
+      bucket: a.bucket,
+      allocatedCents: Math.round(Number(a.allocatedCents)),
+      period: 'campaign',
+      rationale: typeof a.rationale === 'string' ? a.rationale : null,
+      status: 'proposed',
+      createdByAgentId: 'manager',
+      metadata: { summary: parsed.summary ?? null, model: aiResult.model, agentTaskId: task.id },
+    }));
+
+  if (rows.length === 0) {
+    throw new Error('Nenhuma alocação válida proposta');
+  }
+
+  const { error: insertError } = await supabase.from('budget_allocations').insert(rows);
+  if (insertError) throw insertError;
+
+  return {
+    result: JSON.stringify({
+      summary: parsed.summary ?? null,
+      totalProposedCents: proposedTotal,
+      model: aiResult.model,
+    }),
+    costCents: aiResult.costCentsUsd ?? 0,
+  };
+});
 
 export function createBudgetRouter(supabaseAdmin: SupabaseClient, aiBudgetGuard?: RequestHandler) {
   const router = Router();
@@ -294,154 +413,70 @@ export function createBudgetRouter(supabaseAdmin: SupabaseClient, aiBudgetGuard?
     }
   });
 
-  // POST /ceo-plan — invoke CEO agent to propose a fresh allocation
-  // CEO produces proposed rows; nothing executes until a human approves.
+  // POST /ceo-plan — enqueue a budget-ceo-plan task via Paperclip orchestration.
+  // Returns 202 immediately; frontend polls GET /ceo-plan/status/:taskId.
   const ceoPlanCore: RequestHandler = async (req: Request, res: Response) => {
     try {
       const cid = campaignIdOf(req) ?? req.body.campaignId;
       const userId = (req as any).user?.id ?? null;
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
-      const [ctx, spent, allocated] = await Promise.all([
-        loadCampaignBudget(supabaseAdmin, cid),
-        loadSpentByBucket(supabaseAdmin, cid),
-        loadActiveAllocations(supabaseAdmin, cid),
-      ]);
-
+      // Quick budget check so we fail fast before queuing
+      const ctx = await loadCampaignBudget(supabaseAdmin, cid);
       if (ctx.totalBudgetCents <= 0) {
         return res.status(400).json({ error: 'Orçamento total não definido em Configurações' });
       }
 
-      const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
-      const remaining = Math.max(0, ctx.totalBudgetCents - totalSpent);
+      const task = await enqueueTask(supabaseAdmin, {
+        campaignId: cid,
+        type: 'budget-ceo-plan',
+        payload: { userId },
+        requiresApproval: false,
+      });
 
-      const systemPrompt = [
-        'Você é o CEO de uma campanha eleitoral. Sua missão é VENCER a eleição respeitando o orçamento.',
-        'Sua única responsabilidade nesta chamada: ALOCAR o orçamento entre 7 buckets, retornando JSON estrito.',
-        'Regras:',
-        '- A soma dos buckets NÃO pode exceder o orçamento disponível (orçamento total - já gasto).',
-        '- Sempre reserve pelo menos 10% para o bucket "reserva" (imprevistos).',
-        '- Investimento em "redes_sociais" deve crescer conforme se aproxima a eleição (curva sigmoide).',
-        '- Em campanha brasileira típica: pessoal ~30%, material ~25%, recursos ~15%, redes_sociais 10-25%, financeiro ~5%, outros ~5%, reserva 10%.',
-        '- Quanto mais perto da eleição, mais peso em redes_sociais e material; menos em pessoal estrutural.',
-        'Buckets:',
-        '  recursos       — combustível, aluguel de carro, aluguel de espaço',
-        '  financeiro     — advogado, contador, taxas administrativas',
-        '  material       — material gráfico, eventos, comícios',
-        '  pessoal        — salários, ajuda de custo, alimentação',
-        '  redes_sociais  — marketing digital, impulsionamento, anúncios',
-        '  outros         — gastos não categorizados',
-        '  reserva        — fundo de imprevistos (mínimo 10%)',
-        'Retorne EXCLUSIVAMENTE um objeto JSON no formato:',
-        '{ "summary": "<resumo executivo em pt-BR, 2-3 frases>",',
-        '  "allocations": [ { "bucket": "<id>", "allocatedCents": <int>, "rationale": "<por que>" } ] }',
-        'Não inclua markdown, comentários, nem texto fora do JSON.',
-      ].join('\n');
-
-      const userPrompt = [
-        `Orçamento total: R$ ${(ctx.totalBudgetCents / 100).toFixed(2)}`,
-        `Já gasto: R$ ${(totalSpent / 100).toFixed(2)}`,
-        `Disponível para alocação: R$ ${(remaining / 100).toFixed(2)}`,
-        ctx.electionDate ? `Eleição em: ${ctx.electionDate} (${ctx.daysUntilElection} dias)` : 'Data de eleição não definida',
-        '',
-        'Gastos atuais por bucket (cents):',
-        ...ALL_BUCKETS.map(b => `  ${b}: ${spent[b]}`),
-        '',
-        'Alocações ativas atuais (cents):',
-        ...ALL_BUCKETS.map(b => `  ${b}: ${allocated[b]}`),
-        '',
-        'Proponha a alocação ótima para os centavos restantes (' + remaining + ' cents). Retorne o JSON.',
-      ].join('\n');
-
-      let aiResult;
-      try {
-        aiResult = await callAgent(supabaseAdmin, 'manager', userPrompt, {
-          campaignId: cid,
-          userId,
-          systemInstruction: systemPrompt,
-        });
-      } catch (err: any) {
-        return res.status(503).json({ error: `CEO indisponível: ${err.message}` });
-      }
-
-      // Parse JSON — tolerate code fences just in case
-      let parsed: any;
-      try {
-        const text = aiResult.text.trim();
-        const jsonStr = text.startsWith('```')
-          ? text.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '').trim()
-          : text;
-        parsed = JSON.parse(jsonStr);
-      } catch (err: any) {
-        return res.status(502).json({ error: 'CEO retornou JSON inválido', raw: aiResult.text });
-      }
-
-      if (!Array.isArray(parsed.allocations)) {
-        return res.status(502).json({ error: 'CEO sem alocações no retorno', raw: parsed });
-      }
-
-      // Validate bucket sum doesn't exceed remaining
-      const proposedTotal = parsed.allocations.reduce(
-        (sum: number, a: any) => sum + (Number(a.allocatedCents) || 0), 0
+      // Fire-and-forget — local handler runs the CEO agent and inserts budget_allocations
+      executeTask(supabaseAdmin, task.id, cid).catch(err =>
+        console.error('[Budget] CEO task execute error:', err)
       );
-      if (proposedTotal > remaining * 1.01) {
-        return res.status(422).json({
-          error: 'Proposta excede orçamento disponível',
-          proposedCents: proposedTotal,
-          availableCents: remaining,
-        });
-      }
-
-      // Insert proposed allocations (status='proposed' — waiting human approval)
-      const rows = parsed.allocations
-        .filter((a: any) => ALL_BUCKETS.includes(a.bucket) && Number(a.allocatedCents) > 0)
-        .map((a: any) => ({
-          campaignId: cid,
-          bucket: a.bucket,
-          allocatedCents: Math.round(Number(a.allocatedCents)),
-          period: 'campaign',
-          rationale: typeof a.rationale === 'string' ? a.rationale : null,
-          status: 'proposed',
-          createdByAgentId: 'manager',
-          metadata: { summary: parsed.summary ?? null, model: aiResult.model },
-        }));
-
-      if (rows.length === 0) {
-        return res.status(422).json({ error: 'Nenhuma alocação válida proposta' });
-      }
-
-      const { data: inserted, error } = await supabaseAdmin
-        .from('budget_allocations')
-        .insert(rows)
-        .select();
-
-      if (error) throw error;
 
       await audit(supabaseAdmin, {
         ...actorFromRequest(req),
-        action: 'budget.ceo_proposal',
-        resourceType: 'budget_allocation',
+        action: 'budget.ceo_plan_queued',
+        resourceType: 'agent_task',
+        resourceId: task.id,
         severity: 'info',
-        metadata: { count: rows.length, totalCents: proposedTotal, model: aiResult.model },
+        metadata: { taskId: task.id },
       });
 
-      return res.status(201).json({
-        summary: parsed.summary ?? null,
-        allocations: inserted ?? [],
-        meta: {
-          totalProposedCents: proposedTotal,
-          availableCents: remaining,
-          model: aiResult.model,
-          costCentsUsd: aiResult.costCentsUsd,
-        },
-      });
+      return res.status(202).json({ taskId: task.id, status: task.status });
     } catch (err: any) {
-      console.error('[Budget] CEO plan error:', err);
+      console.error('[Budget] CEO plan queue error:', err);
       return res.status(500).json({ error: err.message });
     }
   };
   const ceoPlanHandlers = aiBudgetGuard ? [aiBudgetGuard, ceoPlanCore] : [ceoPlanCore];
   router.post('/ceo-plan', ...ceoPlanHandlers);
+
+  // GET /ceo-plan/status/:taskId — lightweight polling endpoint for BudgetCEOPanel
+  router.get('/ceo-plan/status/:taskId', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const { data, error } = await supabaseAdmin
+        .from('agent_tasks')
+        .select('id, status, result, errorMessage, costCents, updatedAt, completedAt')
+        .eq('id', req.params.taskId)
+        .eq('campaignId', cid)
+        .eq('type', 'budget-ceo-plan')
+        .single();
+
+      if (error || !data) return res.status(404).json({ error: 'task_not_found' });
+      return res.json({ task: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
 
   return router;
 }

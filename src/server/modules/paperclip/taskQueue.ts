@@ -15,6 +15,17 @@ import {
 
 const RETRY_DELAYS_MS = [5_000, 15_000, 45_000];
 
+type LocalTaskHandler = (
+  supabase: SupabaseClient,
+  task: { id: string; campaignId: string; type: string; payload: Record<string, unknown> }
+) => Promise<{ result: string; costCents: number }>;
+
+const _localHandlers = new Map<string, LocalTaskHandler>();
+
+export function registerLocalTaskHandler(type: string, handler: LocalTaskHandler): void {
+  _localHandlers.set(type, handler);
+}
+
 export type TaskStatus =
   | 'pending'
   | 'awaiting_approval'
@@ -143,13 +154,31 @@ export async function executeTask(
     const result = await paperclipDispatch(agentTask);
 
     if (!result) {
-      // Paperclip not configured — mark completed with stub note
-      await supabase.from('agent_tasks').update({
-        status: 'completed',
-        result: JSON.stringify({ note: 'Paperclip não configurado — execução local simulada', type: task.type }),
-        costCents: 0,
-        updatedAt: new Date().toISOString(),
-      }).eq('id', taskId);
+      const localHandler = _localHandlers.get(task.type);
+      if (localHandler) {
+        // Run registered local handler (throws → retry logic in outer catch applies)
+        const { result: localResult, costCents: localCost } = await localHandler(supabase, {
+          id: taskId,
+          campaignId,
+          type: task.type,
+          payload: task.payload ?? {},
+        });
+        await supabase.from('agent_tasks').update({
+          status: 'completed',
+          result: localResult,
+          costCents: localCost,
+          completedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }).eq('id', taskId);
+      } else {
+        // Paperclip not configured and no local handler — mark completed with stub note
+        await supabase.from('agent_tasks').update({
+          status: 'completed',
+          result: JSON.stringify({ note: 'Paperclip não configurado — execução local simulada', type: task.type }),
+          costCents: 0,
+          updatedAt: new Date().toISOString(),
+        }).eq('id', taskId);
+      }
     } else {
       await supabase.from('agent_tasks').update({
         status: result.status === 'completed' ? 'completed' : 'running',
