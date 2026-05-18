@@ -17,6 +17,8 @@ import { createIntelligenceRouter } from './src/server/modules/intelligence/inte
 import { createPaperclipRouter } from './src/server/modules/paperclip/paperclipRouter';
 import { createChannelsRouter } from './src/server/modules/channels/channelsRouter';
 import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
+import { createWhatsappRouter } from './src/server/modules/whatsapp/whatsappRouter';
+import { createEvolutionWebhookRouter } from './src/server/modules/whatsapp/evolutionWebhookRouter';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
 import { createScenariosRouter } from './src/server/modules/scenarios/scenariosRouter';
 import { createObservabilityRouter } from './src/server/modules/observability/observabilityRouter';
@@ -206,7 +208,8 @@ async function startServer() {
   if (supabaseAdmin) {
     app.use('/api/v1/intelligence', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createIntelligenceRouter(supabaseAdmin));
     app.use('/api/v1/paperclip', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'paperclip'), requireAiBudget(supabaseAdmin), createPaperclipRouter(supabaseAdmin));
-    app.use('/api/v1/channels', requireAuth, messagingLimiter, createChannelsRouter(supabaseAdmin));
+    app.use('/api/v1/channels', requireAuth, messagingLimiter, requireFeature(supabaseAdmin, 'whatsapp_omnichannel'), createChannelsRouter(supabaseAdmin));
+    app.use('/api/v1/whatsapp', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'whatsapp_omnichannel'), createWhatsappRouter(supabaseAdmin));
     app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'rag'), requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
     app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
     app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
@@ -229,6 +232,8 @@ async function startServer() {
       return requireAuth(req, res, next);
     }, obsRouter);
     app.use('/webhooks', webhookLimiter, createWebhookRouter(supabaseAdmin));
+    // Evolution API webhooks (per-instance routing via :instanceName URL segment)
+    app.use('/api/webhooks', webhookLimiter, createEvolutionWebhookRouter(supabaseAdmin));
     // Payment provider webhooks (Asaas / Stripe / Pagar.me) — token-validated by gateway
     app.use('/webhooks/payments', webhookLimiter, createPaymentWebhookRouter(supabaseAdmin));
   }
