@@ -46,7 +46,7 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
   // POST /instances — create new WhatsApp connection
   router.post('/instances', async (req: Request, res: Response) => {
     try {
-      const cid = campaignIdOf(req) ?? req.body.campaignId;
+      const cid = campaignIdOf(req);
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
       if (!isEvolutionConfigured()) {
         return res.status(503).json({ error: 'evolution_api_not_configured' });
