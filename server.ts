@@ -32,7 +32,7 @@ import { createTeamInvitesRouter, createTeamInvitesPublicRouter } from './src/se
 import { createGoalsRouter } from './src/server/modules/goals/goalsRouter';
 import { createRoutinesRouter } from './src/server/modules/routines/routinesRouter';
 import { createBudgetRouter } from './src/server/modules/budget/budgetRouter';
-import { requireAiBudget } from './src/server/middleware/featureGate';
+import { requireAiBudget, requireFeature } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
@@ -204,10 +204,10 @@ async function startServer() {
 
   // --- Intelligence v1 (Snapshot → CampanhaProCenarios) ---
   if (supabaseAdmin) {
-    app.use('/api/v1/intelligence', requireAuth, mutationLimiter, createIntelligenceRouter(supabaseAdmin));
-    app.use('/api/v1/paperclip', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createPaperclipRouter(supabaseAdmin));
+    app.use('/api/v1/intelligence', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createIntelligenceRouter(supabaseAdmin));
+    app.use('/api/v1/paperclip', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'paperclip'), requireAiBudget(supabaseAdmin), createPaperclipRouter(supabaseAdmin));
     app.use('/api/v1/channels', requireAuth, messagingLimiter, createChannelsRouter(supabaseAdmin));
-    app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
+    app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'rag'), requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
     app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
     app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
     app.use('/api/v1/team', requireAuth, mutationLimiter, createTeamInvitesRouter(supabaseAdmin));
@@ -218,10 +218,10 @@ async function startServer() {
       return requireAuth(req, res, next);        // /invites/token/:token/accept auth
     }, createTeamInvitesPublicRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
-    app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, createScenariosRouter(supabaseAdmin));
-    app.use('/api/v1/goals', requireAuth, mutationLimiter, createGoalsRouter(supabaseAdmin));
-    app.use('/api/v1/routines', requireAuth, mutationLimiter, createRoutinesRouter(supabaseAdmin));
-    app.use('/api/v1/budget', requireAuth, expensiveLimiter, createBudgetRouter(supabaseAdmin, requireAiBudget(supabaseAdmin)));
+    app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'scenarios'), createScenariosRouter(supabaseAdmin));
+    app.use('/api/v1/goals', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'goals'), createGoalsRouter(supabaseAdmin));
+    app.use('/api/v1/routines', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'routines'), createRoutinesRouter(supabaseAdmin));
+    app.use('/api/v1/budget', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'budget_ceo'), createBudgetRouter(supabaseAdmin, requireAiBudget(supabaseAdmin)));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
     const obsRouter = createObservabilityRouter(supabaseAdmin);
     app.use('/api/v1/observability', (req, res, next) => {
