@@ -221,7 +221,7 @@ async function startServer() {
     app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, createScenariosRouter(supabaseAdmin));
     app.use('/api/v1/goals', requireAuth, mutationLimiter, createGoalsRouter(supabaseAdmin));
     app.use('/api/v1/routines', requireAuth, mutationLimiter, createRoutinesRouter(supabaseAdmin));
-    app.use('/api/v1/budget', requireAuth, expensiveLimiter, requireAiBudget(supabaseAdmin), createBudgetRouter(supabaseAdmin));
+    app.use('/api/v1/budget', requireAuth, expensiveLimiter, createBudgetRouter(supabaseAdmin, requireAiBudget(supabaseAdmin)));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
     const obsRouter = createObservabilityRouter(supabaseAdmin);
     app.use('/api/v1/observability', (req, res, next) => {

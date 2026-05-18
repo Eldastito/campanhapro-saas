@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, RequestHandler } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { callAgent } from '../../../lib/aiCallAgent';
 import { audit, actorFromRequest } from '../observability/auditLogger';
@@ -101,7 +101,7 @@ async function loadActiveAllocations(supabaseAdmin: SupabaseClient, campaignId: 
   return result;
 }
 
-export function createBudgetRouter(supabaseAdmin: SupabaseClient) {
+export function createBudgetRouter(supabaseAdmin: SupabaseClient, aiBudgetGuard?: RequestHandler) {
   const router = Router();
 
   // GET /summary — totals + per-bucket spent + allocated
@@ -296,7 +296,7 @@ export function createBudgetRouter(supabaseAdmin: SupabaseClient) {
 
   // POST /ceo-plan — invoke CEO agent to propose a fresh allocation
   // CEO produces proposed rows; nothing executes until a human approves.
-  router.post('/ceo-plan', async (req: Request, res: Response) => {
+  const ceoPlanCore: RequestHandler = async (req: Request, res: Response) => {
     try {
       const cid = campaignIdOf(req) ?? req.body.campaignId;
       const userId = (req as any).user?.id ?? null;
@@ -439,7 +439,9 @@ export function createBudgetRouter(supabaseAdmin: SupabaseClient) {
       console.error('[Budget] CEO plan error:', err);
       return res.status(500).json({ error: err.message });
     }
-  });
+  };
+  const ceoPlanHandlers = aiBudgetGuard ? [aiBudgetGuard, ceoPlanCore] : [ceoPlanCore];
+  router.post('/ceo-plan', ...ceoPlanHandlers);
 
   return router;
 }
