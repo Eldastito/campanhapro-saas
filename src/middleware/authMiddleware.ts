@@ -59,13 +59,13 @@ export function createAuthMiddleware(supabaseAdmin: any) {
       try {
         const { data: profile } = await supabaseAdmin
           .from('users')
-          .select('campaign_id, type, is_supreme_admin')
+          .select('campaignId, type, isSupremeAdmin')
           .eq('id', user.id)
           .maybeSingle();
         if (profile) {
-          campaignId = profile.campaign_id ?? null;
+          campaignId = profile.campaignId ?? null;
           userType = profile.type ?? null;
-          isSupremeAdmin = !!profile.is_supreme_admin;
+          isSupremeAdmin = !!profile.isSupremeAdmin;
         }
       } catch (err: any) {
         console.warn('[Auth Middleware] Falha ao carregar perfil:', err.message);
