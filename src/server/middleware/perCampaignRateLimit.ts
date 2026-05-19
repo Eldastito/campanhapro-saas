@@ -31,7 +31,11 @@ export function buildRateLimiter(
   });
 }
 
-export const expensiveLimiter = buildRateLimiter(60_000, 5, 'campaign');
-export const messagingLimiter = buildRateLimiter(60_000, 30, 'campaign');
-export const mutationLimiter = buildRateLimiter(60_000, 60, 'campaign');
+// In development, multiply caps 20x so navigation + hot-reload doesn't trip
+// limits intended for production traffic.
+const DEV_MULTIPLIER = process.env.NODE_ENV === 'production' ? 1 : 20;
+
+export const expensiveLimiter = buildRateLimiter(60_000, 5 * DEV_MULTIPLIER, 'campaign');
+export const messagingLimiter = buildRateLimiter(60_000, 30 * DEV_MULTIPLIER, 'campaign');
+export const mutationLimiter = buildRateLimiter(60_000, 60 * DEV_MULTIPLIER, 'campaign');
 export const webhookLimiter = buildRateLimiter(60_000, 300, 'ip');
