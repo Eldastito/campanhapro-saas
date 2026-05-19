@@ -37,6 +37,7 @@ export function createAuthMiddleware(supabaseAdmin: any) {
       // 2. Extrair token do header Authorization
       const authHeader = req.headers.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.warn(`[Auth] 401 sem Bearer em ${req.method} ${req.originalUrl} — header=${authHeader ? 'presente-malformado' : 'ausente'}`);
         return res.status(401).json({ error: 'Token de autenticação ausente.' });
       }
 
@@ -46,6 +47,7 @@ export function createAuthMiddleware(supabaseAdmin: any) {
       const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
       if (error || !user) {
+        console.warn(`[Auth] 401 token rejeitado em ${req.method} ${req.originalUrl} — supabase_error="${error?.message ?? 'sem erro mas user vazio'}" token_prefix=${token.slice(0,20)}...`);
         return res.status(401).json({ error: 'Token inválido ou expirado.' });
       }
 
@@ -57,13 +59,13 @@ export function createAuthMiddleware(supabaseAdmin: any) {
       try {
         const { data: profile } = await supabaseAdmin
           .from('users')
-          .select('campaign_id, type, is_supreme_admin')
+          .select('campaignId, type, isSupremeAdmin')
           .eq('id', user.id)
           .maybeSingle();
         if (profile) {
-          campaignId = profile.campaign_id ?? null;
+          campaignId = profile.campaignId ?? null;
           userType = profile.type ?? null;
-          isSupremeAdmin = !!profile.is_supreme_admin;
+          isSupremeAdmin = !!profile.isSupremeAdmin;
         }
       } catch (err: any) {
         console.warn('[Auth Middleware] Falha ao carregar perfil:', err.message);
