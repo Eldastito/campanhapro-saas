@@ -19,6 +19,7 @@ import { createChannelsRouter } from './src/server/modules/channels/channelsRout
 import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
 import { createWhatsappRouter } from './src/server/modules/whatsapp/whatsappRouter';
 import { createEvolutionWebhookRouter } from './src/server/modules/whatsapp/evolutionWebhookRouter';
+import { setWebhook, isEvolutionConfigured } from './src/server/modules/integrations/evolutionApiClient';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
 import { createScenariosRouter } from './src/server/modules/scenarios/scenariosRouter';
 import { createObservabilityRouter } from './src/server/modules/observability/observabilityRouter';
@@ -1015,13 +1016,32 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
 
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`Servidor rodando em todas as interfaces na porta ${port}`);
-    // Inicia monitor proativo (varre campanhas com flag ativa). Por default
-    // todas as campanhas vêm com proactive_monitoring_enabled=false, então
-    // o monitor só dispara IA pra quem opt-in.
     startProactiveMonitor(supabaseAdmin);
-    // Phase 11 — billing lifecycle: pre-renewal reminders + auto-downgrade
-    // after grace period. Disable via LIFECYCLE_ENABLED=false in tests.
     if (supabaseAdmin) startLifecycleSweeper(supabaseAdmin);
+    // Re-register webhooks for all connected WhatsApp instances so the
+    // correct EVOLUTION_WEBHOOK_URL is always active (self-healing).
+    if (supabaseAdmin && isEvolutionConfigured()) {
+      void (async () => {
+        try {
+          const { data } = await supabaseAdmin
+            .from('whatsapp_instances')
+            .select('instanceName, apiKey')
+            .eq('status', 'connected')
+            .not('apiKey', 'is', null);
+          const rows = (data ?? []) as Array<{ instanceName: string; apiKey: string }>;
+          if (!rows.length) return;
+          const results = await Promise.allSettled(
+            rows.map((inst) => setWebhook(inst.instanceName, inst.apiKey)),
+          );
+          const ok = results.filter((r) => r.status === 'fulfilled').length;
+          const fail = results.filter((r) => r.status === 'rejected').length;
+          console.log(`[Evolution] Webhook resync: ${ok} ok, ${fail} falhas`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn('[Evolution] Webhook resync failed:', message);
+        }
+      })();
+    }
   });
 }
 

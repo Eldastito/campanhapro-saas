@@ -6,6 +6,7 @@ import {
   getStatus,
   deleteInstance,
   sendText,
+  setWebhook,
   isEvolutionConfigured,
 } from '../integrations/evolutionApiClient';
 import { audit, actorFromRequest } from '../observability/auditLogger';
@@ -153,6 +154,41 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ status: remoteStatus, phoneNumber: inst.phoneNumber });
     } catch (err: any) {
       console.error('[WhatsApp] status:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /instances/:id/resync-webhook — re-register webhook URL on Evolution
+  // without re-pairing. Useful when EVOLUTION_WEBHOOK_URL changed
+  // (e.g. localhost → host.docker.internal).
+  router.post('/instances/:id/resync-webhook', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+
+      const { data: inst } = await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('id, instanceName, apiKey')
+        .eq('id', req.params.id)
+        .eq('campaignId', cid)
+        .maybeSingle();
+
+      if (!inst) return res.status(404).json({ error: 'instance_not_found' });
+      if (!inst.apiKey) return res.status(409).json({ error: 'instance_not_provisioned' });
+
+      await setWebhook(inst.instanceName, inst.apiKey);
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'whatsapp.webhook_resynced',
+        resourceType: 'whatsapp_instance',
+        resourceId: inst.id,
+        severity: 'info',
+      });
+
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error('[WhatsApp] resync-webhook:', err);
       return res.status(500).json({ error: err.message });
     }
   });
