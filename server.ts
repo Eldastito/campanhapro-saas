@@ -1021,22 +1021,26 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     // Re-register webhooks for all connected WhatsApp instances so the
     // correct EVOLUTION_WEBHOOK_URL is always active (self-healing).
     if (supabaseAdmin && isEvolutionConfigured()) {
-      supabaseAdmin
-        .from('whatsapp_instances')
-        .select('instanceName, apiKey')
-        .eq('status', 'connected')
-        .not('apiKey', 'is', null)
-        .then(({ data }) => {
-          if (!data?.length) return;
-          Promise.allSettled(
-            data.map(inst => setWebhook(inst.instanceName, inst.apiKey))
-          ).then(results => {
-            const ok = results.filter(r => r.status === 'fulfilled').length;
-            const fail = results.filter(r => r.status === 'rejected').length;
-            console.log(`[Evolution] Webhook resync: ${ok} ok, ${fail} falhas`);
-          });
-        })
-        .catch(err => console.warn('[Evolution] Webhook resync failed:', err.message));
+      void (async () => {
+        try {
+          const { data } = await supabaseAdmin
+            .from('whatsapp_instances')
+            .select('instanceName, apiKey')
+            .eq('status', 'connected')
+            .not('apiKey', 'is', null);
+          const rows = (data ?? []) as Array<{ instanceName: string; apiKey: string }>;
+          if (!rows.length) return;
+          const results = await Promise.allSettled(
+            rows.map((inst) => setWebhook(inst.instanceName, inst.apiKey)),
+          );
+          const ok = results.filter((r) => r.status === 'fulfilled').length;
+          const fail = results.filter((r) => r.status === 'rejected').length;
+          console.log(`[Evolution] Webhook resync: ${ok} ok, ${fail} falhas`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn('[Evolution] Webhook resync failed:', message);
+        }
+      })();
     }
   });
 }
