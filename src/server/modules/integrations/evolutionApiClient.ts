@@ -136,6 +136,29 @@ export async function sendText(
   return { messageId: result?.key?.id ?? result?.id ?? '' };
 }
 
+/**
+ * Re-register the webhook URL for an existing instance. Useful when
+ * EVOLUTION_WEBHOOK_URL changed (e.g. host.docker.internal vs localhost)
+ * after instances were already paired — avoids re-scanning QR.
+ */
+export async function setWebhook(instanceName: string, apiKey: string): Promise<void> {
+  if (!EVOLUTION_WEBHOOK_URL) throw new Error('evolution_webhook_url_not_configured');
+  await call(
+    'POST',
+    `/webhook/set/${encodeURIComponent(instanceName)}`,
+    {
+      webhook: {
+        enabled: true,
+        url: `${EVOLUTION_WEBHOOK_URL}/evolution/${encodeURIComponent(instanceName)}`,
+        byEvents: false,
+        base64: false,
+        events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
+      },
+    },
+    apiKey,
+  );
+}
+
 /** Permanently delete an instance from the Evolution server. */
 export async function deleteInstance(instanceName: string, apiKey: string): Promise<void> {
   try {
