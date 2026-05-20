@@ -1,0 +1,64 @@
+# Evolution API stack para deploy em produção via Coolify.
+#
+# Difere do docker-compose.yml (dev) em:
+#   - Sem `ports:` expostos no host (Coolify proxia via Traefik se preciso)
+#   - AUTHENTICATION_API_KEY via variável de ambiente (não hardcoded)
+#   - SERVER_URL aponta para o domínio público da Evolution (opcional)
+#   - Os containers ficam acessíveis pelo nome dentro da rede interna do
+#     projeto Coolify. O campanhapro fala com a Evolution por
+#     http://evolution-api:8080
+#
+# Variáveis exigidas no Coolify (resource → Environment Variables):
+#   EVOLUTION_AUTH_KEY   = uma string aleatória longa (mesma do .env do app)
+#   EVOLUTION_SERVER_URL = https://evo.tesseractauto.com.br (opcional; só se
+#                          você expor a Evolution publicamente para o
+#                          dashboard web dela)
+
+services:
+  evolution-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:-evolution_pw_change_me}
+      POSTGRES_DB: evolution_db
+    volumes:
+      - evolution_pg_data:/var/lib/postgresql/data
+
+  evolution-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - evolution_redis_data:/data
+
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    restart: unless-stopped
+    depends_on:
+      - evolution-postgres
+      - evolution-redis
+    environment:
+      AUTHENTICATION_API_KEY: ${EVOLUTION_AUTH_KEY}
+
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution-api:8080}
+      SERVER_PORT: 8080
+
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:-evolution_pw_change_me}@evolution-postgres:5432/evolution_db?schema=evolution_api
+      DATABASE_CONNECTION_CLIENT_NAME: evolution_exchange
+
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_TTL: "604800"
+
+      WEBHOOK_GLOBAL_ENABLED: "false"
+
+      LOG_LEVEL: "ERROR,WARN,INFO"
+      DEL_INSTANCE: "false"
+      CORS_ORIGIN: "*"
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  evolution_pg_data:
+  evolution_redis_data:
