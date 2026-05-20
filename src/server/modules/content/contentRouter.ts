@@ -14,6 +14,7 @@
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { chatCompletion, isChatConfigured, activeChatProvider } from '../ai/chatCompletion';
+import { generateImage, isImageGenerationConfigured } from '../ai/imageGeneration';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
 function campaignIdOf(req: Request): string | undefined {
@@ -185,6 +186,37 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
       });
     } catch (err: any) {
       console.error('[Content] generate:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /generate-image  — image for a post via Gemini nano-banana → OpenAI gpt-image-1
+  // Body: { prompt, channel?, postType? } — frontend may add channel/tone for styling
+  // Returns: { imageUrl: data-URL, provider }
+  // ---------------------------------------------------------------------------
+  router.post('/generate-image', async (req: Request, res: Response) => {
+    const campaignId = campaignIdOf(req);
+    if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+    if (!isImageGenerationConfigured()) {
+      return res.status(503).json({ error: 'Geração de imagem não configurada (defina GEMINI_API_KEY ou OPENAI_API_KEY)' });
+    }
+    const { prompt, channel } = req.body ?? {};
+    if (!prompt || String(prompt).trim().length < 5) {
+      return res.status(400).json({ error: 'prompt é obrigatório (mín 5 caracteres)' });
+    }
+    try {
+      // Enriquece o prompt com diretriz visual leve por canal (sem trocar a intenção do usuário).
+      const channelHint = channel === 'instagram' || channel === 'facebook'
+        ? ' Estilo: foto editorial limpa, iluminação natural, espaço para overlay de texto.'
+        : channel === 'tiktok'
+        ? ' Estilo: visual vibrante, alto contraste, vertical-friendly.'
+        : '';
+      const enriched = `${String(prompt).trim()}.${channelHint} Sem texto na imagem, sem logos de terceiros.`;
+      const { dataUrl, provider } = await generateImage({ prompt: enriched });
+      return res.json({ imageUrl: dataUrl, provider });
+    } catch (err: any) {
+      console.error('[Content] generate-image:', err);
       return res.status(500).json({ error: err.message });
     }
   });

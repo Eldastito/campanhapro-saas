@@ -247,8 +247,33 @@ const PostDetailPanel: React.FC<{
   const [text, setText] = React.useState(post.finalText ?? post.generatedText ?? '');
   const [hashtags, setHashtags] = React.useState((post.hashtags ?? []).join(' '));
   const [imageUrl, setImageUrl] = React.useState(post.imageUrl ?? '');
+  const [generatingImage, setGeneratingImage] = React.useState(false);
+  const [imageError, setImageError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
+
+  const handleGenerateImage = async () => {
+    const basePrompt = (post.topic || text || post.brief || '').trim();
+    if (basePrompt.length < 5) {
+      setImageError('Sem tópico/texto suficiente para gerar imagem.');
+      return;
+    }
+    setImageError(null);
+    setGeneratingImage(true);
+    try {
+      const res = await authedFetch('/api/v1/content/generate-image', {
+        method: 'POST',
+        body: JSON.stringify({ prompt: basePrompt, channel: post.channel }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+      setImageUrl(j.imageUrl);
+    } catch (e: any) {
+      setImageError(e.message);
+    } finally {
+      setGeneratingImage(false);
+    }
+  };
   const [scheduleAt, setScheduleAt] = React.useState('');
   const [showSchedule, setShowSchedule] = React.useState(false);
 
@@ -391,13 +416,26 @@ const PostDetailPanel: React.FC<{
 
       {/* Image */}
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-slate-400">URL da imagem (opcional)</label>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-slate-400">Imagem (URL ou gerada por IA)</label>
+          <button
+            type="button"
+            onClick={handleGenerateImage}
+            disabled={generatingImage}
+            className="text-xs px-2.5 py-1 rounded-md bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {generatingImage ? 'Gerando…' : '✨ Gerar Imagem'}
+          </button>
+        </div>
         <input
           value={imageUrl}
           onChange={e => setImageUrl(e.target.value)}
           className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-violet-500"
-          placeholder="https://…"
+          placeholder="https://… ou clique em Gerar Imagem"
         />
+        {imageError && (
+          <div className="text-xs text-red-400">{imageError}</div>
+        )}
         {imageUrl && (
           <img src={imageUrl} alt="" className="mt-2 max-h-48 rounded-lg border border-slate-700" />
         )}
