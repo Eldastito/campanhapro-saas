@@ -1,0 +1,70 @@
+# Evolution API local stack — para desenvolvimento.
+# Sobe Evolution + Postgres + Redis em 3 containers isolados.
+#
+# Uso:
+#   1. Edite AUTHENTICATION_API_KEY abaixo (qualquer string longa aleatória)
+#   2. Na pasta deste arquivo: docker compose up -d
+#   3. Aguarde ~20s, depois acesse http://localhost:8080 (devolve OK se subiu)
+#   4. Copie AUTHENTICATION_API_KEY para o .env do campanhapro como
+#      EVOLUTION_GLOBAL_API_KEY=<mesma-chave>
+#   5. Adicione no .env do campanhapro:
+#      EVOLUTION_API_URL=http://localhost:8080
+#      EVOLUTION_WEBHOOK_URL=http://localhost:3030/api/webhooks
+#   6. Reinicie o npm run server e conecte um número em Recursos → Conexões Sociais
+
+services:
+  evolution-postgres:
+    image: postgres:16-alpine
+    container_name: evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: evolution_local_pw
+      POSTGRES_DB: evolution_db
+    volumes:
+      - evolution_pg_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # 5433 host para não colidir com algum Postgres local
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: evolution-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"  # 6380 host para não colidir
+
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    container_name: evolution-api
+    restart: unless-stopped
+    depends_on:
+      - evolution-postgres
+      - evolution-redis
+    ports:
+      - "8080:8080"
+    environment:
+      # ===== TROQUE ESTA CHAVE por algo aleatório longo (UUID, etc) =====
+      AUTHENTICATION_API_KEY: "TROQUE_POR_UMA_CHAVE_ALEATORIA_LONGA_AQUI"
+
+      SERVER_URL: "http://localhost:8080"
+      SERVER_PORT: 8080
+
+      DATABASE_PROVIDER: "postgresql"
+      DATABASE_CONNECTION_URI: "postgresql://evolution:evolution_local_pw@evolution-postgres:5432/evolution_db?schema=evolution_api"
+      DATABASE_CONNECTION_CLIENT_NAME: "evolution_exchange"
+
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: "redis://evolution-redis:6379/6"
+      CACHE_REDIS_PREFIX_KEY: "evolution"
+      CACHE_REDIS_TTL: "604800"
+
+      # Webhook global desabilitado — campanhapro registra webhook por instância
+      WEBHOOK_GLOBAL_ENABLED: "false"
+
+      LOG_LEVEL: "ERROR,WARN,INFO"
+      DEL_INSTANCE: "false"
+      CORS_ORIGIN: "*"
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  evolution_pg_data:
