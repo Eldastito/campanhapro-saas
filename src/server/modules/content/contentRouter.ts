@@ -13,7 +13,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { AI_MODEL_REGISTRY } from '../ai/modelRegistry';
+import { chatCompletion, isChatConfigured, activeChatProvider } from '../ai/chatCompletion';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
 function campaignIdOf(req: Request): string | undefined {
@@ -132,24 +132,13 @@ export function createContentRouter(supabase: SupabaseClient) {
     const pt = ALLOWED_POST_TYPES.includes(postType as any) ? postType! : 'post';
     const length = lengthHint ?? 'medio';
 
-    const OPENAI_KEY = process.env.OPENAI_API_KEY;
-    if (!OPENAI_KEY) return res.status(503).json({ error: 'IA não configurada (OPENAI_API_KEY ausente)' });
+    if (!isChatConfigured()) return res.status(503).json({ error: 'IA não configurada (defina OPENAI_API_KEY ou CLAUDE_API_KEY)' });
 
     try {
       const context = await buildCampaignContext(supabase, campaignId);
 
-      const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${OPENAI_KEY}`,
-        },
-        body: JSON.stringify({
-          model: AI_MODEL_REGISTRY.chatBalanced,
-          messages: [
-            {
-              role: 'system',
-              content: `Você é um redator-chefe de campanha política brasileira, especialista em comunicação digital e em conformidade com a legislação eleitoral (Resolução TSE 23.610/2019).
+      const content = await chatCompletion({
+        system: `Você é um redator-chefe de campanha política brasileira, especialista em comunicação digital e em conformidade com a legislação eleitoral (Resolução TSE 23.610/2019).
 Você gera conteúdo persuasivo, ético e otimizado por canal.
 Regras invioláveis:
 - NUNCA atribua crime sem prova em texto público.
@@ -158,10 +147,7 @@ Regras invioláveis:
 - Use SOMENTE português do Brasil.
 - Responda ESTRITAMENTE em JSON no formato:
 { "text": "string", "hashtags": ["string"], "callToAction": "string" }`,
-            },
-            {
-              role: 'user',
-              content: `CONTEXTO DA CAMPANHA:
+        user: `CONTEXTO DA CAMPANHA:
 ${context}
 
 GERAR PARA:
@@ -178,21 +164,12 @@ DIRETRIZES DO TOM:
 ${TONE_GUIDANCE[t]}
 
 Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevantes (vazio para WhatsApp).`,
-            },
-          ],
-          max_tokens: 1200,
-          temperature: 0.7,
-          response_format: { type: 'json_object' },
-        }),
+        maxTokens: 1200,
+        temperature: 0.7,
+        jsonMode: true,
       });
 
-      if (!aiRes.ok) {
-        const errText = await aiRes.text();
-        throw new Error(`OpenAI ${aiRes.status}: ${errText.slice(0, 200)}`);
-      }
-
-      const aiJson = await aiRes.json() as any;
-      const parsed = JSON.parse(aiJson.choices?.[0]?.message?.content ?? '{}');
+      const parsed = JSON.parse(content || '{}');
       const text: string = parsed.text ?? '';
       const hashtags: string[] = Array.isArray(parsed.hashtags) ? parsed.hashtags : [];
       const callToAction: string = parsed.callToAction ?? '';
@@ -204,7 +181,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
         hashtags,
         callToAction,
         complianceFlags,
-        model: AI_MODEL_REGISTRY.chatBalanced,
+        provider: activeChatProvider(),
       });
     } catch (err: any) {
       console.error('[Content] generate:', err);
