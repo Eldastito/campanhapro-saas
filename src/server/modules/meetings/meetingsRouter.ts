@@ -12,6 +12,7 @@ import express, { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { enqueueTask } from '../paperclip/taskQueue';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { chatCompletion, isChatConfigured } from '../ai/chatCompletion';
 
 function campaignIdOf(req: Request): string | undefined {
   return (req as any).user?.campaignId;
@@ -151,42 +152,20 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
       if (insertErr) throw insertErr;
 
       let agenda: Array<{ topic: string; description: string }> = [];
-      if (generateAgenda) {
+      if (generateAgenda && isChatConfigured()) {
         const context = await buildCampaignContext(supabase, campaignId);
-        const OPENAI_KEY = process.env.OPENAI_API_KEY;
-        if (OPENAI_KEY) {
-          try {
-            const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${OPENAI_KEY}`,
-              },
-              body: JSON.stringify({
-                model: process.env.AI_MODEL_CHAT_FAST || 'gpt-4o-mini',
-                messages: [
-                  {
-                    role: 'system',
-                    content: 'Você é um assessor político experiente. Com base no contexto da campanha, gere uma pauta objetiva e estratégica para a reunião de planejamento. Responda SOMENTE com JSON no formato: { "agenda": [{ "topic": "string", "description": "string" }] }. Máximo 8 tópicos, em português do Brasil.',
-                  },
-                  {
-                    role: 'user',
-                    content: `Contexto da campanha:\n${context}\n\nGere a pauta da reunião de planejamento.`,
-                  },
-                ],
-                max_tokens: 800,
-                temperature: 0.5,
-                response_format: { type: 'json_object' },
-              }),
-            });
-            if (aiRes.ok) {
-              const json = await aiRes.json() as any;
-              const parsed = JSON.parse(json.choices?.[0]?.message?.content ?? '{}');
-              agenda = Array.isArray(parsed.agenda) ? parsed.agenda : [];
-            }
-          } catch (aiErr) {
-            console.error('[Meetings] agenda generation failed:', aiErr);
-          }
+        try {
+          const content = await chatCompletion({
+            system: 'Você é um assessor político experiente. Com base no contexto da campanha, gere uma pauta objetiva e estratégica para a reunião de planejamento. Responda SOMENTE com JSON no formato: { "agenda": [{ "topic": "string", "description": "string" }] }. Máximo 8 tópicos, em português do Brasil.',
+            user: `Contexto da campanha:\n${context}\n\nGere a pauta da reunião de planejamento.`,
+            maxTokens: 800,
+            temperature: 0.5,
+            jsonMode: true,
+          });
+          const parsed = JSON.parse(content || '{}');
+          agenda = Array.isArray(parsed.agenda) ? parsed.agenda : [];
+        } catch (aiErr) {
+          console.error('[Meetings] agenda generation failed:', aiErr);
         }
 
         if (agenda.length > 0) {
@@ -352,8 +331,7 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
       return res.status(403).json({ error: 'forbidden' });
     }
 
-    const OPENAI_KEY = process.env.OPENAI_API_KEY;
-    if (!OPENAI_KEY) return res.status(503).json({ error: 'IA não configurada' });
+    if (!isChatConfigured()) return res.status(503).json({ error: 'IA não configurada (defina OPENAI_API_KEY ou CLAUDE_API_KEY)' });
 
     try {
       const { data: meeting } = await supabase
@@ -368,18 +346,8 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
 
       const context = await buildCampaignContext(supabase, campaignId);
 
-      const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${OPENAI_KEY}`,
-        },
-        body: JSON.stringify({
-          model: process.env.AI_MODEL_CHAT || 'gpt-4o',
-          messages: [
-            {
-              role: 'system',
-              content: `Você é um assessor político experiente. Analise a ata da reunião de campanha e retorne SOMENTE um JSON válido no formato:
+      const content = await chatCompletion({
+        system: `Você é um assessor político experiente. Analise a ata da reunião de campanha e retorne SOMENTE um JSON válido no formato:
 {
   "summary": "resumo executivo em 3-5 frases",
   "highlights": ["ponto chave 1", "ponto chave 2"],
@@ -394,21 +362,12 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
   ]
 }
 Foco em ações concretas e mensuráveis. Use o contexto da campanha para priorizar. Máximo 10 ações.`,
-            },
-            {
-              role: 'user',
-              content: `Contexto da campanha:\n${context}\n\n---\nATA DA REUNIÃO "${meeting.title}":\n${meeting.transcript}`,
-            },
-          ],
-          max_tokens: 1500,
-          temperature: 0.4,
-          response_format: { type: 'json_object' },
-        }),
+        user: `Contexto da campanha:\n${context}\n\n---\nATA DA REUNIÃO "${meeting.title}":\n${meeting.transcript}`,
+        maxTokens: 1500,
+        temperature: 0.4,
+        jsonMode: true,
       });
-
-      if (!aiRes.ok) throw new Error(`OpenAI error ${aiRes.status}`);
-      const json = await aiRes.json() as any;
-      const result = JSON.parse(json.choices?.[0]?.message?.content ?? '{}');
+      const result = JSON.parse(content || '{}');
 
       const summary: string = result.summary ?? '';
       const highlights: string[] = Array.isArray(result.highlights) ? result.highlights : [];
