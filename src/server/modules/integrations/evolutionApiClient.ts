@@ -74,7 +74,7 @@ export async function createInstance(instanceName: string): Promise<EvolutionCre
 
   if (EVOLUTION_WEBHOOK_URL) {
     body.webhook = {
-      url: `${EVOLUTION_WEBHOOK_URL}/api/webhooks/evolution/${encodeURIComponent(instanceName)}`,
+      url: `${EVOLUTION_WEBHOOK_URL}/evolution/${encodeURIComponent(instanceName)}`,
       byEvents: false,
       base64: false,
       events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
