@@ -92,8 +92,7 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
         // Evolution v2 sends one message per event in `data`, but the shape varies.
         const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
         for (const m of msgs) {
-          // Skip messages we sent (fromMe=true)
-          if (m?.key?.fromMe || m?.fromMe) continue;
+          const direction: 'inbound' | 'outbound' = (m?.key?.fromMe || m?.fromMe) ? 'outbound' : 'inbound';
           const externalId = String(m?.key?.remoteJid ?? m?.remoteJid ?? '').replace(/@.*$/, '');
           if (!externalId) continue;
           const text =
@@ -108,13 +107,14 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             ? new Date(tsRaw < 1e12 ? tsRaw * 1000 : tsRaw).toISOString()
             : new Date().toISOString();
 
-          await ingestInboundMessage(supabaseAdmin, {
+          await ingestMessage(supabaseAdmin, {
             campaignId,
             whatsappInstanceId: inst.id,
             externalId,
             providerMessageId,
             text,
             receivedAt,
+            direction,
           });
         }
       }
@@ -135,7 +135,7 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
   return router;
 }
 
-async function ingestInboundMessage(
+async function ingestMessage(
   supabase: SupabaseClient,
   params: {
     campaignId: string;
@@ -144,6 +144,7 @@ async function ingestInboundMessage(
     providerMessageId: string;
     text: string;
     receivedAt: string;
+    direction: 'inbound' | 'outbound';
   },
 ) {
   // Try to match existing contact by phone; auto-create if missing
@@ -162,7 +163,7 @@ async function ingestInboundMessage(
         campaignId: params.campaignId,
         phone: params.externalId,
         name: `WhatsApp ${params.externalId}`,
-        source: 'whatsapp_inbound',
+        source: params.direction === 'inbound' ? 'whatsapp_inbound' : 'whatsapp_outbound',
       })
       .select('id')
       .single();
@@ -170,30 +171,42 @@ async function ingestInboundMessage(
   }
 
   const now = params.receivedAt;
+  const convoPayload: Record<string, unknown> = {
+    campaignId: params.campaignId,
+    channel: 'whatsapp',
+    provider: 'evolution',
+    whatsappInstanceId: params.whatsappInstanceId,
+    contactId,
+    externalId: params.externalId,
+    lastMessageAt: now,
+    updatedAt: now,
+  };
+  // lastInboundAt only advances when the contact writes to us. Outbound
+  // messages still bump lastMessageAt so the conversation rises in the list.
+  if (params.direction === 'inbound') convoPayload.lastInboundAt = now;
+
   const { data: convoRow } = await supabase
     .from('channel_conversations')
-    .upsert(
-      {
-        campaignId: params.campaignId,
-        channel: 'whatsapp',
-        provider: 'evolution',
-        whatsappInstanceId: params.whatsappInstanceId,
-        contactId,
-        externalId: params.externalId,
-        lastMessageAt: now,
-        lastInboundAt: now,
-        updatedAt: now,
-      },
-      { onConflict: 'campaignId,channel,externalId' },
-    )
+    .upsert(convoPayload, { onConflict: 'campaignId,channel,externalId' })
     .select('id')
     .single();
 
   if (convoRow?.id) {
+    // Dedup: if the same provider message id was already recorded
+    // (e.g. outbound sent via /channels/send already inserted it),
+    // skip to avoid duplicates.
+    const { data: dup } = await supabase
+      .from('channel_messages')
+      .select('id')
+      .eq('conversationId', convoRow.id)
+      .eq('providerMessageId', params.providerMessageId)
+      .maybeSingle();
+    if (dup) return;
+
     await supabase.from('channel_messages').insert({
       conversationId: convoRow.id,
       campaignId: params.campaignId,
-      direction: 'inbound',
+      direction: params.direction,
       channel: 'whatsapp',
       provider: 'evolution',
       whatsappInstanceId: params.whatsappInstanceId,
