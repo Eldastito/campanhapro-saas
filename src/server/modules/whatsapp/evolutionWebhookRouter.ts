@@ -106,6 +106,14 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           const receivedAt = tsRaw > 0
             ? new Date(tsRaw < 1e12 ? tsRaw * 1000 : tsRaw).toISOString()
             : new Date().toISOString();
+          // pushName is the contact's WhatsApp profile name. Only meaningful
+          // for inbound messages — on outbound it'd be our own profile name.
+          const rawPushName = direction === 'inbound'
+            ? String(m?.pushName ?? m?.notifyName ?? '').trim()
+            : '';
+          const pushName = rawPushName.length > 0 && rawPushName.length <= 80
+            ? rawPushName
+            : null;
 
           await ingestMessage(supabaseAdmin, {
             campaignId,
@@ -115,6 +123,7 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             text,
             receivedAt,
             direction,
+            pushName,
           });
         }
       }
@@ -145,12 +154,14 @@ async function ingestMessage(
     text: string;
     receivedAt: string;
     direction: 'inbound' | 'outbound';
+    pushName: string | null;
   },
 ) {
+  const fallbackName = `WhatsApp ${params.externalId}`;
   // Try to match existing contact by phone; auto-create if missing
   const { data: existing } = await supabase
     .from('contacts')
-    .select('id')
+    .select('id, name')
     .eq('campaignId', params.campaignId)
     .eq('phone', params.externalId)
     .maybeSingle();
@@ -162,12 +173,20 @@ async function ingestMessage(
       .insert({
         campaignId: params.campaignId,
         phone: params.externalId,
-        name: `WhatsApp ${params.externalId}`,
+        name: params.pushName ?? fallbackName,
         source: params.direction === 'inbound' ? 'whatsapp_inbound' : 'whatsapp_outbound',
       })
       .select('id')
       .single();
     contactId = created?.id ?? null;
+  } else if (params.pushName && isPlaceholderName(existing?.name)) {
+    // Backfill the contact name once we learn it, but only if it still
+    // carries our placeholder so we don't overwrite a name the user
+    // edited manually in the CRM.
+    await supabase
+      .from('contacts')
+      .update({ name: params.pushName })
+      .eq('id', contactId);
   }
 
   const now = params.receivedAt;
@@ -215,6 +234,10 @@ async function ingestMessage(
       createdAt: now,
     });
   }
+}
+
+function isPlaceholderName(name: unknown): boolean {
+  return typeof name === 'string' && /^WhatsApp \d+$/.test(name);
 }
 
 async function recordWebhookEvent(
