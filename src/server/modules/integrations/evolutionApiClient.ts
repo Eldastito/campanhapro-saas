@@ -11,6 +11,9 @@
  *     CONNECTION_UPDATE (Node v2)
  *   - QR and status are separate endpoints (/instance/qr, /instance/status)
  *   - /instance/delete takes the instance UUID, not the name
+ *   - /instance/create requires us to GENERATE the per-instance token
+ *     client-side (Go responds 400 "token is required" without it, even
+ *     though the OpenAPI marks it optional)
  *
  * Configuration (env vars, server-side only — NEVER expose to frontend):
  *   EVOLUTION_API_URL          base URL (e.g. https://evolutiongo.tesseractauto.com.br)
@@ -20,9 +23,11 @@
  *                              webhook URL (the only place Go accepts auth on the
  *                              outbound webhook call)
  *
- * Per-instance tokens are returned by Evolution at create time and stored
- * encrypted in whatsapp_instances.apiKey — they're only ever used server-side.
+ * Per-instance tokens are generated here, returned to the caller, and
+ * stored encrypted in whatsapp_instances.apiKey — they're only ever used
+ * server-side.
  */
+import { randomUUID } from 'crypto';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL?.replace(/\/+$/, '');
 const EVOLUTION_GLOBAL_API_KEY = process.env.EVOLUTION_GLOBAL_API_KEY;
@@ -109,18 +114,27 @@ function buildWebhookUrl(instanceName: string): string | null {
 export async function createInstance(instanceName: string): Promise<EvolutionCreateResult> {
   if (!EVOLUTION_GLOBAL_API_KEY) throw new Error('evolution_not_configured');
 
-  // Step 1: create the instance shell. Evolution GO autogenerates id + token.
+  // Evolution GO requires `token` in the create payload — we generate a
+  // random UUID and keep it as the per-instance apikey for all subsequent
+  // calls. (Yes, the swagger says it's optional. Yes, the implementation
+  // returns 400 "token is required" without it. We tested.)
+  const token = randomUUID();
+
+  // Step 1: create the instance shell. We provide name + token; Go
+  // autogenerates the id (UUID).
   const created = await call<any>(
     'POST',
     '/instance/create',
-    { name: instanceName },
+    { name: instanceName, token },
     EVOLUTION_GLOBAL_API_KEY,
   );
   // Response shape varies (Go wraps in { data: { ... } }; some versions
-  // return the fields at top level). Tolerate both.
+  // return the fields at top level). Tolerate both, and fall back to the
+  // token we generated if the response omits it (the value we sent is the
+  // value that's now valid).
   const inst = created?.data ?? created ?? {};
   const instanceId: string = inst.id ?? inst.instanceId ?? '';
-  const apiKey: string = inst.token ?? inst.apikey ?? '';
+  const apiKey: string = inst.token ?? inst.apikey ?? token;
 
   if (!apiKey) {
     throw new Error('evolution_create_no_token');
