@@ -10,7 +10,12 @@
  *   3. Standard webhookLimiter rate limiting (configured in server.ts)
  *
  * If EVOLUTION_WEBHOOK_SECRET is set, we additionally require a matching
- * header — Evolution v2 supports this via the `webhook.headers` field.
+ * shared secret. Two ways to deliver it are accepted, in this order:
+ *   - HTTP header `x-webhook-secret` (legacy Node v2 path — supports custom
+ *     headers on the outbound webhook call)
+ *   - URL query string `?secret=<value>` (Evolution GO path — Go doesn't
+ *     let us inject headers on the outbound webhook URL, so the secret
+ *     lives in the URL we register)
  */
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
@@ -33,9 +38,12 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
       : crypto.randomBytes(16).toString('hex');
 
     try {
-      // Optional shared-secret check
+      // Optional shared-secret check — accept via header (Node v2) or
+      // query string (Evolution GO, which can't inject custom headers).
       if (EVOLUTION_WEBHOOK_SECRET) {
-        const provided = req.header('x-webhook-secret') ?? '';
+        const fromHeader = req.header('x-webhook-secret') ?? '';
+        const fromQuery = typeof req.query?.secret === 'string' ? req.query.secret : '';
+        const provided = fromHeader || fromQuery;
         const a = Buffer.from(provided);
         const b = Buffer.from(EVOLUTION_WEBHOOK_SECRET);
         const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
@@ -72,7 +80,13 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
       // Respond 200 fast and process below so Evolution doesn't retry
       res.sendStatus(200);
 
-      if (event === 'connection.update' || event === 'CONNECTION_UPDATE') {
+      // Evolution event-name normalization: Node v2 uses CONNECTION_UPDATE /
+      // MESSAGES_UPSERT; Evolution GO uses CONNECTION / MESSAGE. Accept both.
+      if (
+        event === 'connection.update' ||
+        event === 'CONNECTION_UPDATE' ||
+        event === 'CONNECTION'
+      ) {
         const state: string = data?.state ?? data?.status ?? '';
         const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
         if (state === 'open') {
@@ -88,7 +102,12 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           updates.status = 'qrcode';
         }
         await supabaseAdmin.from('whatsapp_instances').update(updates).eq('id', inst.id);
-      } else if (event === 'messages.upsert' || event === 'MESSAGES_UPSERT') {
+      } else if (
+        event === 'messages.upsert' ||
+        event === 'MESSAGES_UPSERT' ||
+        event === 'MESSAGE' ||
+        event === 'SEND_MESSAGE'
+      ) {
         // Evolution v2 sends one message per event in `data`, but the shape varies.
         const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
         for (const m of msgs) {

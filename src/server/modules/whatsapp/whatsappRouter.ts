@@ -395,7 +395,7 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
 
       const { data: inst } = await supabaseAdmin
         .from('whatsapp_instances')
-        .select('id, instanceName, apiKey')
+        .select('id, instanceName, instanceId, apiKey')
         .eq('id', req.params.id)
         .eq('campaignId', cid)
         .maybeSingle();
@@ -403,7 +403,9 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       if (!inst) return res.status(404).json({ error: 'instance_not_found' });
 
       if (inst.apiKey) {
-        await deleteInstance(inst.instanceName, inst.apiKey);
+        // Pass instanceId (UUID) too — Evolution GO requires it on the path
+        // for /instance/delete/:instanceId, while Node v2 ignored it.
+        await deleteInstance(inst.instanceName, inst.apiKey, inst.instanceId);
       }
 
       // Soft-delete so historic messages still resolve their instance via FK
