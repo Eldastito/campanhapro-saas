@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { supabase } from '../lib/supabaseClient';
 import Card from '../components/ui/Card';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -30,8 +31,17 @@ interface ShortLink {
 
 const API_BASE = '/api/v1/short-links';
 
+/** Adds the Supabase JWT to every API call, matching the rest of the app. */
+async function authHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return {
+    ...(extra ?? {}),
+    ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+  };
+}
+
 async function fetchLinks(): Promise<ShortLink[]> {
-  const res = await fetch(API_BASE, { credentials: 'include' });
+  const res = await fetch(API_BASE, { headers: await authHeaders() });
   if (!res.ok) throw new Error(`fetch_links_${res.status}`);
   const j = await res.json();
   return j.links ?? [];
@@ -45,8 +55,7 @@ async function createLink(payload: {
 }): Promise<ShortLink> {
   const res = await fetch(API_BASE, {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   const j = await res.json().catch(() => ({}));
@@ -57,7 +66,7 @@ async function createLink(payload: {
 async function deleteLink(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/${id}`, {
     method: 'DELETE',
-    credentials: 'include',
+    headers: await authHeaders(),
   });
   if (!res.ok && res.status !== 204) throw new Error(`delete_failed_${res.status}`);
 }

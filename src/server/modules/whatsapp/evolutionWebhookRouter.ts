@@ -74,19 +74,22 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
       }
 
       const campaignId = inst.campaignId;
-      const event = (req.body?.event ?? req.body?.eventType ?? '').toString();
+      const rawEvent = (req.body?.event ?? req.body?.eventType ?? '').toString();
+      // Normalize the event name to UPPERCASE: Evolution GO sends mixed-case
+      // names ("QRCode", "QRTimeout", "Connection", "Message") — we observed
+      // this in webhook_events. Stripping dots/underscores too lets us catch
+      // legacy Node v2 names ("CONNECTION_UPDATE", "messages.upsert") with
+      // the same logic instead of OR-chaining every casing.
+      const event = rawEvent.replace(/[._\s-]/g, '').toUpperCase();
       const data = req.body?.data ?? req.body ?? {};
 
       // Respond 200 fast and process below so Evolution doesn't retry
       res.sendStatus(200);
 
-      // Evolution event-name normalization: Node v2 uses CONNECTION_UPDATE /
-      // MESSAGES_UPSERT / QRCODE_UPDATED; Evolution GO uses CONNECTION /
-      // MESSAGE / QRCODE. Accept both.
       if (
-        event === 'qrcode.updated' ||
-        event === 'QRCODE_UPDATED' ||
-        event === 'QRCODE'
+        event === 'QRCODE' ||
+        event === 'QRCODEUPDATED' ||      // qrcode.updated (Node v2, after normalize)
+        event === 'QRCODEUPDATE'
       ) {
         // Evolution GO emits a fresh QR every ~20s while the instance is
         // pending pairing. The payload shape varies — try every key we've
@@ -110,9 +113,8 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             .eq('id', inst.id);
         }
       } else if (
-        event === 'connection.update' ||
-        event === 'CONNECTION_UPDATE' ||
-        event === 'CONNECTION'
+        event === 'CONNECTION' ||
+        event === 'CONNECTIONUPDATE'      // connection.update / CONNECTION_UPDATE
       ) {
         const state: string = data?.state ?? data?.status ?? '';
         const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
@@ -130,10 +132,9 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
         }
         await supabaseAdmin.from('whatsapp_instances').update(updates).eq('id', inst.id);
       } else if (
-        event === 'messages.upsert' ||
-        event === 'MESSAGES_UPSERT' ||
         event === 'MESSAGE' ||
-        event === 'SEND_MESSAGE'
+        event === 'SENDMESSAGE' ||         // SEND_MESSAGE
+        event === 'MESSAGESUPSERT'         // messages.upsert / MESSAGES_UPSERT
       ) {
         // Evolution v2 sends one message per event in `data`, but the shape varies.
         const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
