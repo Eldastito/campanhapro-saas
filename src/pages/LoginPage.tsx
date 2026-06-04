@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import Card from '../components/ui/Card';
 import Input from '../components/ui/Input';
+import PasswordInput from '../components/ui/PasswordInput';
 import Button from '../components/ui/Button';
 import { LOGO_MONO_BASE64 } from '../constants';
 import { useNavigate, Link } from 'react-router-dom';
@@ -50,10 +51,9 @@ const LoginPage = () => {
             required
             autoComplete="email"
           />
-          <Input
+          <PasswordInput
             label="Senha"
             id="password"
-            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required

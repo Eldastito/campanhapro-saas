@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import Card from '../components/ui/Card';
 import Input from '../components/ui/Input';
+import PasswordInput from '../components/ui/PasswordInput';
 import Button from '../components/ui/Button';
 import { LOGO_MONO_BASE64 } from '../constants';
 
@@ -60,8 +61,8 @@ const RegisterPage = () => {
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input label="Nome Completo" id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} required />
           <Input label="Email" id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          <Input label="Senha" id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          <Input label="Confirmar Senha" id="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required />
+          <PasswordInput label="Senha" id="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" />
+          <PasswordInput label="Confirmar Senha" id="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required autoComplete="new-password" />
           
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? 'Criando conta...' : 'Cadastrar'}
