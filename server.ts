@@ -19,6 +19,10 @@ import { createChannelsRouter } from './src/server/modules/channels/channelsRout
 import { createWebhookRouter } from './src/server/modules/channels/webhookRouter';
 import { createWhatsappRouter } from './src/server/modules/whatsapp/whatsappRouter';
 import { createEvolutionWebhookRouter } from './src/server/modules/whatsapp/evolutionWebhookRouter';
+import {
+  createShortLinksAdminRouter,
+  createShortLinksPublicRouter,
+} from './src/server/modules/shortLinks/shortLinksRouter';
 import { setWebhook, isEvolutionConfigured } from './src/server/modules/integrations/evolutionApiClient';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
 import { createScenariosRouter } from './src/server/modules/scenarios/scenariosRouter';
@@ -241,6 +245,11 @@ async function startServer() {
     app.use('/api/webhooks', webhookLimiter, createEvolutionWebhookRouter(supabaseAdmin));
     // Payment provider webhooks (Asaas / Stripe / Pagar.me) — token-validated by gateway
     app.use('/webhooks/payments', webhookLimiter, createPaymentWebhookRouter(supabaseAdmin));
+    // Short links — admin CRUD (auth) + public /l/:slug redirect (no auth).
+    // The public router uses webhookLimiter because the rate profile is the
+    // same: unauthenticated, hot path, must respond fast.
+    app.use('/api/v1/short-links', requireAuth, mutationLimiter, createShortLinksAdminRouter(supabaseAdmin));
+    app.use('/l', webhookLimiter, createShortLinksPublicRouter(supabaseAdmin));
   }
 
   // --- OAuth Social (Simulação) ---

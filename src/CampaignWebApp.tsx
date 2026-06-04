@@ -37,9 +37,10 @@ const GoalsPage = React.lazy(() => import('./pages/GoalsPage'));
 const RoutinesPage = React.lazy(() => import('./pages/RoutinesPage'));
 const MeetingsPage = React.lazy(() => import('./pages/MeetingsPage'));
 const ContentStudioPage = React.lazy(() => import('./pages/ContentStudioPage'));
+const ShortLinksPage = React.lazy(() => import('./pages/ShortLinksPage'));
 
 // Import Icons for Tabs
-import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays, Sparkles } from 'lucide-react';
+import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays, Sparkles, Link2 } from 'lucide-react';
 import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
     UsersGroupIcon, CurrencyDollarIcon, AcademicCapIcon, CogIcon,
@@ -100,7 +101,7 @@ const AdminApp: React.FC = () => {
                 'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
                 'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
                 'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio'
+                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio', 'Links Curtos'
             ];
             mandatory.forEach(tab => {
                 if (!allowedTabs.includes(tab)) allowedTabs.push(tab);
@@ -137,6 +138,7 @@ const AdminApp: React.FC = () => {
         'Rotinas': <RefreshCw className="h-5 w-5" />,
         'Reuniões': <CalendarDays className="h-5 w-5" />,
         'Estúdio': <Sparkles className="h-5 w-5" />,
+        'Links Curtos': <Link2 className="h-5 w-5" />,
     };
 
     // Componentes mapeados para as abas (deve seguir a ordem lógica do ALL_TABS para o componente Tabs indexar corretamente)
@@ -167,6 +169,7 @@ const AdminApp: React.FC = () => {
         'Rotinas': <RoutinesPage />,
         'Reuniões': <MeetingsPage />,
         'Estúdio': <ContentStudioPage />,
+        'Links Curtos': <ShortLinksPage />,
     };
 
     if (isLoading) {
