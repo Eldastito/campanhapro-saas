@@ -81,8 +81,35 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
       res.sendStatus(200);
 
       // Evolution event-name normalization: Node v2 uses CONNECTION_UPDATE /
-      // MESSAGES_UPSERT; Evolution GO uses CONNECTION / MESSAGE. Accept both.
+      // MESSAGES_UPSERT / QRCODE_UPDATED; Evolution GO uses CONNECTION /
+      // MESSAGE / QRCODE. Accept both.
       if (
+        event === 'qrcode.updated' ||
+        event === 'QRCODE_UPDATED' ||
+        event === 'QRCODE'
+      ) {
+        // Evolution GO emits a fresh QR every ~20s while the instance is
+        // pending pairing. The payload shape varies — try every key we've
+        // seen across versions. Most commonly: data.qrcode (with the
+        // "data:image/png;base64," prefix) or data.base64 (raw base64).
+        const qr =
+          (typeof data?.qrcode === 'string' && data.qrcode) ||
+          (typeof data?.base64 === 'string' && data.base64) ||
+          (typeof data?.qr === 'string' && data.qr) ||
+          (typeof data?.code === 'string' && data.code) ||
+          (typeof req.body?.qrcode === 'string' && req.body.qrcode) ||
+          null;
+        if (qr) {
+          await supabaseAdmin
+            .from('whatsapp_instances')
+            .update({
+              lastQRCode: qr,
+              status: 'qrcode',
+              updatedAt: new Date().toISOString(),
+            })
+            .eq('id', inst.id);
+        }
+      } else if (
         event === 'connection.update' ||
         event === 'CONNECTION_UPDATE' ||
         event === 'CONNECTION'
