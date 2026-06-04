@@ -72,7 +72,6 @@ ALTER TABLE boletins_urna ENABLE ROW LEVEL SECURITY;
 ALTER TABLE election_incidents ENABLE ROW LEVEL SECURITY;
 
 -- Políticas Básicas (Admin e Fiscais da Campanha)
--- Como o list_tables falhou, vou usar o ID do projeto que está no .env: jvmtcsxoxgzepslxqtdy
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Admins can manage election data') THEN

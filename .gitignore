@@ -29,3 +29,6 @@ npm-debug.log*
 # MCP config (contém tokens sensíveis)
 .mcp.json
 paperclip/
+
+# Supabase CLI cache (linked project metadata varia por máquina)
+supabase/.temp/

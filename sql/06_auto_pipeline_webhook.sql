@@ -15,7 +15,7 @@ DROP FUNCTION IF EXISTS notify_auto_pipeline_on_negative_report();
 CREATE OR REPLACE FUNCTION trigger_auto_pipeline_on_negative_report()
 RETURNS TRIGGER AS $$
 DECLARE
-    project_ref  TEXT := 'jvmtcsxoxgzepslxqtdy';
+    project_ref  TEXT := 'clfivmzwjydtmqobzxzb';
     function_url TEXT;
     payload      JSONB;
     col_campaign TEXT;
