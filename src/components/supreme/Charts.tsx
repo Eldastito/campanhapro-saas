@@ -5,28 +5,39 @@ import {
 } from 'recharts';
 
 /**
- * Gráficos modernos reutilizáveis para o Supreme Admin: fills em gradiente,
- * efeito glow (brilho neon), cantos arredondados, animação de entrada suave
- * e tooltip com blur. Cada gráfico recebe uma cor e gera ids únicos pros
- * <defs> (evita colisão de gradiente quando há vários no mesmo DOM).
+ * Gráficos modernos reutilizáveis para o Supreme Admin: gradientes vivos
+ * (two-tone), glow neon, barras arredondadas com "trilho" de fundo,
+ * linha de área curva e espessa com pontos brilhantes, animação de entrada
+ * e tooltip com vidro fosco. Ids únicos por instância evitam colisão de
+ * <defs> quando há vários gráficos no mesmo DOM.
  */
 
 const slug = (s: string) => s.replace(/[^a-z0-9]/gi, '').slice(0, 24);
+
+/** Clareia/escurece um hex pra montar gradientes two-tone. */
+function shade(hex: string, pct: number): string {
+  const n = parseInt(hex.replace('#', ''), 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.max(0, Math.min(255, Math.round(r + (pct / 100) * 255)));
+  g = Math.max(0, Math.min(255, Math.round(g + (pct / 100) * 255)));
+  b = Math.max(0, Math.min(255, Math.round(b + (pct / 100) * 255)));
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
 
 const ModernTooltip = ({ active, payload, label, unit }: any) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: 'rgba(15,23,42,0.92)',
-      border: '1px solid rgba(255,255,255,0.12)',
-      borderRadius: 10,
-      padding: '8px 12px',
-      backdropFilter: 'blur(8px)',
-      boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+      background: 'rgba(15,23,42,0.85)',
+      border: '1px solid rgba(255,255,255,0.14)',
+      borderRadius: 12,
+      padding: '10px 14px',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
     }}>
-      {label !== undefined && <p style={{ color: '#94a3b8', fontSize: 10, marginBottom: 4 }}>{label}{unit ?? ''}</p>}
+      {label !== undefined && <p style={{ color: '#94a3b8', fontSize: 10, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>{label}{unit ?? ''}</p>}
       {payload.map((p: any, i: number) => (
-        <p key={i} style={{ color: p.color || p.fill || '#e2e8f0', fontSize: 13, fontWeight: 700, fontFamily: 'monospace' }}>
+        <p key={i} style={{ color: p.color || p.fill || '#e2e8f0', fontSize: 16, fontWeight: 800, fontFamily: 'monospace' }}>
           {Number(p.value).toLocaleString('pt-BR')}
         </p>
       ))}
@@ -34,40 +45,40 @@ const ModernTooltip = ({ active, payload, label, unit }: any) => {
   );
 };
 
-interface AreaProps {
-  data: any[];
-  xKey: string;
-  dataKey: string;
-  color?: string;
-}
+interface AreaProps { data: any[]; xKey: string; dataKey: string; color?: string; }
 
 export const ModernArea: React.FC<AreaProps> = ({ data, xKey, dataKey, color = '#34d399' }) => {
   const id = slug(dataKey + color);
+  const light = shade(color, 25);
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 10, right: 10, left: -8, bottom: 0 }}>
+      <AreaChart data={data} margin={{ top: 16, right: 12, left: -6, bottom: 0 }}>
         <defs>
           <linearGradient id={`fill-${id}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.55} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
+            <stop offset="0%" stopColor={light} stopOpacity={0.75} />
+            <stop offset="45%" stopColor={color} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={color} stopOpacity={0.02} />
           </linearGradient>
-          <filter id={`glow-${id}`} x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
+          <linearGradient id={`stroke-${id}`} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={light} />
+            <stop offset="100%" stopColor={color} />
+          </linearGradient>
+          <filter id={`glow-${id}`} x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="4" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-        <XAxis dataKey={xKey} tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
-        <Tooltip content={<ModernTooltip />} cursor={{ stroke: color, strokeOpacity: 0.2 }} />
+        <CartesianGrid strokeDasharray="4 6" stroke="rgba(255,255,255,0.06)" vertical={false} />
+        <XAxis dataKey={xKey} tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} dy={6} />
+        <YAxis tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} width={30} />
+        <Tooltip content={<ModernTooltip />} cursor={{ stroke: color, strokeOpacity: 0.25, strokeWidth: 2 }} />
         <Area
-          type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2.5}
+          type="monotone" dataKey={dataKey}
+          stroke={`url(#stroke-${id})`} strokeWidth={3.5} strokeLinecap="round"
           fill={`url(#fill-${id})`} filter={`url(#glow-${id})`}
-          dot={false} activeDot={{ r: 4, fill: color, stroke: '#0f172a', strokeWidth: 2 }}
-          isAnimationActive animationDuration={900} animationEasing="ease-out"
+          dot={false}
+          activeDot={{ r: 6, fill: color, stroke: '#fff', strokeWidth: 2, filter: `url(#glow-${id})` }}
+          isAnimationActive animationDuration={1100} animationEasing="ease-out"
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -75,64 +86,58 @@ export const ModernArea: React.FC<AreaProps> = ({ data, xKey, dataKey, color = '
 };
 
 interface BarProps {
-  data: any[];
-  xKey: string;
-  dataKey: string;
-  color?: string;
-  /** Gradiente multicolor por barra (paleta) em vez de cor única. */
-  palette?: string[];
-  horizontal?: boolean;
-  unit?: string;
-  yWidth?: number;
+  data: any[]; xKey: string; dataKey: string; color?: string;
+  palette?: string[]; horizontal?: boolean; unit?: string; yWidth?: number;
 }
 
-const DEFAULT_PALETTE = ['#6366f1', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#a78bfa', '#fb7185', '#4ade80'];
+const DEFAULT_PALETTE = ['#818cf8', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#a78bfa', '#fb7185', '#4ade80'];
 
 export const ModernBar: React.FC<BarProps> = ({
-  data, xKey, dataKey, color = '#6366f1', palette, horizontal = false, unit, yWidth = 28,
+  data, xKey, dataKey, color = '#818cf8', palette, horizontal = false, unit, yWidth = 30,
 }) => {
   const id = slug(dataKey + color);
+  const pal = palette ?? null;
+  const grad = (c: string, key: string) => (
+    <linearGradient key={key} id={key} x1="0" y1="0" x2={horizontal ? '1' : '0'} y2={horizontal ? '0' : '1'}>
+      <stop offset="0%" stopColor={shade(c, 30)} stopOpacity={1} />
+      <stop offset="100%" stopColor={c} stopOpacity={0.65} />
+    </linearGradient>
+  );
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'} margin={{ top: 10, right: 12, left: horizontal ? 8 : -8, bottom: 0 }}>
+      <BarChart data={data} layout={horizontal ? 'vertical' : 'horizontal'} barCategoryGap={horizontal ? '28%' : '32%'} margin={{ top: 16, right: 14, left: horizontal ? 8 : -6, bottom: 0 }}>
         <defs>
-          <linearGradient id={`bar-${id}`} x1="0" y1="0" x2={horizontal ? '1' : '0'} y2={horizontal ? '0' : '1'}>
-            <stop offset="0%" stopColor={color} stopOpacity={1} />
-            <stop offset="100%" stopColor={color} stopOpacity={0.45} />
-          </linearGradient>
-          {(palette ?? DEFAULT_PALETTE).map((c, i) => (
-            <linearGradient key={i} id={`barp-${id}-${i}`} x1="0" y1="0" x2={horizontal ? '1' : '0'} y2={horizontal ? '0' : '1'}>
-              <stop offset="0%" stopColor={c} stopOpacity={1} />
-              <stop offset="100%" stopColor={c} stopOpacity={0.45} />
-            </linearGradient>
-          ))}
-          <filter id={`bglow-${id}`} x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="2" result="b" />
+          {grad(color, `bar-${id}`)}
+          {(pal ?? DEFAULT_PALETTE).map((c, i) => grad(c, `barp-${id}-${i}`))}
+          <filter id={`bglow-${id}`} x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="3.5" result="b" />
             <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={!horizontal} vertical={horizontal} />
+        <CartesianGrid strokeDasharray="4 6" stroke="rgba(255,255,255,0.06)" horizontal={!horizontal} vertical={horizontal} />
         {horizontal ? (
           <>
             <XAxis type="number" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} />
-            <YAxis type="category" dataKey={xKey} tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={120} />
+            <YAxis type="category" dataKey={xKey} tick={{ fontSize: 10, fill: '#cbd5e1' }} axisLine={false} tickLine={false} width={130} />
           </>
         ) : (
           <>
-            <XAxis dataKey={xKey} tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} unit={unit} />
+            <XAxis dataKey={xKey} tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} unit={unit} dy={6} />
             <YAxis tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} width={yWidth} />
           </>
         )}
-        <Tooltip content={<ModernTooltip unit={unit} />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+        <Tooltip content={<ModernTooltip unit={unit} />} cursor={{ fill: 'rgba(255,255,255,0.05)', radius: 8 }} />
         <Bar
           dataKey={dataKey}
-          radius={horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0]}
+          radius={horizontal ? [0, 10, 10, 0] : [10, 10, 0, 0]}
+          maxBarSize={horizontal ? 26 : 46}
           filter={`url(#bglow-${id})`}
-          isAnimationActive animationDuration={900} animationEasing="ease-out"
+          background={{ fill: 'rgba(255,255,255,0.035)', radius: horizontal ? 10 : 10 } as any}
+          isAnimationActive animationDuration={1000} animationEasing="ease-out"
         >
-          {palette
-            ? data.map((_, i) => <Cell key={i} fill={`url(#barp-${id}-${i % (palette ?? DEFAULT_PALETTE).length})`} />)
-            : data.map((_, i) => <Cell key={i} fill={`url(#bar-${id})`} />)}
+          {data.map((_, i) => (
+            <Cell key={i} fill={pal ? `url(#barp-${id}-${i % pal.length})` : `url(#bar-${id})`} />
+          ))}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
