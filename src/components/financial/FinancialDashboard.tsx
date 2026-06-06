@@ -3,6 +3,7 @@ import { useFinancial } from '../../contexts/FinancialContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useTeam } from '../../contexts/TeamContext';
 import { useCalculator } from '../../contexts/CalculatorContext';
+import { usePrintIsolation } from '../../hooks/usePrintIsolation';
 import Card from '../ui/Card';
 import { PrintIcon, FileTextIcon, AlertTriangleIcon, CheckCircleIcon } from '../icons';
 import Button from '../ui/Button';
@@ -16,6 +17,8 @@ const FinancialDashboard = () => {
     const { teamMembers } = useTeam();
     const { campaignDetails, footerLogo } = useSettings();
     const { calcState } = useCalculator();
+
+    usePrintIsolation();
 
     const totalTeamCosts = React.useMemo(() => teamMembers.reduce((sum, member) => sum + (member.cost || 0), 0), [teamMembers]);
     const totalIncomes = React.useMemo(() => incomes.reduce((sum, item) => sum + item.valor, 0), [incomes]);
@@ -98,7 +101,12 @@ const FinancialDashboard = () => {
     const formatCurrency = (value: number) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     return (
-        <div className="space-y-6 text-slate-200">
+        <div className="space-y-6 text-slate-200 print-root">
+            <div className="print-footer hidden text-[9px] text-slate-500 text-center">
+                {campaignDetails?.cnpj
+                    ? `CNPJ da campanha: ${campaignDetails.cnpj} · ${campaignDetails?.nomeUrna || ''} · Gerado por CampanhaPro`
+                    : '⚠ CNPJ da campanha não cadastrado (obrigatório TSE) · CampanhaPro'}
+            </div>
             <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 no-print">
                 <div>
                     <h3 className="text-xl font-bold text-slate-300">Resumo Estratégico</h3>

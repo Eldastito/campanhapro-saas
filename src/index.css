@@ -67,4 +67,28 @@ body {
     text-decoration: none;
     color: #000000 !important;
   }
+
+  /* ===== Isolamento de impressão de relatórios =====
+     Quando um relatório está aberto, o componente adiciona a classe
+     `report-open` no <body> (via usePrintIsolation). Aí imprimimos APENAS
+     o container `.print-root`, escondendo o resto da tela (headers, menus,
+     tabelas de fundo). Como é escopado em body.report-open, NÃO afeta a
+     impressão de páginas normais. Ancora o início da folha na logo/topo
+     do relatório. */
+  body.report-open * { visibility: hidden !important; }
+  body.report-open .print-root,
+  body.report-open .print-root * { visibility: visible !important; }
+  body.report-open .print-root {
+    position: absolute !important;
+    inset: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+  /* Blocos que não devem ser cortados entre páginas (empurra pra próxima). */
+  .print-keep, .print-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  @page { margin: 14mm 12mm 20mm 12mm; }
 }

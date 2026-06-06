@@ -4,6 +4,7 @@ import { useTeam } from '../../contexts/TeamContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useFinancial } from '../../contexts/FinancialContext';
 import { useDashboardMetrics } from '../../hooks/useDashboardMetrics';
+import { usePrintIsolation } from '../../hooks/usePrintIsolation';
 import { supabase } from '../../lib/supabaseClient';
 import { LOGO_MONO_BASE64 } from '../../constants';
 
@@ -43,6 +44,8 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
   const [buData, setBuData] = React.useState<BUData[]>([]);
   const [fiscais, setFiscais] = React.useState<FiscalData[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+
+  usePrintIsolation();
 
   React.useEffect(() => {
     const fetchElectionData = async () => {
@@ -131,7 +134,12 @@ const ElectionReportGenerator: React.FC<ElectionReportGeneratorProps> = ({ repor
   }
 
   return (
-    <div className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static print:bg-white print:text-black">
+    <div className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static print:bg-white print:text-black print-root">
+      <div className="print-footer hidden text-[9px] text-slate-500 text-center">
+        {campaignDetails?.cnpj
+          ? `CNPJ da campanha: ${campaignDetails.cnpj} · ${campaignDetails?.nomeUrna || ''} · Gerado por CampanhaPro`
+          : '⚠ CNPJ da campanha não cadastrado (obrigatório TSE) · CampanhaPro'}
+      </div>
       <style>{`
         @media print {
           .no-print { display: none !important; }

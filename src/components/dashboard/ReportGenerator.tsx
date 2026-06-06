@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTeam } from '../../contexts/TeamContext';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useDashboardMetrics } from '../../hooks/useDashboardMetrics';
+import { usePrintIsolation } from '../../hooks/usePrintIsolation';
 import { LOGO_MONO_BASE64 } from '../../constants';
 import { BarChartIcon, CurrencyDollarIcon, SparklesIcon } from '../icons';
 import { generateExecutiveReport } from '../../services/agentsClientService';
@@ -25,6 +26,8 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ reportType, onClose }
 
   const [aiReport, setAiReport] = React.useState<string | null>(null);
   const [isGenerating, setIsGenerating] = React.useState(true);
+
+  usePrintIsolation();
 
   const reportTitle = React.useMemo(() => {
     switch (reportType) {
@@ -101,7 +104,12 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({ reportType, onClose }
   }
 
   return (
-    <div className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static print:bg-white print:text-black">
+    <div className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static print:bg-white print:text-black print-root">
+      <div className="print-footer hidden text-[9px] text-slate-500 text-center">
+        {campaignDetails?.cnpj
+          ? `CNPJ da campanha: ${campaignDetails.cnpj} · ${campaignDetails?.nomeUrna || ''} · Gerado por CampanhaPro`
+          : '⚠ CNPJ da campanha não cadastrado (obrigatório TSE) · CampanhaPro'}
+      </div>
       <style>{`
         @media print {
           title { display: none; }
