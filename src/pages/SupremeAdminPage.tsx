@@ -17,8 +17,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-    AreaChart, Area, Cell
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    AreaChart, Area
 } from 'recharts';
 
 interface CampaignConfig {
@@ -31,16 +31,6 @@ interface CampaignConfig {
     };
     customFields: Record<string, CustomField[]>;
     status: 'active' | 'blocked';
-}
-
-interface AIUsageRecord {
-    id: string;
-    campaignId: string;
-    userId: string;
-    model: string;
-    totalTokens: number;
-    estimatedCost: number;
-    timestamp: any;
 }
 
 interface CustomField {
@@ -96,9 +86,6 @@ const SupremeAdminPage: React.FC = () => {
     const [userSearch, setUserSearch] = useState('');
     const [userFilter, setUserFilter] = useState<'all' | 'Admin' | 'Líder' | 'Apoiador' | 'Colaborador' | 'Pesquisador' | 'Suporte' | 'Manutenção'>('all');
     
-    // AI Usage Data
-    const [aiUsageData, setAiUsageData] = useState<AIUsageRecord[]>([]);
-    const [usageStats, setUsageStats] = useState({ totalTokens: 0, totalCost: 0 });
 
     // Platform metrics (F1) — real aggregates from supreme_platform_metrics()
     const [metrics, setMetrics] = useState<any | null>(null);
@@ -169,29 +156,9 @@ const SupremeAdminPage: React.FC = () => {
             });
             setCampaignConfigs(configs);
 
-            // 3. Fetch AI Usage
-            const { data: usageData, error: usageError } = await supabase
-                .from('ai_usage')
-                .select('*')
-                .order('timestamp', { ascending: false })
-                .limit(50);
-            if (usageError) throw usageError;
-            setAiUsageData(usageData as AIUsageRecord[]);
-
-            // 4. Fetch Platform Stats
-            const { data: statsData } = await supabase
-                .from('platform_stats')
-                .select('*')
-                .eq('id', 'global')
-                .single();
-            if (statsData) {
-                setUsageStats({
-                    totalTokens: statsData.totalTokens || 0,
-                    totalCost: statsData.totalCost || 0
-                });
-            }
-
             // 5. Platform metrics (real aggregates) — best-effort, never blocks the page
+            // (consumo de IA real vem daqui — metrics.tokens, de agent_runs —
+            //  as tabelas ai_usage/platform_stats legadas ficavam vazias)
             try {
                 const m = await supremeFetch('/metrics');
                 setMetrics(m?.metrics ?? null);
@@ -1400,13 +1367,18 @@ const SupremeAdminPage: React.FC = () => {
                                 </div>
                                 <div className="flex items-center gap-4 bg-slate-900 p-3 rounded-xl border border-white/5">
                                     <div className="text-right">
-                                        <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Total Gasto (Estimated)</p>
-                                        <p className="text-xl font-black text-emerald-400 font-mono">USD {usageStats.totalCost.toFixed(5)}</p>
+                                        <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Total Gasto (USD)</p>
+                                        <p className="text-xl font-black text-emerald-400 font-mono">US$ {(metrics?.tokens?.totalCostUsd ?? 0).toFixed(2)}</p>
                                     </div>
                                     <div className="h-8 w-px bg-white/10" />
                                     <div className="text-right">
                                         <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Tokens Processados</p>
-                                        <p className="text-xl font-black text-white font-mono">{usageStats.totalTokens.toLocaleString()}</p>
+                                        <p className="text-xl font-black text-white font-mono">{(metrics?.tokens?.totalTokens ?? 0).toLocaleString('pt-BR')}</p>
+                                    </div>
+                                    <div className="h-8 w-px bg-white/10" />
+                                    <div className="text-right">
+                                        <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Chamadas</p>
+                                        <p className="text-xl font-black text-sky-400 font-mono">{(metrics?.tokens?.totalRuns ?? 0).toLocaleString('pt-BR')}</p>
                                     </div>
                                 </div>
                             </div>
@@ -1415,107 +1387,74 @@ const SupremeAdminPage: React.FC = () => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <Card className="bg-slate-900 border-white/5 p-6 h-[400px]">
                                     <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                                        <Activity className="w-4 h-4 text-indigo-400" /> Fluxo de Consumo por Modelo
+                                        <Activity className="w-4 h-4 text-indigo-400" /> Tokens por Provider / Modelo
                                     </h3>
-                                    <ResponsiveContainer width="100%" height="85%">
-                                        <AreaChart data={aiUsageData.slice().reverse()}>
-                                            <defs>
-                                                <linearGradient id="colorTokens" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                                                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                                                </linearGradient>
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
-                                            <XAxis 
-                                                dataKey="timestamp" 
-                                                hide 
-                                            />
-                                            <YAxis stroke="#94a3b8" fontSize={10} />
-                                            <Tooltip 
-                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }}
-                                                itemStyle={{ fontSize: '12px' }}
-                                            />
-                                            <Area type="monotone" dataKey="totalTokens" stroke="#6366f1" fillOpacity={1} fill="url(#colorTokens)" />
-                                        </AreaChart>
-                                    </ResponsiveContainer>
+                                    {(metrics?.tokens?.byModel?.length) ? (
+                                        <ResponsiveContainer width="100%" height="85%">
+                                            <BarChart data={metrics.tokens.byModel} layout="vertical" margin={{ left: 40 }}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+                                                <XAxis type="number" stroke="#94a3b8" fontSize={10} />
+                                                <YAxis type="category" dataKey="model" stroke="#94a3b8" fontSize={9} width={120} />
+                                                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} />
+                                                <Bar dataKey="tokens" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    ) : <div className="h-[85%] flex items-center justify-center text-slate-500 text-sm">Sem dados de IA.</div>}
                                 </Card>
 
                                 <Card className="bg-slate-900 border-white/5 p-6 h-[400px]">
                                     <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                                        <TrendingIcon className="w-4 h-4 text-emerald-400" /> Matriz de Custos por Campanha
+                                        <TrendingIcon className="w-4 h-4 text-emerald-400" /> Custo (US$) por Campanha
                                     </h3>
-                                    <ResponsiveContainer width="100%" height="85%">
-                                        <BarChart data={campaigns.map(c => {
-                                            const campaignUsage = aiUsageData.filter(u => u.campaignId === c.campaignId);
-                                            return {
-                                                name: c.name.substring(0, 10),
-                                                cost: campaignUsage.reduce((acc, curr) => acc + curr.estimatedCost, 0),
-                                                tokens: campaignUsage.reduce((acc, curr) => acc + curr.totalTokens, 0)
-                                            };
-                                        }).filter(c => c.tokens > 0)}>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
-                                            <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} />
-                                            <YAxis stroke="#94a3b8" fontSize={10} />
-                                            <Tooltip 
-                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }}
-                                            />
-                                            <Bar dataKey="cost" fill="#10b981" radius={[4, 4, 0, 0]}>
-                                                {campaigns.map((_, index) => (
-                                                    <Cell key={`cell-${index}`} fillOpacity={0.8} />
-                                                ))}
-                                            </Bar>
-                                        </BarChart>
-                                    </ResponsiveContainer>
+                                    {(metrics?.tokens?.byCampaign?.length) ? (
+                                        <ResponsiveContainer width="100%" height="85%">
+                                            <BarChart data={metrics.tokens.byCampaign.map((c: any) => ({
+                                                name: (metrics.usersByCampaign?.find((u: any) => u.campaign_id === c.campaign_id)?.campaign_name) || String(c.campaign_id).substring(0, 8),
+                                                cost: c.cost_usd, tokens: c.tokens,
+                                            }))}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+                                                <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} />
+                                                <YAxis stroke="#94a3b8" fontSize={10} />
+                                                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} />
+                                                <Bar dataKey="cost" fill="#10b981" radius={[4, 4, 0, 0]} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    ) : <div className="h-[85%] flex items-center justify-center text-slate-500 text-sm">Sem dados de IA.</div>}
                                 </Card>
                             </div>
 
-                            {/* Detailed Logs */}
+                            {/* Breakdown por modelo (agent_runs) */}
                             <Card className="bg-slate-900 border-white/5 overflow-hidden">
                                 <div className="p-4 border-b border-white/5 flex justify-between items-center">
                                     <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                                        <Settings className="w-4 h-4 text-slate-500" /> Histórico Operacional de IA
+                                        <Cpu className="w-4 h-4 text-slate-500" /> Consumo de IA por Modelo (agent_runs)
                                     </h3>
-                                    <div className="flex gap-2">
-                                        <Button variant="ghost" className="h-7 text-[10px] flex items-center gap-2"><Filter className="w-3 h-3" /> Filtrar Usuário</Button>
-                                        <Button variant="ghost" className="h-7 text-[10px] flex items-center gap-2"><Download className="w-3 h-3" /> Export CSV</Button>
-                                    </div>
+                                    <span className="text-[10px] text-slate-500 font-mono">Total: {(metrics?.tokens?.totalTokens ?? 0).toLocaleString('pt-BR')} tokens · US$ {(metrics?.tokens?.totalCostUsd ?? 0).toFixed(2)}</span>
                                 </div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left">
                                         <thead className="bg-slate-950 text-slate-500 text-[10px] uppercase font-black tracking-widest">
                                             <tr>
-                                                <th className="px-6 py-4">Sessão / Modelo</th>
-                                                <th className="px-6 py-4">Campaign ID</th>
-                                                <th className="px-6 py-4">Tokens</th>
-                                                <th className="px-6 py-4 text-right">Custo Est.</th>
+                                                <th className="px-6 py-4">Provider / Modelo</th>
+                                                <th className="px-6 py-4 text-right">Chamadas</th>
+                                                <th className="px-6 py-4 text-right">Tokens</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-white/5">
-                                            {aiUsageData.map((usage) => (
-                                                <tr key={usage.id} className="hover:bg-white/5 text-[11px] transition-colors">
-                                                    <td className="px-6 py-3">
-                                                        <p className="text-slate-200 font-bold">{usage.model}</p>
-                                                        <p className="text-[9px] text-slate-500 font-mono">LOG_ID: {usage.id.substring(0, 10)}</p>
-                                                    </td>
-                                                    <td className="px-6 py-3 text-slate-400 font-mono">
-                                                        {usage.campaignId}
-                                                    </td>
-                                                    <td className="px-6 py-3">
-                                                        <span className="text-indigo-400 font-bold">{usage.totalTokens}</span>
-                                                    </td>
-                                                    <td className="px-6 py-3 text-right">
-                                                        <span className="text-emerald-500 font-black">USD {usage.estimatedCost.toFixed(6)}</span>
-                                                    </td>
+                                            {(metrics?.tokens?.byModel ?? []).map((m: any, i: number) => (
+                                                <tr key={i} className="hover:bg-white/5 text-[11px] transition-colors">
+                                                    <td className="px-6 py-3 text-slate-200 font-bold">{m.model}</td>
+                                                    <td className="px-6 py-3 text-right text-slate-400 font-mono">{Number(m.calls).toLocaleString('pt-BR')}</td>
+                                                    <td className="px-6 py-3 text-right text-indigo-400 font-bold">{Number(m.tokens).toLocaleString('pt-BR')}</td>
                                                 </tr>
                                             ))}
-                                            {aiUsageData.length === 0 && (
-                                                <tr>
-                                                    <td colSpan={4} className="px-6 py-10 text-center text-slate-500 italic">Nenhum log de IA capturado ainda.</td>
-                                                </tr>
+                                            {!(metrics?.tokens?.byModel?.length) && (
+                                                <tr><td colSpan={3} className="px-6 py-10 text-center text-slate-500 italic">Nenhuma chamada de IA registrada ainda.</td></tr>
                                             )}
                                         </tbody>
                                     </table>
                                 </div>
+                                <p className="text-[10px] text-slate-600 p-3">Dados reais de agent_runs (consumo das chamadas do callAgent). Nota: providers que não retornam contagem de tokens (alguns Anthropic/Gemini) aparecem com 0 tokens — correção registrada como follow-up.</p>
                             </Card>
                         </motion.div>
                     )}
