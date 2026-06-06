@@ -1429,7 +1429,12 @@ const SupremeAdminPage: React.FC = () => {
                                     <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
                                         <Cpu className="w-4 h-4 text-slate-500" /> Consumo de IA por Modelo (agent_runs)
                                     </h3>
-                                    <span className="text-[10px] text-slate-500 font-mono">Total: {(metrics?.tokens?.totalTokens ?? 0).toLocaleString('pt-BR')} tokens · US$ {(metrics?.tokens?.totalCostUsd ?? 0).toFixed(2)}</span>
+                                    <span className="text-[10px] text-slate-500 font-mono">
+                                        Total: {(metrics?.tokens?.totalTokens ?? 0).toLocaleString('pt-BR')} tokens · US$ {(metrics?.tokens?.totalCostUsd ?? 0).toFixed(2)}
+                                        {metrics?.tokens?.reliability && (
+                                            <span className="ml-2">· <span className="text-emerald-400">{metrics.tokens.reliability.ok} ok</span> / <span className="text-rose-400">{metrics.tokens.reliability.error} erro</span></span>
+                                        )}
+                                    </span>
                                 </div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left">

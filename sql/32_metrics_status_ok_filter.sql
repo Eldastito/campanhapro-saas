@@ -1,0 +1,25 @@
+-- =============================================
+-- PARTE 32: Métricas de IA contam apenas runs bem-sucedidas (status='ok')
+--
+-- Diagnóstico: agent_runs guarda TODAS as tentativas, inclusive falhas
+-- (status='error' com 0 tokens). As métricas antigas somavam tudo, fazendo
+-- o painel mostrar "anthropic 303 chamadas / 0 tokens" (eram falhas, não bug
+-- de extração — runs OK do Anthropic gravam tokens corretamente).
+--
+-- Correção: nos blocos de consumo de IA, filtrar status='ok' para tokens,
+-- custo, byModel, byCampaign, peakHours e totalRuns. Exposto também um
+-- indicador de confiabilidade (ok vs error).
+--
+-- As funções supreme_platform_metrics() e supreme_campaign_analytics(text)
+-- foram recriadas em produção com esse filtro (ver migrations
+-- supreme_platform_metrics + campaign_analytics_ai_ok_filter). Este arquivo
+-- documenta a mudança; o corpo completo vive em 25_ e 26_.
+--
+-- NOTA: a extração de tokens por provider está CORRETA (Anthropic usa
+-- usage.input_tokens/output_tokens; Gemini usa
+-- usageMetadata.promptTokenCount/candidatesTokenCount; OpenAI usage.*).
+-- As falhas históricas vieram de chave ausente / modelo descontinuado,
+-- já resolvidas pelo roteamento cost-aware (parte 34 / commit 84849b0).
+-- =============================================
+-- (sem DDL novo — apenas documentação da alteração das funções)
+SELECT 'metrics filtram status=ok' AS nota;
