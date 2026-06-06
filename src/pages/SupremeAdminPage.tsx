@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { syncPlanForCampaign, getPlanConfig } from '../utils/planUtils';
 import ConsultantReport from '../components/supreme/ConsultantReport';
 import { ModernArea, ModernBar } from '../components/supreme/Charts';
+import FormBuilder from '../components/supreme/FormBuilder';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -66,7 +67,7 @@ async function supremeFetch(path: string, init?: RequestInit): Promise<any> {
 
 const SupremeAdminPage: React.FC = () => {
     const { user, logout, sendPasswordReset } = useAuth();
-    const [activeTab, setActiveTab] = useState<'overview' | 'campaigns' | 'users' | 'platform' | 'financial' | 'audit'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'campaigns' | 'users' | 'platform' | 'financial' | 'audit' | 'forms'>('overview');
 
     // Auditoria (F2)
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -149,7 +150,8 @@ const SupremeAdminPage: React.FC = () => {
 
             const configs: Record<string, CampaignConfig> = {};
             configsData?.forEach((c: any) => {
-                configs[c.id] = c as CampaignConfig;
+                // O banco retorna snake_case (custom_fields); a UI usa customFields.
+                configs[c.id] = { ...c, customFields: c.custom_fields ?? c.customFields ?? {} } as CampaignConfig;
             });
             setCampaignConfigs(configs);
 
@@ -567,7 +569,13 @@ const SupremeAdminPage: React.FC = () => {
                         >
                             Usuários
                         </button>
-                        <button 
+                        <button
+                            onClick={() => setActiveTab('forms')}
+                            className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'forms' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Formulários
+                        </button>
+                        <button
                             onClick={() => setActiveTab('financial')}
                             className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'financial' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
                         >
@@ -1055,6 +1063,24 @@ const SupremeAdminPage: React.FC = () => {
                                         </tbody>
                                     </table>
                                 </div>
+                            </Card>
+                        </motion.div>
+                    )}
+
+                    {activeTab === 'forms' && (
+                        <motion.div
+                            key="forms"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="space-y-8"
+                        >
+                            <Card className="bg-slate-900/40 border-white/5 p-6">
+                                <FormBuilder
+                                    campaigns={campaigns
+                                        .filter((c) => !!c.campaignId)
+                                        .map((c) => ({ id: c.campaignId as string, name: c.name }))}
+                                    supremeFetch={supremeFetch}
+                                />
                             </Card>
                         </motion.div>
                     )}
@@ -1779,38 +1805,23 @@ const SupremeAdminPage: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Custom Fields Section */}
-                        <div className="space-y-4">
-                            <h4 className="text-[10px] font-black uppercase text-indigo-400 border-b border-indigo-500/20 pb-1">Campos Customizados (Visitas)</h4>
-                            <div className="space-y-2">
-                                {(campaignConfigs[showConfigModal]?.customFields?.visits || []).map((f, i) => (
-                                    <div key={i} className="flex items-center justify-between p-2 bg-slate-950 rounded text-xs">
-                                        <span>{f.label} ({f.type})</span>
-                                        <button 
-                                            onClick={() => {
-                                                const nextFields = campaignConfigs[showConfigModal].customFields.visits.filter((_, idx) => idx !== i);
-                                                updateConfig(showConfigModal, { customFields: { ...campaignConfigs[showConfigModal].customFields, visits: nextFields } });
-                                            }}
-                                            className="text-red-500 hover:text-red-400"
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
+                        {/* Custom Fields — agora geridos no Form Builder (F5) */}
+                        <div className="space-y-3">
+                            <h4 className="text-[10px] font-black uppercase text-indigo-400 border-b border-indigo-500/20 pb-1">Campos Personalizáveis</h4>
+                            <div className="flex flex-wrap gap-2 text-[10px]">
+                                {(['visits', 'contacts', 'pesquisa'] as const).map((t) => (
+                                    <span key={t} className="px-2 py-1 rounded bg-slate-950 border border-white/5 text-slate-400">
+                                        {t === 'visits' ? 'Visitas' : t === 'contacts' ? 'Contatos' : 'Pesquisa'}: <strong className="text-slate-200">{(campaignConfigs[showConfigModal]?.customFields?.[t]?.length) || 0}</strong>
+                                    </span>
                                 ))}
-                                <Button 
-                                    variant="ghost" 
-                                    className="w-full h-8 text-[10px] border-dashed border-white/10"
-                                    onClick={() => {
-                                        const label = prompt('Label do campo:');
-                                        if (label) {
-                                            const nextFields = [...(campaignConfigs[showConfigModal].customFields?.visits || []), { id: `field_${Date.now()}`, label, type: 'text', required: false }];
-                                            updateConfig(showConfigModal, { customFields: { ...campaignConfigs[showConfigModal].customFields, visits: nextFields as CustomField[] } });
-                                        }
-                                    }}
-                                >
-                                    + Adicionar Campo à Visita
-                                </Button>
                             </div>
+                            <Button
+                                variant="ghost"
+                                className="w-full h-8 text-[10px] border-dashed border-white/10"
+                                onClick={() => { setShowConfigModal(null); setActiveTab('forms'); }}
+                            >
+                                Editar no Form Builder →
+                            </Button>
                         </div>
 
                         <div className="pt-4">

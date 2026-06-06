@@ -109,7 +109,9 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     setPermissions(DEFAULT_PERMISSIONS);
                     setConfig(null);
                 } else if (data || isVIP) {
-                    let configData = (data || { id: user.campaignId }) as CampaignConfig;
+                    const raw: any = data || { id: user.campaignId };
+                    // O banco retorna snake_case (custom_fields); a app usa customFields.
+                    let configData = { ...raw, customFields: raw.custom_fields ?? raw.customFields ?? {} } as CampaignConfig;
 
                     // VIP Override: Acesso total automático
                     if (isVIP) {

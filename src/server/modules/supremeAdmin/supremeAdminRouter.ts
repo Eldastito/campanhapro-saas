@@ -27,6 +27,41 @@ import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { runLifecycleSweep } from '../billing/subscriptionLifecycle';
 import { calcSimplesNacional } from './taxCalculator';
 
+// ── Form Builder (F5) ──────────────────────────────────────────────────
+// Alvos (entidades) que aceitam campos personalizáveis por campanha.
+const FORM_TARGETS = ['visits', 'contacts', 'pesquisa'] as const;
+const FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'email', 'phone', 'select', 'boolean'] as const;
+
+/** Normaliza/valida o schema de formulários vindo do cliente (defensivo). */
+function sanitizeFormSchema(input: any): Record<string, any[]> {
+  const out: Record<string, any[]> = {};
+  const src = input && typeof input === 'object' ? input : {};
+  for (const target of FORM_TARGETS) {
+    const arr = Array.isArray(src[target]) ? src[target] : [];
+    const fields: any[] = [];
+    for (const f of arr) {
+      if (!f || typeof f !== 'object') continue;
+      const label = typeof f.label === 'string' ? f.label.trim().slice(0, 120) : '';
+      if (!label) continue; // campo sem label é descartado
+      const type = (FIELD_TYPES as readonly string[]).includes(f.type) ? f.type : 'text';
+      const id = typeof f.id === 'string' && f.id.trim()
+        ? f.id.trim().slice(0, 64)
+        : `f_${Math.random().toString(36).slice(2, 10)}`;
+      const field: any = { id, label, type, required: !!f.required };
+      if (type === 'select') {
+        field.options = Array.isArray(f.options)
+          ? f.options.map((o: any) => String(o).trim()).filter(Boolean).slice(0, 50)
+          : [];
+      }
+      if (typeof f.placeholder === 'string' && f.placeholder.trim()) field.placeholder = f.placeholder.trim().slice(0, 160);
+      if (typeof f.help === 'string' && f.help.trim()) field.help = f.help.trim().slice(0, 240);
+      fields.push(field);
+    }
+    out[target] = fields.slice(0, 50); // teto defensivo
+  }
+  return out;
+}
+
 /**
  * System prompt for the campaign-consultant agent. Persona: a senior
  * political-campaign strategist specialised in converting voters into
@@ -271,6 +306,44 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ ok: true });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'tax_config_update_failed' });
+    }
+  });
+
+  // ── Form Builder (F5): campos personalizáveis por campanha ──────────
+  // Schema vive em campaign_configs.custom_fields (jsonb), chaveado por alvo.
+  router.get('/forms/:campaignId', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('campaign_configs')
+        .select('custom_fields')
+        .eq('id', req.params.campaignId)
+        .maybeSingle();
+      if (error) return res.status(500).json({ error: 'forms_load_failed', detail: error.message });
+      return res.json({ schema: sanitizeFormSchema(data?.custom_fields) });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'forms_load_failed' });
+    }
+  });
+
+  router.put('/forms/:campaignId', async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.campaignId;
+      if (!campaignId) return res.status(400).json({ error: 'missing_campaign' });
+      const schema = sanitizeFormSchema(req.body?.schema);
+      // upsert preserva limits/features existentes; cria a linha se não existir.
+      const { error } = await supabaseAdmin
+        .from('campaign_configs')
+        .upsert({ id: campaignId, custom_fields: schema }, { onConflict: 'id' });
+      if (error) return res.status(500).json({ error: 'forms_save_failed', detail: error.message });
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'supreme.forms.update',
+        severity: 'info',
+        metadata: { campaignId, counts: Object.fromEntries(Object.entries(schema).map(([k, v]) => [k, (v as any[]).length])) },
+      }).catch(() => {});
+      return res.json({ ok: true, schema });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'forms_save_failed' });
     }
   });
 
