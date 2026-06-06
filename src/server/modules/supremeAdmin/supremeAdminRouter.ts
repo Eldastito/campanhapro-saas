@@ -41,6 +41,23 @@ function parsePlan(raw: unknown): Plan | null {
 export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
 
+  // ── GET /metrics ────────────────────────────────────────────────────
+  // One round-trip dashboard: campaigns, users (total/active/blocked),
+  // users-by-type, users-by-campaign, DB size + top tables, user &
+  // campaign growth, token usage, peak hours. All computed server-side by
+  // the supreme_platform_metrics() SQL function (SECURITY DEFINER so it can
+  // read auth.users + pg_catalog). Empty sections mean no data yet — not
+  // a failure (e.g. ai_usage may be unpopulated).
+  router.get('/metrics', async (_req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin.rpc('supreme_platform_metrics');
+      if (error) return res.status(500).json({ error: 'metrics_failed', detail: error.message });
+      return res.json({ metrics: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'metrics_failed' });
+    }
+  });
+
   // ── POST /users ─────────────────────────────────────────────────────
   // Create an internal/platform user (Suporte, Manutenção) or any user
   // without disturbing the operator's session.

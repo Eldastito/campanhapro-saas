@@ -92,6 +92,9 @@ const SupremeAdminPage: React.FC = () => {
     // AI Usage Data
     const [aiUsageData, setAiUsageData] = useState<AIUsageRecord[]>([]);
     const [usageStats, setUsageStats] = useState({ totalTokens: 0, totalCost: 0 });
+
+    // Platform metrics (F1) — real aggregates from supreme_platform_metrics()
+    const [metrics, setMetrics] = useState<any | null>(null);
     
     // UI State
     const [isLoading, setIsLoading] = useState(true);
@@ -158,6 +161,14 @@ const SupremeAdminPage: React.FC = () => {
                     totalTokens: statsData.totalTokens || 0,
                     totalCost: statsData.totalCost || 0
                 });
+            }
+
+            // 5. Platform metrics (real aggregates) — best-effort, never blocks the page
+            try {
+                const m = await supremeFetch('/metrics');
+                setMetrics(m?.metrics ?? null);
+            } catch (mErr) {
+                console.warn('[Supreme] metrics fetch failed:', mErr);
             }
 
         } catch (error) {
@@ -409,44 +420,96 @@ const SupremeAdminPage: React.FC = () => {
                             exit={{ opacity: 0, y: -10 }}
                             className="space-y-8"
                         >
-                            {/* Stats Grid */}
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            {/* Stats Grid — dados reais de supreme_platform_metrics() */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                                 {[
-                                    { label: 'Campanhas Ativas', val: campaigns.length, icon: Globe, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-                                    { label: 'Usuários Totais', val: globalUsers.length, icon: Users, color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
-                                    { label: 'Bloqueios Ativos', val: globalUsers.filter(u => u.role === 'blocked').length, icon: Ban, color: 'text-rose-400', bg: 'bg-rose-500/10' },
-                                    { label: 'Integridade Sistema', val: '99.9%', icon: ShieldAlert, color: 'text-emerald-400', bg: 'bg-emerald-500/10' }
+                                    { label: 'Campanhas Ativas', val: metrics?.campaigns?.active ?? campaigns.length, icon: Globe, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                                    { label: 'Usuários Totais', val: metrics?.users?.total ?? globalUsers.length, icon: Users, color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
+                                    { label: 'Ativos (30d)', val: metrics?.users?.active30d ?? '—', icon: Activity, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+                                    { label: 'Bloqueados', val: metrics?.users?.blocked ?? globalUsers.filter(u => u.role === 'blocked').length, icon: Ban, color: 'text-rose-400', bg: 'bg-rose-500/10' },
+                                    { label: 'Tokens IA', val: (metrics?.tokens?.totalTokens ?? 0).toLocaleString('pt-BR'), icon: Cpu, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                                    { label: 'Banco de Dados', val: metrics?.database?.sizePretty ?? '—', icon: Layers, color: 'text-purple-400', bg: 'bg-purple-500/10' },
                                 ].map((stat, i) => (
-                                    <Card key={i} className="bg-slate-900/50 border-white/5 p-6 relative overflow-hidden group">
-                                        <div className={`absolute top-0 right-0 p-4 ${stat.bg} rounded-bl-3xl opacity-20 group-hover:scale-110 transition-transform`}>
-                                            <stat.icon className={`w-8 h-8 ${stat.color}`} />
+                                    <Card key={i} className="bg-slate-900/50 border-white/5 p-4 relative overflow-hidden group">
+                                        <div className={`absolute top-0 right-0 p-3 ${stat.bg} rounded-bl-3xl opacity-20 group-hover:scale-110 transition-transform`}>
+                                            <stat.icon className={`w-6 h-6 ${stat.color}`} />
                                         </div>
                                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
-                                        <p className="text-3xl font-black text-white mt-2 font-mono tracking-tighter">{stat.val}</p>
+                                        <p className="text-2xl font-black text-white mt-2 font-mono tracking-tighter">{stat.val}</p>
                                     </Card>
                                 ))}
                             </div>
 
+                            {/* Crescimento de usuários + Usuários por campanha */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                    <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                        <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                                            <TrendingIcon className="w-4 h-4 text-emerald-400" /> Crescimento de Usuários (30d)
+                                        </h3>
+                                    </div>
+                                    <div className="p-4 h-64">
+                                        {metrics?.userGrowth?.length ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <AreaChart data={metrics.userGrowth}>
+                                                    <defs>
+                                                        <linearGradient id="ug" x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="5%" stopColor="#34d399" stopOpacity={0.4} />
+                                                            <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                                                    <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#64748b' }} />
+                                                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
+                                                    <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+                                                    <Area type="monotone" dataKey="novos" stroke="#34d399" fill="url(#ug)" />
+                                                </AreaChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <div className="h-full flex items-center justify-center text-slate-500 text-sm">Sem dados de crescimento ainda.</div>
+                                        )}
+                                    </div>
+                                </Card>
+
+                                <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                    <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                        <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                                            <Users className="w-4 h-4 text-indigo-400" /> Usuários por Campanha
+                                        </h3>
+                                    </div>
+                                    <div className="p-4 space-y-2 max-h-64 overflow-y-auto">
+                                        {(metrics?.usersByCampaign ?? []).map((c: any, idx: number) => (
+                                            <div key={idx} className="flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-white/5 text-sm">
+                                                <div>
+                                                    <p className="font-bold text-white">{c.campaign_name ?? c.campaign_id?.substring(0, 8)}</p>
+                                                    <p className="text-[10px] text-slate-500 font-mono">
+                                                        {Object.entries(c.by_type ?? {}).map(([t, n]) => `${t}: ${n}`).join('  ·  ')}
+                                                    </p>
+                                                </div>
+                                                <span className="text-lg font-black text-indigo-400 font-mono">{c.total}</span>
+                                            </div>
+                                        ))}
+                                        {!(metrics?.usersByCampaign?.length) && (
+                                            <div className="text-slate-500 text-sm py-8 text-center">Sem campanhas com usuários.</div>
+                                        )}
+                                    </div>
+                                </Card>
+                            </div>
+
+                            {/* Tamanho do banco (top tabelas) + Horários de pico */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 <Card className="bg-slate-900 border-white/5 overflow-hidden">
                                     <div className="p-4 border-b border-white/5 bg-slate-800/30 flex justify-between items-center">
                                         <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                                            <Layers className="w-4 h-4 text-indigo-400" /> Atividade Recente do Sistema
+                                            <Layers className="w-4 h-4 text-purple-400" /> Consumo de Espaço (Top Tabelas)
                                         </h3>
+                                        <span className="text-[10px] text-slate-500 font-mono">Total: {metrics?.database?.sizePretty ?? '—'}</span>
                                     </div>
-                                    <div className="p-4 space-y-4">
-                                        {campaigns.slice(0, 5).map((c, idx) => (
-                                            <div key={idx} className="flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-white/5 text-sm">
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 bg-indigo-500/20 rounded flex items-center justify-center text-indigo-400 font-bold">
-                                                        {c.name.charAt(0)}
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-bold text-white">{c.name}</p>
-                                                        <p className="text-[10px] text-slate-500">{c.email}</p>
-                                                    </div>
-                                                </div>
-                                                <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded uppercase font-mono">Log_{idx + 400}</span>
+                                    <div className="p-4 space-y-1.5 max-h-64 overflow-y-auto">
+                                        {(metrics?.topTables ?? []).map((t: any, idx: number) => (
+                                            <div key={idx} className="flex items-center justify-between text-xs">
+                                                <span className="font-mono text-slate-300">{t.table_name}</span>
+                                                <span className="font-mono text-slate-500">{t.pretty}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -455,17 +518,26 @@ const SupremeAdminPage: React.FC = () => {
                                 <Card className="bg-slate-900 border-white/5 overflow-hidden">
                                     <div className="p-4 border-b border-white/5 bg-slate-800/30">
                                         <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                                            <Cpu className="w-4 h-4 text-emerald-400" /> Recursos de Infraestrutura
+                                            <Activity className="w-4 h-4 text-amber-400" /> Horários de Pico de Atividade (IA, 30d)
                                         </h3>
                                     </div>
-                                    <div className="p-8 flex flex-col items-center justify-center text-center space-y-4">
-                                        <div className="w-32 h-32 rounded-full border-8 border-slate-800 border-t-emerald-500 flex items-center justify-center relative">
-                                            <span className="text-2xl font-black text-white">82%</span>
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-white text-sm">Carga do Cluster Gemini</p>
-                                            <p className="text-xs text-slate-500">Multimodal Pipeline Status: Stable</p>
-                                        </div>
+                                    <div className="p-4 h-64">
+                                        {metrics?.peakHours?.length ? (
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={metrics.peakHours}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                                                    <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#64748b' }} unit="h" />
+                                                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
+                                                    <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+                                                    <Bar dataKey="atividades" fill="#fbbf24" radius={[4, 4, 0, 0]} />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <div className="h-full flex items-center justify-center text-slate-500 text-sm text-center px-4">
+                                                Sem registros de IA ainda.<br />
+                                                <span className="text-[10px]">(o consumo de tokens passa a aparecer quando ai_usage for populado)</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </Card>
                             </div>
