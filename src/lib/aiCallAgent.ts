@@ -196,10 +196,10 @@ const getMonthSpentCents = async (supabaseAdmin: any, campaignId: string): Promi
     const startOfMonth = new Date(); startOfMonth.setUTCDate(1); startOfMonth.setUTCHours(0,0,0,0);
     const { data: rows } = await supabaseAdmin
         .from('agent_runs')
-        .select('"costCentsUsd"')
-        .eq('campaignId', campaignId)
-        .gte('createdAt', startOfMonth.toISOString());
-    return (rows || []).reduce((s: number, r: any) => s + (r.costCentsUsd || 0), 0);
+        .select('cost_cents_usd')
+        .eq('campaign_id', campaignId)
+        .gte('created_at', startOfMonth.toISOString());
+    return (rows || []).reduce((s: number, r: any) => s + (r.cost_cents_usd || 0), 0);
 };
 
 // ---------------------------------------------------------------------------
@@ -420,17 +420,17 @@ export async function callAgent(
         if (spent >= MONTHLY_CAP_CENTS_USD) {
             // Loga a tentativa bloqueada pra rastreabilidade
             await supabaseAdmin.from('agent_runs').insert({
-                campaignId: opts.campaignId,
-                userId: opts.userId || null,
-                managerRunId: opts.managerRunId || null,
-                agentId,
+                campaign_id: opts.campaignId,
+                user_id: opts.userId || null,
+                manager_run_id: opts.managerRunId || null,
+                agent_id: agentId,
                 provider: 'none',
                 model: 'none',
                 action: 'budget_blocked',
-                promptExcerpt: prompt.slice(0, 500),
-                tokensIn: 0,
-                tokensOut: 0,
-                costCentsUsd: 0,
+                prompt_excerpt: prompt.slice(0, 500),
+                tokens_in: 0,
+                tokens_out: 0,
+                cost_cents_usd: 0,
                 status: 'budget_exceeded',
                 error: `Mensal ${spent} cents >= cap ${MONTHLY_CAP_CENTS_USD}`,
             }).then(() => {}, (e: any) => console.error('[callAgent] log budget_exceeded falhou:', e));
@@ -462,20 +462,20 @@ export async function callAgent(
                 // Log de sucesso
                 let runId = '';
                 if (supabaseAdmin) {
-                    const { data } = await supabaseAdmin.from('agent_runs').insert({
-                        campaignId: opts.campaignId,
-                        userId: opts.userId || null,
-                        managerRunId: opts.managerRunId || null,
-                        agentId,
+                    const { data, error: logErr } = await supabaseAdmin.from('agent_runs').insert({
+                        campaign_id: opts.campaignId,
+                        user_id: opts.userId || null,
+                        manager_run_id: opts.managerRunId || null,
+                        agent_id: agentId,
                         provider,
                         model: raw.model,
                         action: 'chat',
-                        promptExcerpt: prompt.slice(0, 500),
-                        responseExcerpt: (raw.text || '').slice(0, 500),
-                        tokensIn: raw.tokensIn,
-                        tokensOut: raw.tokensOut,
-                        costCentsUsd: costCents,
-                        latencyMs,
+                        prompt_excerpt: prompt.slice(0, 500),
+                        response_excerpt: (raw.text || '').slice(0, 500),
+                        tokens_in: raw.tokensIn,
+                        tokens_out: raw.tokensOut,
+                        cost_cents_usd: costCents,
+                        latency_ms: latencyMs,
                         status: 'ok',
                         metadata: {
                             temperature: config.temperature,
@@ -486,6 +486,7 @@ export async function callAgent(
                             citations: raw.citations || null,
                         },
                     }).select('id').single();
+                    if (logErr) console.error('[callAgent] log ok falhou:', logErr.message);
                     runId = data?.id || '';
 
                     // Phase 8 — billing: mirror cost into usage_records for plan budget tracking
@@ -524,18 +525,18 @@ export async function callAgent(
                 // Log de erro
                 if (supabaseAdmin) {
                     await supabaseAdmin.from('agent_runs').insert({
-                        campaignId: opts.campaignId,
-                        userId: opts.userId || null,
-                        managerRunId: opts.managerRunId || null,
-                        agentId,
+                        campaign_id: opts.campaignId,
+                        user_id: opts.userId || null,
+                        manager_run_id: opts.managerRunId || null,
+                        agent_id: agentId,
                         provider,
                         model: config.model?.[provider] || DEFAULT_MODELS[provider],
                         action: 'chat',
-                        promptExcerpt: prompt.slice(0, 500),
-                        tokensIn: 0,
-                        tokensOut: 0,
-                        costCentsUsd: 0,
-                        latencyMs,
+                        prompt_excerpt: prompt.slice(0, 500),
+                        tokens_in: 0,
+                        tokens_out: 0,
+                        cost_cents_usd: 0,
+                        latency_ms: latencyMs,
                         status: err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '') ? 'timeout' : 'error',
                         error: String(err?.message || err).slice(0, 500),
                         metadata: { attempt, willRetry, willFallbackProvider: isLastAttempt && provider !== providers[providers.length - 1] },
