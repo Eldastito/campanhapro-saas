@@ -8,6 +8,7 @@ import Modal from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { syncPlanForCampaign, getPlanConfig } from '../utils/planUtils';
 import ConsultantReport from '../components/supreme/ConsultantReport';
+import { ModernArea, ModernBar } from '../components/supreme/Charts';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -16,10 +17,6 @@ import {
     Activity, Filter, Download, Brain, RefreshCw, LogOut, ScrollText, Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    AreaChart, Area
-} from 'recharts';
 
 interface CampaignConfig {
     id: string;
@@ -696,15 +693,7 @@ const SupremeAdminPage: React.FC = () => {
                                             </div>
                                             <div className="p-4 h-56">
                                                 {campaignSnapshot.userGrowth?.length ? (
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <AreaChart data={campaignSnapshot.userGrowth}>
-                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                                                            <XAxis dataKey="day" tick={{ fontSize: 9, fill: '#64748b' }} />
-                                                            <YAxis tick={{ fontSize: 9, fill: '#64748b' }} allowDecimals={false} />
-                                                            <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
-                                                            <Area type="monotone" dataKey="novos" stroke="#34d399" fill="#34d39933" />
-                                                        </AreaChart>
-                                                    </ResponsiveContainer>
+                                                    <ModernArea data={campaignSnapshot.userGrowth} xKey="day" dataKey="novos" color="#34d399" />
                                                 ) : <div className="h-full flex items-center justify-center text-slate-500 text-sm">Sem novos usuários (30d).</div>}
                                             </div>
                                         </Card>
@@ -714,15 +703,7 @@ const SupremeAdminPage: React.FC = () => {
                                             </div>
                                             <div className="p-4 h-56">
                                                 {campaignSnapshot.peakHours?.length ? (
-                                                    <ResponsiveContainer width="100%" height="100%">
-                                                        <BarChart data={campaignSnapshot.peakHours}>
-                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                                                            <XAxis dataKey="hour" tick={{ fontSize: 9, fill: '#64748b' }} unit="h" />
-                                                            <YAxis tick={{ fontSize: 9, fill: '#64748b' }} allowDecimals={false} />
-                                                            <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
-                                                            <Bar dataKey="atividades" fill="#fbbf24" radius={[4, 4, 0, 0]} />
-                                                        </BarChart>
-                                                    </ResponsiveContainer>
+                                                    <ModernBar data={campaignSnapshot.peakHours} xKey="hour" dataKey="atividades" color="#fbbf24" unit="h" />
                                                 ) : <div className="h-full flex items-center justify-center text-slate-500 text-sm text-center px-4">Sem atividade de IA (30d).</div>}
                                             </div>
                                         </Card>
@@ -782,21 +763,7 @@ const SupremeAdminPage: React.FC = () => {
                                     </div>
                                     <div className="p-4 h-64">
                                         {metrics?.userGrowth?.length ? (
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <AreaChart data={metrics.userGrowth}>
-                                                    <defs>
-                                                        <linearGradient id="ug" x1="0" y1="0" x2="0" y2="1">
-                                                            <stop offset="5%" stopColor="#34d399" stopOpacity={0.4} />
-                                                            <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
-                                                        </linearGradient>
-                                                    </defs>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                                                    <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#64748b' }} />
-                                                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
-                                                    <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
-                                                    <Area type="monotone" dataKey="novos" stroke="#34d399" fill="url(#ug)" />
-                                                </AreaChart>
-                                            </ResponsiveContainer>
+                                            <ModernArea data={metrics.userGrowth} xKey="day" dataKey="novos" color="#34d399" />
                                         ) : (
                                             <div className="h-full flex items-center justify-center text-slate-500 text-sm">Sem dados de crescimento ainda.</div>
                                         )}
@@ -855,19 +822,10 @@ const SupremeAdminPage: React.FC = () => {
                                     </div>
                                     <div className="p-4 h-64">
                                         {metrics?.peakHours?.length ? (
-                                            <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={metrics.peakHours}>
-                                                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                                                    <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#64748b' }} unit="h" />
-                                                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
-                                                    <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
-                                                    <Bar dataKey="atividades" fill="#fbbf24" radius={[4, 4, 0, 0]} />
-                                                </BarChart>
-                                            </ResponsiveContainer>
+                                            <ModernBar data={metrics.peakHours} xKey="hour" dataKey="atividades" color="#fbbf24" unit="h" />
                                         ) : (
                                             <div className="h-full flex items-center justify-center text-slate-500 text-sm text-center px-4">
-                                                Sem registros de IA ainda.<br />
-                                                <span className="text-[10px]">(o consumo de tokens passa a aparecer quando ai_usage for populado)</span>
+                                                Sem registros de IA ainda.
                                             </div>
                                         )}
                                     </div>
@@ -1390,15 +1348,7 @@ const SupremeAdminPage: React.FC = () => {
                                         <Activity className="w-4 h-4 text-indigo-400" /> Tokens por Provider / Modelo
                                     </h3>
                                     {(metrics?.tokens?.byModel?.length) ? (
-                                        <ResponsiveContainer width="100%" height="85%">
-                                            <BarChart data={metrics.tokens.byModel} layout="vertical" margin={{ left: 40 }}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
-                                                <XAxis type="number" stroke="#94a3b8" fontSize={10} />
-                                                <YAxis type="category" dataKey="model" stroke="#94a3b8" fontSize={9} width={120} />
-                                                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} />
-                                                <Bar dataKey="tokens" fill="#6366f1" radius={[0, 4, 4, 0]} />
-                                            </BarChart>
-                                        </ResponsiveContainer>
+                                        <div className="h-[85%]"><ModernBar data={metrics.tokens.byModel} xKey="model" dataKey="tokens" horizontal palette={['#6366f1','#34d399','#fbbf24','#f472b6']} /></div>
                                     ) : <div className="h-[85%] flex items-center justify-center text-slate-500 text-sm">Sem dados de IA.</div>}
                                 </Card>
 
@@ -1407,18 +1357,13 @@ const SupremeAdminPage: React.FC = () => {
                                         <TrendingIcon className="w-4 h-4 text-emerald-400" /> Custo (US$) por Campanha
                                     </h3>
                                     {(metrics?.tokens?.byCampaign?.length) ? (
-                                        <ResponsiveContainer width="100%" height="85%">
-                                            <BarChart data={metrics.tokens.byCampaign.map((c: any) => ({
+                                        <div className="h-[85%]"><ModernBar
+                                            data={metrics.tokens.byCampaign.map((c: any) => ({
                                                 name: (metrics.usersByCampaign?.find((u: any) => u.campaign_id === c.campaign_id)?.campaign_name) || String(c.campaign_id).substring(0, 8),
                                                 cost: c.cost_usd, tokens: c.tokens,
-                                            }))}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
-                                                <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} />
-                                                <YAxis stroke="#94a3b8" fontSize={10} />
-                                                <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} />
-                                                <Bar dataKey="cost" fill="#10b981" radius={[4, 4, 0, 0]} />
-                                            </BarChart>
-                                        </ResponsiveContainer>
+                                            }))}
+                                            xKey="name" dataKey="cost" color="#10b981"
+                                        /></div>
                                     ) : <div className="h-[85%] flex items-center justify-center text-slate-500 text-sm">Sem dados de IA.</div>}
                                 </Card>
                             </div>
