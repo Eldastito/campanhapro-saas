@@ -31,9 +31,39 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
   // Quando há seção de Evolução (2), as demais deslocam +1.
   const off = a?.evolucao?.comparavel ? 1 : 0;
 
+  const cnpj = snap?.campaign?.cnpj;
+
   return (
-    <div className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static">
-      <style>{`@media print { .no-print { display: none !important; } }`}</style>
+    <div id="consultant-report" className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static">
+      <style>{`
+        @media print {
+          /* Imprime APENAS o relatório — ancora o início na logo/nome,
+             escondendo a tela por trás (header SUPREME CONTROL, tabela, etc). */
+          body * { visibility: hidden !important; }
+          #consultant-report, #consultant-report * { visibility: visible !important; }
+          #consultant-report {
+            position: absolute !important;
+            inset: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+          .no-print { display: none !important; }
+          /* Mantém cada bloco inteiro na mesma página (empurra pra próxima
+             se não couber, em vez de cortar no meio). */
+          .report-block { break-inside: avoid; page-break-inside: avoid; }
+          .report-section { break-inside: avoid; page-break-inside: avoid; margin-bottom: 18px; }
+          /* Rodapé fixo repetido em todas as páginas (CNPJ — TRE/TSE). */
+          .print-footer { position: fixed; bottom: 0; left: 0; right: 0; display: block !important; }
+          @page { margin: 14mm 12mm 20mm 12mm; }
+        }
+      `}</style>
+
+      {/* Rodapé que repete em toda página impressa (CNPJ obrigatório TRE/TSE) */}
+      <div className="print-footer hidden text-[9px] text-slate-500 border-t border-slate-300 pt-1 px-2">
+        {cnpj
+          ? `CNPJ da campanha: ${cnpj} · Documento gerado por CampanhaPro · campanhapro2.tesseractauto.com.br`
+          : `⚠ CNPJ da campanha não cadastrado (obrigatório TSE) · CampanhaPro · campanhapro2.tesseractauto.com.br`}
+      </div>
 
       {/* Toolbar (não imprime) */}
       <div className="no-print mb-8 flex justify-between items-center">
@@ -69,7 +99,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
       ) : (
         <div className="space-y-10">
           {/* 1. Panorama */}
-          <section>
+          <section className="report-section">
             <SectionTitle n={1}>Panorama Estratégico</SectionTitle>
             <div className="flex items-center gap-6 bg-slate-50 p-6 rounded-xl border border-slate-200">
               <div className="shrink-0 w-28 h-28 rounded-full flex flex-col items-center justify-center border-8"
@@ -86,7 +116,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
 
           {/* Evolução vs análise anterior */}
           {a.evolucao?.comparavel && (
-            <section>
+            <section className="report-section">
               <SectionTitle n={2}>Evolução desde a Última Análise</SectionTitle>
               <div className={`rounded-xl border p-6 ${
                 a.evolucao.tendencia === 'avanco' ? 'bg-emerald-50 border-emerald-200'
@@ -132,7 +162,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
 
           {/* Funil */}
           {a.funilConversao && (
-            <section>
+            <section className="report-section">
               <SectionTitle n={2 + off}>Funil de Conversão (Eleitor → Apoiador → Votante)</SectionTitle>
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 space-y-3">
                 <p className="text-slate-700 leading-relaxed">{a.funilConversao.diagnostico}</p>
@@ -148,7 +178,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
 
           {/* 3. SWOT */}
           {a.swot && (
-            <section>
+            <section className="report-section">
               <SectionTitle n={3 + off}>Análise SWOT</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 {[
@@ -172,11 +202,11 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
 
           {/* 4. Diagnóstico por fase */}
           {Array.isArray(a.diagnosticoPorFase) && a.diagnosticoPorFase.length > 0 && (
-            <section>
+            <section className="report-section">
               <SectionTitle n={4 + off}>Diagnóstico por Fase</SectionTitle>
               <div className="space-y-2">
                 {a.diagnosticoPorFase.map((f: any, i: number) => (
-                  <div key={i} className="flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-lg p-4">
+                  <div key={i} className="report-block flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-lg p-4">
                     <span className={`mt-1 w-3 h-3 rounded-full shrink-0 ${f.status === 'bom' ? 'bg-emerald-500' : f.status === 'critico' ? 'bg-rose-500' : 'bg-amber-500'}`} />
                     <div>
                       <p className="font-bold text-slate-800">{f.fase}</p>
@@ -190,11 +220,11 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
 
           {/* 5. Recomendações */}
           {Array.isArray(a.recomendacoes) && a.recomendacoes.length > 0 && (
-            <section>
+            <section className="report-section">
               <SectionTitle n={5 + off}>Plano de Ação Recomendado</SectionTitle>
               <div className="space-y-3">
                 {a.recomendacoes.map((r: any, i: number) => (
-                  <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-start gap-3">
+                  <div key={i} className="report-block bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-start gap-3">
                     <Target className="h-5 w-5 text-indigo-600 shrink-0 mt-0.5" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
@@ -211,7 +241,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
 
           {/* Apêndice: dados analisados */}
           {snap && (
-            <section>
+            <section className="report-section">
               <SectionTitle n={6 + off}>Dados Analisados (Apêndice)</SectionTitle>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
                 {[

@@ -53,7 +53,11 @@ BEGIN
     'campaign', (
       SELECT jsonb_build_object(
         'name', (SELECT name FROM public.users WHERE "campaignId" = v_uuid AND type='Admin' ORDER BY "createdAt" LIMIT 1),
-        'plan', cc."planTier", 'status', cc.status, 'features', cc.features, 'createdAt', cc."createdAt"
+        'plan', cc."planTier", 'status', cc.status, 'features', cc.features, 'createdAt', cc."createdAt",
+        -- Dados eleitorais (TRE/TSE) — vêm de settings.campaignDetails (jsonb)
+        'cnpj', (SELECT "campaignDetails"->>'cnpj' FROM settings WHERE "campaignId" = p_campaign_id LIMIT 1),
+        'nomeUrna', (SELECT "campaignDetails"->>'nomeUrna' FROM settings WHERE "campaignId" = p_campaign_id LIMIT 1),
+        'partido', (SELECT "campaignDetails"->>'partido' FROM settings WHERE "campaignId" = p_campaign_id LIMIT 1)
       ) FROM campaign_configs cc WHERE cc.id = p_campaign_id
     ),
     'team', (
