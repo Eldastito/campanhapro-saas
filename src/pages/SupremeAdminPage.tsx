@@ -13,7 +13,7 @@ import {
     Settings, Plus, Search, Lock, Unlock,
     Layout, Cpu, AlertTriangle, Trash2, Mail,
     CreditCard, Layers, TrendingUp as TrendingIcon,
-    Activity, Filter, Download, Brain
+    Activity, Filter, Download, Brain, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -96,6 +96,10 @@ const SupremeAdminPage: React.FC = () => {
 
     // Platform metrics (F1) — real aggregates from supreme_platform_metrics()
     const [metrics, setMetrics] = useState<any | null>(null);
+
+    // Financial metrics (F3)
+    const [financial, setFinancial] = useState<any | null>(null);
+    const [runningLifecycle, setRunningLifecycle] = useState(false);
 
     // Dashboard per-campaign filter (F1)
     const [dashCampaign, setDashCampaign] = useState<string>('all');
@@ -181,6 +185,14 @@ const SupremeAdminPage: React.FC = () => {
                 setMetrics(m?.metrics ?? null);
             } catch (mErr) {
                 console.warn('[Supreme] metrics fetch failed:', mErr);
+            }
+
+            // 6. Financial metrics (F3) — best-effort
+            try {
+                const f = await supremeFetch('/financial');
+                setFinancial(f?.financial ?? null);
+            } catch (fErr) {
+                console.warn('[Supreme] financial fetch failed:', fErr);
             }
 
         } catch (error) {
@@ -348,6 +360,26 @@ const SupremeAdminPage: React.FC = () => {
             setAnalysis({ error: e.message || 'Falha na análise' });
         } finally {
             setAnalyzingId(null);
+        }
+    };
+
+    const handleRunLifecycle = async () => {
+        setRunningLifecycle(true);
+        try {
+            const r = await supremeFetch('/financial/run-lifecycle', { method: 'POST' });
+            const res = r?.result ?? {};
+            alert(
+                `Cobrança/lifecycle executado:\n` +
+                `• Lembretes enviados: ${res.remindersSent ?? 0}\n` +
+                `• Downgrades por inadimplência: ${res.downgraded ?? 0}\n` +
+                `• Cancelados expirados: ${res.canceledExpired ?? 0}\n` +
+                `• Erros: ${res.errors ?? 0}`
+            );
+            fetchAllData();
+        } catch (e: any) {
+            alert(`Erro ao rodar cobrança: ${e.message || 'desconhecido'}`);
+        } finally {
+            setRunningLifecycle(false);
         }
     };
 
@@ -896,12 +928,87 @@ const SupremeAdminPage: React.FC = () => {
                     )}
 
                     {activeTab === 'financial' && (
-                        <motion.div 
+                        <motion.div
                             key="financial"
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             className="space-y-8"
                         >
+                            {/* ===== FINANCEIRO SAAS (F3) ===== */}
+                            <div className="flex justify-between items-end">
+                                <div>
+                                    <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic">Financeiro SaaS</h2>
+                                    <p className="text-xs text-slate-500 uppercase tracking-widest font-mono">Receita Recorrente, Assinaturas e Inadimplência</p>
+                                </div>
+                                <Button onClick={handleRunLifecycle} disabled={runningLifecycle} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-2">
+                                    <RefreshCw className={`w-4 h-4 ${runningLifecycle ? 'animate-spin' : ''}`} />
+                                    {runningLifecycle ? 'Processando…' : 'Rodar cobrança agora'}
+                                </Button>
+                            </div>
+
+                            {/* Cards financeiros */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                                {[
+                                    { label: 'MRR', val: `R$ ${((financial?.mrrCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`, color: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: TrendingIcon },
+                                    { label: 'ARR (anual)', val: `R$ ${((financial?.arrCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits: 0})}`, color: 'text-teal-400', bg: 'bg-teal-500/10', icon: TrendingIcon },
+                                    { label: 'Pagantes Ativos', val: financial?.subscriptions?.payingActive ?? 0, color: 'text-blue-400', bg: 'bg-blue-500/10', icon: CheckCircle },
+                                    { label: 'Inadimplentes', val: financial?.subscriptions?.pastDue ?? 0, color: 'text-rose-400', bg: 'bg-rose-500/10', icon: AlertTriangle },
+                                    { label: 'Cancelados', val: financial?.subscriptions?.canceled ?? 0, color: 'text-slate-400', bg: 'bg-slate-500/10', icon: Ban },
+                                    { label: 'Custo IA (USD)', val: `$${(financial?.aiCostUsd ?? 0).toFixed(2)}`, color: 'text-amber-400', bg: 'bg-amber-500/10', icon: Cpu },
+                                ].map((s, i) => (
+                                    <Card key={i} className="bg-slate-900/50 border-white/5 p-4 relative overflow-hidden">
+                                        <div className={`absolute top-0 right-0 p-3 ${s.bg} rounded-bl-3xl opacity-20`}><s.icon className={`w-6 h-6 ${s.color}`} /></div>
+                                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{s.label}</p>
+                                        <p className="text-xl font-black text-white mt-2 font-mono tracking-tighter">{s.val}</p>
+                                    </Card>
+                                ))}
+                            </div>
+
+                            {/* Planos + Inadimplentes */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                    <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                        <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><CreditCard className="w-4 h-4 text-emerald-400" /> Planos & Assinantes</h3>
+                                    </div>
+                                    <div className="p-4 space-y-2">
+                                        {(financial?.byPlan ?? []).map((p: any) => (
+                                            <div key={p.id} className="flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-white/5">
+                                                <div>
+                                                    <p className="font-bold text-white">{p.name}</p>
+                                                    <p className="text-[10px] text-slate-500 font-mono">R$ {(p.monthlyCents/100).toLocaleString('pt-BR')}/mês {p.active ? '' : '· inativo'}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-lg font-black text-emerald-400 font-mono">{p.active_subs}</p>
+                                                    <p className="text-[10px] text-slate-500">ativos</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
+
+                                <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                    <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                        <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-rose-400" /> Inadimplentes (suspensão automática)</h3>
+                                    </div>
+                                    <div className="p-4 space-y-2 max-h-72 overflow-y-auto">
+                                        {(financial?.inadimplentes?.length ?? 0) === 0 ? (
+                                            <p className="text-slate-500 text-sm py-8 text-center flex flex-col items-center gap-2"><CheckCircle className="w-8 h-8 text-emerald-500/40" /> Nenhum inadimplente. 🎉</p>
+                                        ) : financial.inadimplentes.map((x: any) => (
+                                            <div key={x.subscription_id} className="flex items-center justify-between p-3 bg-rose-500/5 rounded-lg border border-rose-500/20">
+                                                <div>
+                                                    <p className="font-bold text-white">{x.campaign_name ?? x.campaign_id?.substring(0,8)}</p>
+                                                    <p className="text-[10px] text-slate-500">{x.plan_name} · desde {x.updatedAt ? new Date(x.updatedAt).toLocaleDateString('pt-BR') : '—'}</p>
+                                                </div>
+                                                <span className="text-rose-400 font-mono text-sm">R$ {(x.monthlyCents/100).toLocaleString('pt-BR')}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </Card>
+                            </div>
+
+                            <div className="border-t border-white/5 pt-6" />
+
+                            {/* ===== IA: CONSUMO & CUSTO ===== */}
                             <div className="flex justify-between items-end">
                                 <div>
                                     <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic">AI Intelligence: Consumption & Cost</h2>

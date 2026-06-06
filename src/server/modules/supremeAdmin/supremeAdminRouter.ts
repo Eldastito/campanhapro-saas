@@ -24,6 +24,7 @@ import { getPlanConfig } from '../../../utils/planUtils';
 import { Plan } from '../../../types/user';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
+import { runLifecycleSweep } from '../billing/subscriptionLifecycle';
 
 /**
  * System prompt for the campaign-consultant agent. Persona: a senior
@@ -113,6 +114,38 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ metrics: data });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'metrics_failed' });
+    }
+  });
+
+  // ── GET /financial ──────────────────────────────────────────────────
+  // SaaS financial dashboard: MRR/ARR, subscriptions by status, per-plan
+  // distribution, overdue (past_due) campaigns, confirmed revenue, AI cost.
+  router.get('/financial', async (_req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin.rpc('supreme_financial_metrics');
+      if (error) return res.status(500).json({ error: 'financial_failed', detail: error.message });
+      return res.json({ financial: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'financial_failed' });
+    }
+  });
+
+  // ── POST /financial/run-lifecycle ───────────────────────────────────
+  // Manually trigger the billing lifecycle sweep (reminders, auto-downgrade
+  // of stale past_due, expire canceled). Normally runs every 6h on its own
+  // (startLifecycleSweeper in server.ts) — this lets the operator force it.
+  router.post('/financial/run-lifecycle', async (req: Request, res: Response) => {
+    try {
+      const result = await runLifecycleSweep(supabaseAdmin);
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'supreme.financial.run_lifecycle',
+        severity: 'info',
+        metadata: result as any,
+      }).catch(() => {});
+      return res.json({ result });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'lifecycle_failed' });
     }
   });
 
