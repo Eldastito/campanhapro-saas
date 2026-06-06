@@ -23,6 +23,54 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPlanConfig } from '../../../utils/planUtils';
 import { Plan } from '../../../types/user';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
+
+/**
+ * System prompt for the campaign-consultant agent. Persona: a senior
+ * political-campaign strategist specialised in converting voters into
+ * supporters and likely voters. It receives a data snapshot and must
+ * return strict JSON (no prose outside the object).
+ */
+const CONSULTANT_SYSTEM = `Você é um consultor sênior de campanhas políticas brasileiras, especialista em CONVERSÃO de eleitores em apoiadores e prováveis votantes. Você analisa dados reais de uma campanha e produz um diagnóstico acionável, honesto e específico — sem floreios genéricos.
+
+Receberá um JSON com métricas da campanha (equipe, contatos/CRM, visitas de campo, reportes de rua, pesquisas, jornada do eleitor/funil, engajamento, metas, uso de IA, WhatsApp).
+
+Analise CADA fase do funil (captura → relacionamento → conversão → mobilização) e identifique o que está funcionando e o que está travando. Quando um dado estiver zerado ou ausente, trate como sinal (ex.: "sem pesquisas = cego sobre intenção de voto"), não ignore.
+
+Responda APENAS com um objeto JSON válido, sem markdown, neste formato exato:
+{
+  "scoreConversao": <0-100, nota geral da saúde de conversão da campanha>,
+  "resumoExecutivo": "<2-4 frases diretas pro gestor>",
+  "funilConversao": {
+    "diagnostico": "<análise do funil eleitor→apoiador→votante>",
+    "maiorGargalo": "<o ponto que mais trava conversão>"
+  },
+  "swot": {
+    "forcas": ["<...>"],
+    "fraquezas": ["<...>"],
+    "oportunidades": ["<...>"],
+    "ameacas": ["<...>"]
+  },
+  "diagnosticoPorFase": [
+    { "fase": "<nome>", "status": "<bom|atencao|critico>", "observacao": "<...>" }
+  ],
+  "recomendacoes": [
+    { "prioridade": "<alta|media|baixa>", "acao": "<ação concreta>", "impactoEsperado": "<...>" }
+  ]
+}`;
+
+/** Strips ```json fences and parses; returns null on failure. */
+function parseJsonLoose(text: string): any | null {
+  if (!text) return null;
+  let t = text.trim();
+  // Remove leading/trailing markdown fences if present
+  t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  // Grab the outermost {...} if there's surrounding prose
+  const first = t.indexOf('{');
+  const last = t.lastIndexOf('}');
+  if (first >= 0 && last > first) t = t.slice(first, last + 1);
+  try { return JSON.parse(t); } catch { return null; }
+}
 
 // 100 years — Supabase has no "permanent" ban literal, so we use a long span.
 const BAN_FOREVER = '876000h';
@@ -245,6 +293,98 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       return res.status(204).end();
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'delete_failed' });
+    }
+  });
+
+  // ── POST /campaigns/:id/analyze ─────────────────────────────────────
+  // Runs the AI campaign consultant: gathers a real data snapshot via
+  // supreme_campaign_analytics(), feeds it to callAgent (OpenAI → Anthropic
+  // → Gemini chain), parses the structured SWOT/diagnosis, persists it in
+  // consultant_reports, and returns it.
+  router.post('/campaigns/:id/analyze', async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.id;
+
+      // 1. Gather the data snapshot
+      const { data: snapshot, error: snapErr } = await supabaseAdmin.rpc(
+        'supreme_campaign_analytics',
+        { p_campaign_id: campaignId },
+      );
+      if (snapErr) return res.status(500).json({ error: 'snapshot_failed', detail: snapErr.message });
+
+      // 2. Ask the consultant agent (multi-provider chain inside callAgent)
+      const prompt =
+        `Analise esta campanha e devolva o JSON conforme instruído.\n\n` +
+        `DADOS DA CAMPANHA:\n${JSON.stringify(snapshot, null, 2)}`;
+
+      let result;
+      try {
+        result = await callAgent(supabaseAdmin, 'campaign_consultant', prompt, {
+          campaignId,
+          userId: (req as any).user?.id ?? null,
+          systemInstruction: CONSULTANT_SYSTEM,
+        });
+      } catch (aiErr: any) {
+        if (aiErr instanceof BudgetExceededError) {
+          return res.status(402).json({ error: 'ai_budget_exceeded', detail: aiErr.message });
+        }
+        return res.status(502).json({ error: 'ai_call_failed', detail: aiErr?.message });
+      }
+
+      const analysis = parseJsonLoose(result.text);
+
+      // 3. Persist the report (best-effort)
+      const { data: saved } = await supabaseAdmin
+        .from('consultant_reports')
+        .insert({
+          campaignId,
+          generatedBy: (req as any).user?.id ?? null,
+          provider: result.provider,
+          model: result.model,
+          snapshot,
+          analysis: analysis ?? null,
+          narrative: analysis ? null : result.text, // fallback: keep raw text if JSON parse failed
+          tokensIn: result.tokensIn,
+          tokensOut: result.tokensOut,
+        })
+        .select('id, createdAt')
+        .single();
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'supreme.campaign.analyze',
+        severity: 'info',
+        metadata: { campaignId, provider: result.provider, model: result.model, reportId: saved?.id },
+      }).catch(() => {});
+
+      return res.json({
+        reportId: saved?.id,
+        provider: result.provider,
+        model: result.model,
+        snapshot,
+        analysis,
+        rawText: analysis ? undefined : result.text,
+      });
+    } catch (err: any) {
+      console.error('[supreme] analyze error:', err);
+      return res.status(500).json({ error: err.message ?? 'analyze_failed' });
+    }
+  });
+
+  // ── GET /campaigns/:id/reports ──────────────────────────────────────
+  // List past consultant reports for a campaign (most recent first).
+  router.get('/campaigns/:id/reports', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('consultant_reports')
+        .select('id, provider, model, analysis, createdAt')
+        .eq('campaignId', req.params.id)
+        .order('createdAt', { ascending: false })
+        .limit(20);
+      if (error) return res.status(500).json({ error: 'list_reports_failed', detail: error.message });
+      return res.json({ reports: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'list_reports_failed' });
     }
   });
 

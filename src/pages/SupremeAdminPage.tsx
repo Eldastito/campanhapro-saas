@@ -8,11 +8,11 @@ import Modal from '../components/ui/Modal';
 import { useAuth } from '../contexts/AuthContext';
 import { syncPlanForCampaign, getPlanConfig } from '../utils/planUtils';
 import { 
-    Users, ShieldAlert, Ban, CheckCircle, Globe, 
+    Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
     Layout, Cpu, AlertTriangle, Trash2, Mail,
     CreditCard, Layers, TrendingUp as TrendingIcon,
-    Activity, Filter, Download
+    Activity, Filter, Download, Brain
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -95,6 +95,12 @@ const SupremeAdminPage: React.FC = () => {
 
     // Platform metrics (F1) — real aggregates from supreme_platform_metrics()
     const [metrics, setMetrics] = useState<any | null>(null);
+
+    // AI Consultant (F6)
+    const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+    const [analysis, setAnalysis] = useState<any | null>(null);
+    const [analysisCampaign, setAnalysisCampaign] = useState<string>('');
+    const [showAnalysisModal, setShowAnalysisModal] = useState(false);
     
     // UI State
     const [isLoading, setIsLoading] = useState(true);
@@ -304,6 +310,22 @@ const SupremeAdminPage: React.FC = () => {
         } catch (error: any) {
             console.error(error);
             alert(`Erro ao ${isBlocked ? 'desbloquear' : 'bloquear'}: ${error.message || 'desconhecido'}`);
+        }
+    };
+
+    const handleAnalyzeCampaign = async (campaignId: string, campaignName: string) => {
+        if (!campaignId) return;
+        setAnalyzingId(campaignId);
+        setAnalysisCampaign(campaignName);
+        setAnalysis(null);
+        setShowAnalysisModal(true);
+        try {
+            const r = await supremeFetch(`/campaigns/${campaignId}/analyze`, { method: 'POST' });
+            setAnalysis(r);
+        } catch (e: any) {
+            setAnalysis({ error: e.message || 'Falha na análise' });
+        } finally {
+            setAnalyzingId(null);
         }
     };
 
@@ -607,8 +629,16 @@ const SupremeAdminPage: React.FC = () => {
                                                     </td>
                                                     <td className="px-6 py-5 text-right">
                                                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <Button 
-                                                                variant="ghost" 
+                                                            <Button
+                                                                variant="ghost"
+                                                                onClick={() => handleAnalyzeCampaign(c.campaignId || '', c.name)}
+                                                                className="h-8 px-2 text-indigo-400 hover:text-indigo-300 flex items-center gap-1 text-xs"
+                                                                title="Analisar campanha com IA (consultor político)"
+                                                            >
+                                                                <Brain className="w-4 h-4" /> Analisar IA
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
                                                                 onClick={() => setShowConfigModal(c.campaignId || '')}
                                                                 className="h-8 w-8 p-0 text-slate-400 hover:text-white"
                                                             >
@@ -947,6 +977,123 @@ const SupremeAdminPage: React.FC = () => {
             </main>
 
             {/* Modals */}
+
+            {/* AI Consultant analysis (F6) */}
+            <Modal
+                isOpen={showAnalysisModal}
+                onClose={() => setShowAnalysisModal(false)}
+                title={`CONSULTOR IA — ${analysisCampaign}`}
+            >
+                <div className="p-4 text-slate-200 max-h-[70vh] overflow-y-auto">
+                    {analyzingId ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-4">
+                            <div className="w-12 h-12 rounded-full border-4 border-slate-700 border-t-indigo-500 animate-spin" />
+                            <p className="text-sm text-slate-400">Consultor analisando os dados da campanha…</p>
+                            <p className="text-[10px] text-slate-600">Funil de conversão, SWOT, diagnóstico por fase</p>
+                        </div>
+                    ) : analysis?.error ? (
+                        <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded text-rose-400 text-sm">
+                            {analysis.error}
+                        </div>
+                    ) : analysis?.analysis ? (
+                        (() => {
+                            const a = analysis.analysis;
+                            return (
+                                <div className="space-y-5">
+                                    {/* Score + resumo */}
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-20 h-20 rounded-full border-4 border-slate-700 flex items-center justify-center shrink-0"
+                                             style={{ borderTopColor: (a.scoreConversao ?? 0) >= 60 ? '#34d399' : (a.scoreConversao ?? 0) >= 35 ? '#fbbf24' : '#f87171' }}>
+                                            <span className="text-2xl font-black text-white">{a.scoreConversao ?? '—'}</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] uppercase tracking-widest text-slate-500 font-black">Score de Conversão</p>
+                                            <p className="text-sm text-slate-300 mt-1">{a.resumoExecutivo}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Funil */}
+                                    {a.funilConversao && (
+                                        <div className="bg-slate-950/50 rounded-lg p-4 border border-white/5">
+                                            <p className="text-xs font-black uppercase tracking-widest text-indigo-400 mb-2">Funil de Conversão</p>
+                                            <p className="text-sm text-slate-300">{a.funilConversao.diagnostico}</p>
+                                            {a.funilConversao.maiorGargalo && (
+                                                <p className="text-xs text-amber-400 mt-2"><strong>Maior gargalo:</strong> {a.funilConversao.maiorGargalo}</p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* SWOT — classes estáticas (Tailwind JIT não compila classes dinâmicas) */}
+                                    {a.swot && (
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {[
+                                                { k: 'forcas', label: 'Forças', box: 'bg-emerald-500/5 border-emerald-500/20', title: 'text-emerald-400', bullet: 'text-emerald-400' },
+                                                { k: 'fraquezas', label: 'Fraquezas', box: 'bg-rose-500/5 border-rose-500/20', title: 'text-rose-400', bullet: 'text-rose-400' },
+                                                { k: 'oportunidades', label: 'Oportunidades', box: 'bg-sky-500/5 border-sky-500/20', title: 'text-sky-400', bullet: 'text-sky-400' },
+                                                { k: 'ameacas', label: 'Ameaças', box: 'bg-amber-500/5 border-amber-500/20', title: 'text-amber-400', bullet: 'text-amber-400' },
+                                            ].map(({ k, label, box, title, bullet }) => (
+                                                <div key={k} className={`border rounded-lg p-3 ${box}`}>
+                                                    <p className={`text-[10px] font-black uppercase tracking-widest mb-2 ${title}`}>{label}</p>
+                                                    <ul className="space-y-1">
+                                                        {(a.swot[k] ?? []).map((item: string, i: number) => (
+                                                            <li key={i} className="text-xs text-slate-300 flex gap-1.5"><span className={bullet}>•</span>{item}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Diagnóstico por fase */}
+                                    {Array.isArray(a.diagnosticoPorFase) && a.diagnosticoPorFase.length > 0 && (
+                                        <div>
+                                            <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">Diagnóstico por Fase</p>
+                                            <div className="space-y-2">
+                                                {a.diagnosticoPorFase.map((f: any, i: number) => (
+                                                    <div key={i} className="flex items-start gap-2 text-sm">
+                                                        <span className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${f.status === 'bom' ? 'bg-emerald-400' : f.status === 'critico' ? 'bg-rose-400' : 'bg-amber-400'}`} />
+                                                        <div>
+                                                            <span className="font-bold text-white">{f.fase}: </span>
+                                                            <span className="text-slate-300">{f.observacao}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Recomendações */}
+                                    {Array.isArray(a.recomendacoes) && a.recomendacoes.length > 0 && (
+                                        <div>
+                                            <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">Recomendações</p>
+                                            <div className="space-y-2">
+                                                {a.recomendacoes.map((r: any, i: number) => (
+                                                    <div key={i} className="bg-slate-950/50 rounded-lg p-3 border border-white/5">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${r.prioridade === 'alta' ? 'bg-rose-500/20 text-rose-400' : r.prioridade === 'media' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-400'}`}>{r.prioridade}</span>
+                                                            <span className="text-sm font-bold text-white">{r.acao}</span>
+                                                        </div>
+                                                        {r.impactoEsperado && <p className="text-xs text-slate-400">{r.impactoEsperado}</p>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <p className="text-[10px] text-slate-600 text-right pt-2 border-t border-white/5">
+                                        Gerado por {analysis.provider} / {analysis.model}
+                                    </p>
+                                </div>
+                            );
+                        })()
+                    ) : analysis?.rawText ? (
+                        <pre className="text-xs text-slate-300 whitespace-pre-wrap">{analysis.rawText}</pre>
+                    ) : (
+                        <p className="text-slate-500 text-sm">Sem dados.</p>
+                    )}
+                </div>
+            </Modal>
+
             <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="LIBERAR NOVO CANDIDATO">
                 <form onSubmit={handleCreateCampaign} className="space-y-4 p-4 text-slate-200">
                     {error && (

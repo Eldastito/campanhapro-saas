@@ -333,6 +333,8 @@ export const AGENT_CONFIGS: Record<string, AgentConfig> = {
     backup:     { agentId: 'backup',     temperature: 0.2 },
     secretary:  { agentId: 'secretary',  temperature: 0.1, maxTokens: 1000 }, // JSON estrito → mínima criatividade
     advisor:    { agentId: 'advisor',    temperature: 0.6 },
+    // Consultor de campanha (Supreme): raciocínio analítico + saída JSON longa
+    campaign_consultant: { agentId: 'campaign_consultant', temperature: 0.4, maxTokens: 4000, model: { anthropic: 'claude-sonnet-4-5', openai: 'gpt-4o-mini' } },
     pipeline:   { agentId: 'pipeline',   temperature: 0.7, maxTokens: 6000 },
 };
 
