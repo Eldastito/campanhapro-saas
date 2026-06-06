@@ -23,6 +23,8 @@ import {
   createShortLinksAdminRouter,
   createShortLinksPublicRouter,
 } from './src/server/modules/shortLinks/shortLinksRouter';
+import { createSupremeAdminRouter } from './src/server/modules/supremeAdmin/supremeAdminRouter';
+import { requireSupremeAdmin } from './src/server/middleware/requireSupremeAdmin';
 import { setWebhook, isEvolutionConfigured } from './src/server/modules/integrations/evolutionApiClient';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
 import { createScenariosRouter } from './src/server/modules/scenarios/scenariosRouter';
@@ -250,6 +252,8 @@ async function startServer() {
     // same: unauthenticated, hot path, must respond fast.
     app.use('/api/v1/short-links', requireAuth, mutationLimiter, createShortLinksAdminRouter(supabaseAdmin));
     app.use('/l', webhookLimiter, createShortLinksPublicRouter(supabaseAdmin));
+    // Supreme Admin (SaaS operator) — every route gated by requireSupremeAdmin.
+    app.use('/api/v1/supreme', requireAuth, mutationLimiter, requireSupremeAdmin(), createSupremeAdminRouter(supabaseAdmin));
   }
 
   // --- OAuth Social (Simulação) ---

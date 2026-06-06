@@ -50,6 +50,32 @@ interface CustomField {
     required: boolean;
 }
 
+const SUPREME_API = '/api/v1/supreme';
+
+/**
+ * Calls a Supreme Admin backend endpoint with the operator's JWT.
+ * These actions run server-side with the service_role key (create users
+ * without hijacking the session, set passwords, ban accounts), so they
+ * MUST go through the API — not the browser Supabase client.
+ */
+async function supremeFetch(path: string, init?: RequestInit): Promise<any> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPREME_API}${path}`, {
+        ...init,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+            ...(init?.headers ?? {}),
+        },
+    });
+    if (res.status === 204) return null;
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(body?.detail || body?.error || `request_failed_${res.status}`);
+    }
+    return body;
+}
+
 const SupremeAdminPage: React.FC = () => {
     const { user, logout, sendPasswordReset } = useAuth();
     const [activeTab, setActiveTab] = useState<'overview' | 'campaigns' | 'users' | 'platform' | 'financial'>('overview');
@@ -148,31 +174,29 @@ const SupremeAdminPage: React.FC = () => {
     const handleCreateInternalUser = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
-            const { data: newUser, error } = await supabase.auth.signUp({
-                email: newInternalUser.email,
-                password: 'temporary-password-123' // Or prompt for it
-            });
-            if (error) throw error;
-            
-            if (newUser.user) {
-                const userData: AuthenticatedUser = {
-                    id: newUser.user.id,
+            // Server-side: admin.createUser doesn't hijack the operator's session
+            // and uses a real password (no more fixed 'temporary-password-123').
+            const tempPassword = `Cp${Math.random().toString(36).slice(2, 10)}!${Math.floor(Math.random() * 90 + 10)}`;
+            await supremeFetch('/users', {
+                method: 'POST',
+                body: JSON.stringify({
                     name: newInternalUser.name,
                     email: newInternalUser.email,
+                    password: tempPassword,
                     type: newInternalUser.type,
-                    plan: Plan.TOTAL,
                     campaignId: newInternalUser.campaignId,
-                    role: 'active'
-                };
-                await supabase.from('users').insert(userData);
-                
-                setShowCreateUserModal(false);
-                fetchAllData();
-                alert(`Usuário de ${newInternalUser.type} criado com sucesso.`);
-            }
-        } catch (error) {
+                }),
+            });
+            setShowCreateUserModal(false);
+            fetchAllData();
+            alert(
+                `Usuário de ${newInternalUser.type} criado com sucesso.\n\n` +
+                `Senha temporária: ${tempPassword}\n` +
+                `Repasse ao usuário e peça que troque no primeiro acesso.`
+            );
+        } catch (error: any) {
             console.error(error);
-            alert('Erro ao criar usuário.');
+            alert(`Erro ao criar usuário: ${error.message || 'desconhecido'}`);
         }
     };
 
@@ -192,12 +216,15 @@ const SupremeAdminPage: React.FC = () => {
 
     const handleSetUserPassword = async (email: string, pass: string) => {
         try {
-            const { error } = await supabase.functions.invoke('set-password', {
-                body: { email, newPassword: pass }
+            // Resolve the user id from the email we already have loaded.
+            const target = globalUsers.find(u => u.email === email);
+            if (!target?.id) throw new Error('Usuário não encontrado na lista.');
+            // Server-side override via admin.updateUserById (the old `set-password`
+            // edge function never existed).
+            await supremeFetch(`/users/${target.id}/password`, {
+                method: 'POST',
+                body: JSON.stringify({ password: pass }),
             });
-
-            if (error) throw error;
-            
             return true;
         } catch (error: any) {
             console.error("Erro no set-password:", error);
@@ -228,41 +255,22 @@ const SupremeAdminPage: React.FC = () => {
         setIsLoading(true);
         setError(null);
         try {
-            // 1. Create User Identity in Auth (via Supabase)
-            const { data: newUser, error: signUpError } = await supabase.auth.signUp({
-                email: newCampaign.email,
-                password: newCampaign.password
-            });
-            if (signUpError) throw signUpError;
-            
-            if (newUser.user) {
-                const campaignId = `camp_${Date.now()}`;
-                
-                const userData: AuthenticatedUser = {
-                    id: newUser.user.id,
+            // Server-side provisioning: creates the auth identity (admin.createUser,
+            // no session hijack), the campaign admin profile, and campaign_configs
+            // with a proper UUID campaignId (the old `camp_${Date.now()}` text id
+            // was incompatible with the uuid column in production).
+            await supremeFetch('/campaigns', {
+                method: 'POST',
+                body: JSON.stringify({
                     name: newCampaign.name,
                     email: newCampaign.email,
-                    type: 'Admin',
+                    password: newCampaign.password,
                     plan: newCampaign.plan,
-                    campaignId: campaignId,
-                    role: 'active'
-                };
-                
-                await supabase.from('users').insert(userData);
-
-                // Cria campaign_configs com planTier/features/limits derivados do plano
-                const config = getPlanConfig(newCampaign.plan);
-                await supabase.from('campaign_configs').insert({
-                    id: campaignId,
-                    features: config.features,
-                    limits: config.limits,
-                    status: 'active'
-                });
-                
-                setShowCreateModal(false);
-                setNewCampaign({ name: '', email: '', password: '', plan: Plan.ESSENCIAL });
-                await fetchAllData();
-            }
+                }),
+            });
+            setShowCreateModal(false);
+            setNewCampaign({ name: '', email: '', password: '', plan: Plan.ESSENCIAL });
+            await fetchAllData();
         } catch (err: any) {
             console.error(err);
             setError(err.message || 'Erro crítico ao provisionar servidor.');
@@ -274,13 +282,17 @@ const SupremeAdminPage: React.FC = () => {
     const handleToggleUserStatus = async (user: AuthenticatedUser) => {
         const isBlocked = user.role === 'blocked';
         try {
-            await supabase
-                .from('users')
-                .update({ role: isBlocked ? 'active' : 'blocked' })
-                .eq('id', user.id);
+            // Real enforcement: the backend bans/unbans at the Supabase Auth
+            // layer (prevents login + kills sessions) AND mirrors role on the
+            // profile. The old client-side version only flipped role='blocked',
+            // which the app routing never checked — blocked users still logged in.
+            await supremeFetch(`/users/${user.id}/${isBlocked ? 'unblock' : 'block'}`, {
+                method: 'POST',
+            });
             fetchAllData();
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
+            alert(`Erro ao ${isBlocked ? 'desbloquear' : 'bloquear'}: ${error.message || 'desconhecido'}`);
         }
     };
 
@@ -626,13 +638,15 @@ const SupremeAdminPage: React.FC = () => {
                                                             className="text-xs h-7 px-3 border-emerald-500/50 text-emerald-500 hover:bg-emerald-500/10"
                                                             onClick={async () => {
                                                                 try {
-                                                                    const { error } = await supabase.functions.invoke('promote-user', {
-                                                                        body: { email: u.email }
+                                                                    // Server-side promote (the `promote-user` edge fn never existed).
+                                                                    await supremeFetch(`/users/${u.id}/promote`, {
+                                                                        method: 'POST',
+                                                                        body: JSON.stringify({ type: 'Admin' }),
                                                                     });
-                                                                    if (error) throw error;
-                                                                    alert('Usuário promovido com sucesso.');
-                                                                } catch (e) { 
-                                                                    alert('Erro na promoção.'); 
+                                                                    alert('Usuário promovido a Admin com sucesso.');
+                                                                    fetchAllData();
+                                                                } catch (e: any) {
+                                                                    alert(`Erro na promoção: ${e.message || 'desconhecido'}`);
                                                                     console.error(e);
                                                                 }
                                                             }}
