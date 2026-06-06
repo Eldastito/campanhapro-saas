@@ -28,6 +28,8 @@ const SectionTitle: React.FC<{ n: number; children: React.ReactNode }> = ({ n, c
 const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, result, onClose }) => {
   const a = result?.analysis;
   const snap = result?.snapshot;
+  // Quando há seção de Evolução (2), as demais deslocam +1.
+  const off = a?.evolucao?.comparavel ? 1 : 0;
 
   return (
     <div className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static">
@@ -82,10 +84,56 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
             </div>
           </section>
 
-          {/* 2. Funil */}
+          {/* Evolução vs análise anterior */}
+          {a.evolucao?.comparavel && (
+            <section>
+              <SectionTitle n={2}>Evolução desde a Última Análise</SectionTitle>
+              <div className={`rounded-xl border p-6 ${
+                a.evolucao.tendencia === 'avanco' ? 'bg-emerald-50 border-emerald-200'
+                : a.evolucao.tendencia === 'retrocesso' ? 'bg-rose-50 border-rose-200'
+                : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center gap-4 mb-4">
+                  <span className={`text-xs font-black uppercase px-3 py-1 rounded-full ${
+                    a.evolucao.tendencia === 'avanco' ? 'bg-emerald-600 text-white'
+                    : a.evolucao.tendencia === 'retrocesso' ? 'bg-rose-600 text-white'
+                    : 'bg-slate-500 text-white'}`}>
+                    {a.evolucao.tendencia === 'avanco' ? '▲ Avanço' : a.evolucao.tendencia === 'retrocesso' ? '▼ Retrocesso' : '＝ Estável'}
+                  </span>
+                  {typeof a.evolucao.scoreAnterior === 'number' && (
+                    <span className="text-sm text-slate-600 font-mono">
+                      Score: {a.evolucao.scoreAnterior} → <strong style={{ color: scoreColor(a.scoreConversao ?? 0) }}>{a.scoreConversao}</strong>
+                    </span>
+                  )}
+                </div>
+                {a.evolucao.resumoComparativo && <p className="text-slate-700 mb-4">{a.evolucao.resumoComparativo}</p>}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-700 mb-2">Avanços</p>
+                    <ul className="space-y-1.5">
+                      {(a.evolucao.avancos ?? []).map((x: string, i: number) => (
+                        <li key={i} className="text-sm text-slate-700 flex gap-1.5"><span className="text-emerald-600">▲</span>{x}</li>
+                      ))}
+                      {!(a.evolucao.avancos?.length) && <li className="text-sm text-slate-400">—</li>}
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-rose-700 mb-2">Retrocessos / Estagnação</p>
+                    <ul className="space-y-1.5">
+                      {(a.evolucao.retrocessos ?? []).map((x: string, i: number) => (
+                        <li key={i} className="text-sm text-slate-700 flex gap-1.5"><span className="text-rose-600">▼</span>{x}</li>
+                      ))}
+                      {!(a.evolucao.retrocessos?.length) && <li className="text-sm text-slate-400">—</li>}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Funil */}
           {a.funilConversao && (
             <section>
-              <SectionTitle n={2}>Funil de Conversão (Eleitor → Apoiador → Votante)</SectionTitle>
+              <SectionTitle n={2 + off}>Funil de Conversão (Eleitor → Apoiador → Votante)</SectionTitle>
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 space-y-3">
                 <p className="text-slate-700 leading-relaxed">{a.funilConversao.diagnostico}</p>
                 {a.funilConversao.maiorGargalo && (
@@ -101,7 +149,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
           {/* 3. SWOT */}
           {a.swot && (
             <section>
-              <SectionTitle n={3}>Análise SWOT</SectionTitle>
+              <SectionTitle n={3 + off}>Análise SWOT</SectionTitle>
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { k: 'forcas', label: 'Forças', cls: 'bg-emerald-50 border-emerald-200', tcls: 'text-emerald-700', icon: <CheckCircle2 className="h-4 w-4" /> },
@@ -125,7 +173,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
           {/* 4. Diagnóstico por fase */}
           {Array.isArray(a.diagnosticoPorFase) && a.diagnosticoPorFase.length > 0 && (
             <section>
-              <SectionTitle n={4}>Diagnóstico por Fase</SectionTitle>
+              <SectionTitle n={4 + off}>Diagnóstico por Fase</SectionTitle>
               <div className="space-y-2">
                 {a.diagnosticoPorFase.map((f: any, i: number) => (
                   <div key={i} className="flex items-start gap-3 bg-slate-50 border border-slate-200 rounded-lg p-4">
@@ -143,7 +191,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
           {/* 5. Recomendações */}
           {Array.isArray(a.recomendacoes) && a.recomendacoes.length > 0 && (
             <section>
-              <SectionTitle n={5}>Plano de Ação Recomendado</SectionTitle>
+              <SectionTitle n={5 + off}>Plano de Ação Recomendado</SectionTitle>
               <div className="space-y-3">
                 {a.recomendacoes.map((r: any, i: number) => (
                   <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-start gap-3">
@@ -164,7 +212,7 @@ const ConsultantReport: React.FC<ConsultantReportProps> = ({ campaignName, resul
           {/* Apêndice: dados analisados */}
           {snap && (
             <section>
-              <SectionTitle n={6}>Dados Analisados (Apêndice)</SectionTitle>
+              <SectionTitle n={6 + off}>Dados Analisados (Apêndice)</SectionTitle>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
                 {[
                   { l: 'Contatos', v: snap.contacts?.total ?? 0 },

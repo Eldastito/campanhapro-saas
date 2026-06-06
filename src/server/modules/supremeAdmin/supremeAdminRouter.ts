@@ -37,6 +37,8 @@ Receberá um JSON com métricas da campanha (equipe, contatos/CRM, visitas de ca
 
 Analise CADA fase do funil (captura → relacionamento → conversão → mobilização) e identifique o que está funcionando e o que está travando. Quando um dado estiver zerado ou ausente, trate como sinal (ex.: "sem pesquisas = cego sobre intenção de voto"), não ignore.
 
+Se for fornecido um RELATÓRIO ANTERIOR, COMPARE os dados atuais com ele e identifique avanços e retrocessos concretos (com números quando possível). Se não houver anterior, marque evolucao.comparavel = false.
+
 Responda APENAS com um objeto JSON válido, sem markdown, neste formato exato:
 {
   "scoreConversao": <0-100, nota geral da saúde de conversão da campanha>,
@@ -56,7 +58,15 @@ Responda APENAS com um objeto JSON válido, sem markdown, neste formato exato:
   ],
   "recomendacoes": [
     { "prioridade": "<alta|media|baixa>", "acao": "<ação concreta>", "impactoEsperado": "<...>" }
-  ]
+  ],
+  "evolucao": {
+    "comparavel": <true se havia relatório anterior, senão false>,
+    "scoreAnterior": <número 0-100 do relatório anterior, ou null>,
+    "tendencia": "<avanco|estavel|retrocesso>",
+    "avancos": ["<o que melhorou desde a última análise, com números>"],
+    "retrocessos": ["<o que piorou ou estagnou>"],
+    "resumoComparativo": "<1-3 frases comparando com a análise anterior>"
+  }
 }`;
 
 /** Strips ```json fences and parses; returns null on failure. */
@@ -312,10 +322,42 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       );
       if (snapErr) return res.status(500).json({ error: 'snapshot_failed', detail: snapErr.message });
 
+      // 1b. Fetch the most recent previous report so the AI can compare
+      // (advances/regressions). Only a compact slice is sent to keep tokens low.
+      const { data: prev } = await supabaseAdmin
+        .from('consultant_reports')
+        .select('analysis, snapshot, createdAt')
+        .eq('campaignId', campaignId)
+        .order('createdAt', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      let previousBlock = '';
+      if (prev?.analysis) {
+        const prevCompact = {
+          data: prev.createdAt,
+          scoreConversao: prev.analysis.scoreConversao,
+          resumoExecutivo: prev.analysis.resumoExecutivo,
+          maiorGargalo: prev.analysis.funilConversao?.maiorGargalo,
+          // key metrics from the prior snapshot for numeric comparison
+          metricas: prev.snapshot ? {
+            contatos: prev.snapshot.contacts?.total,
+            visitas: prev.snapshot.visits?.total,
+            reportes: prev.snapshot.streetReports?.total,
+            whatsappMsgs: prev.snapshot.whatsapp?.messages,
+            funil: prev.snapshot.voterJourney,
+          } : null,
+        };
+        previousBlock =
+          `\n\nRELATÓRIO ANTERIOR (gerado em ${prev.createdAt}) — compare com os dados atuais:\n` +
+          `${JSON.stringify(prevCompact, null, 2)}`;
+      }
+
       // 2. Ask the consultant agent (multi-provider chain inside callAgent)
       const prompt =
         `Analise esta campanha e devolva o JSON conforme instruído.\n\n` +
-        `DADOS DA CAMPANHA:\n${JSON.stringify(snapshot, null, 2)}`;
+        `DADOS DA CAMPANHA (atuais):\n${JSON.stringify(snapshot, null, 2)}` +
+        previousBlock;
 
       let result;
       try {
