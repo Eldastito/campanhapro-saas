@@ -161,6 +161,70 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ── Notas Fiscais (rastreador manual de NFS-e) ──────────────────────
+  router.get('/invoices', async (_req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin.rpc('supreme_nf_summary');
+      if (error) return res.status(500).json({ error: 'nf_failed', detail: error.message });
+      return res.json({ nf: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'nf_failed' });
+    }
+  });
+
+  router.post('/invoices', async (req: Request, res: Response) => {
+    try {
+      const { number, amountCents, customerName, customerDoc, description, campaignId, issuedAt, status } = req.body ?? {};
+      const cents = Number(amountCents);
+      if (!Number.isFinite(cents) || cents < 0) return res.status(400).json({ error: 'invalid_amount' });
+      const { data, error } = await supabaseAdmin.from('nf_invoices').insert({
+        number: number ?? null,
+        amountCents: Math.round(cents),
+        customerName: customerName ?? null,
+        customerDoc: customerDoc ?? null,
+        description: description ?? null,
+        campaignId: campaignId ?? null,
+        issuedAt: issuedAt || new Date().toISOString().slice(0, 10),
+        status: ['rascunho', 'emitida', 'cancelada', 'substituida'].includes(status) ? status : 'emitida',
+        provider: 'manual',
+        createdBy: (req as any).user?.id ?? null,
+      }).select('id').single();
+      if (error) return res.status(500).json({ error: 'nf_create_failed', detail: error.message });
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.invoice.create', severity: 'info',
+        metadata: { number, amountCents: Math.round(cents), customerName },
+      }).catch(() => {});
+      return res.status(201).json({ id: data?.id });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'nf_create_failed' });
+    }
+  });
+
+  router.patch('/invoices/:id', async (req: Request, res: Response) => {
+    try {
+      const updates: Record<string, unknown> = {};
+      if (['rascunho', 'emitida', 'cancelada', 'substituida'].includes(req.body?.status)) updates.status = req.body.status;
+      if (typeof req.body?.pdfUrl === 'string') updates.pdfUrl = req.body.pdfUrl;
+      if (typeof req.body?.number === 'string') updates.number = req.body.number;
+      if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'no_fields' });
+      const { error } = await supabaseAdmin.from('nf_invoices').update(updates).eq('id', req.params.id);
+      if (error) return res.status(500).json({ error: 'nf_update_failed', detail: error.message });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'nf_update_failed' });
+    }
+  });
+
+  router.delete('/invoices/:id', async (req: Request, res: Response) => {
+    try {
+      const { error } = await supabaseAdmin.from('nf_invoices').delete().eq('id', req.params.id);
+      if (error) return res.status(500).json({ error: 'nf_delete_failed', detail: error.message });
+      return res.status(204).end();
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'nf_delete_failed' });
+    }
+  });
+
   // ── GET /taxes ──────────────────────────────────────────────────────
   // Estima a DAS do Simples Nacional (SaaS, sede RJ). RBT12 = MRR×12,
   // receita do mês = MRR, folha (Fator R) = custos de salários/pessoal ×12.

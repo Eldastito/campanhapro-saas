@@ -108,6 +108,8 @@ const SupremeAdminPage: React.FC = () => {
     const [runningLifecycle, setRunningLifecycle] = useState(false);
     const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amount: '', currency: 'BRL' });
     const [taxes, setTaxes] = useState<any | null>(null);
+    const [nf, setNf] = useState<any | null>(null);
+    const [newNf, setNewNf] = useState({ number: '', amount: '', customerName: '', description: '' });
 
     // Dashboard per-campaign filter (F1)
     const [dashCampaign, setDashCampaign] = useState<string>('all');
@@ -209,6 +211,14 @@ const SupremeAdminPage: React.FC = () => {
                 setTaxes(t?.taxes ?? null);
             } catch (tErr) {
                 console.warn('[Supreme] taxes fetch failed:', tErr);
+            }
+
+            // 8. Notas Fiscais (rastreador manual) — best-effort
+            try {
+                const n = await supremeFetch('/invoices');
+                setNf(n?.nf ?? null);
+            } catch (nErr) {
+                console.warn('[Supreme] nf fetch failed:', nErr);
             }
 
         } catch (error) {
@@ -401,6 +411,32 @@ const SupremeAdminPage: React.FC = () => {
         if (activeTab === 'audit' && auditLogs.length === 0) fetchAudit();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab]);
+
+    const handleAddNf = async () => {
+        const val = parseFloat(String(newNf.amount).replace(',', '.'));
+        if (!Number.isFinite(val) || val < 0) { alert('Valor inválido.'); return; }
+        try {
+            await supremeFetch('/invoices', {
+                method: 'POST',
+                body: JSON.stringify({
+                    number: newNf.number.trim() || null,
+                    amountCents: Math.round(val * 100),
+                    customerName: newNf.customerName.trim() || null,
+                    description: newNf.description.trim() || null,
+                }),
+            });
+            setNewNf({ number: '', amount: '', customerName: '', description: '' });
+            fetchAllData();
+        } catch (e: any) { alert(`Erro ao registrar nota: ${e.message}`); }
+    };
+
+    const handleCancelNf = async (id: string) => {
+        if (!window.confirm('Marcar esta nota como cancelada?')) return;
+        try {
+            await supremeFetch(`/invoices/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelada' }) });
+            fetchAllData();
+        } catch (e: any) { alert(`Erro: ${e.message}`); }
+    };
 
     const handleAddCost = async () => {
         const val = parseFloat(String(newCost.amount).replace(',', '.'));
@@ -1201,6 +1237,42 @@ const SupremeAdminPage: React.FC = () => {
                                 ) : (
                                     <p className="text-slate-500 text-sm p-6">Sem dados de imposto (defina receita/assinaturas).</p>
                                 )}
+                            </Card>
+
+                            {/* ===== NOTAS FISCAIS (rastreador manual) ===== */}
+                            <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                <div className="p-4 border-b border-white/5 bg-slate-800/30 flex justify-between items-center">
+                                    <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><Download className="w-4 h-4 text-emerald-400" /> Notas Fiscais (NFS-e)</h3>
+                                    <div className="flex gap-4 text-right">
+                                        <div><p className="text-[9px] text-slate-500 uppercase">Mês atual</p><p className="text-sm font-black text-emerald-400 font-mono">R$ {((nf?.mesAtualCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}</p></div>
+                                        <div><p className="text-[9px] text-slate-500 uppercase">Emitidas</p><p className="text-sm font-black text-white font-mono">{nf?.count ?? 0}</p></div>
+                                    </div>
+                                </div>
+                                <div className="p-4 space-y-2">
+                                    {(nf?.items ?? []).slice(0, 50).map((n: any) => (
+                                        <div key={n.id} className="flex items-center gap-3 p-3 bg-slate-950/50 rounded-lg border border-white/5 text-sm">
+                                            <span className="font-mono text-slate-400 w-16 shrink-0">{n.number || '—'}</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-white truncate">{n.customerName || n.campaign_name || 'Cliente'}</p>
+                                                <p className="text-[10px] text-slate-500 truncate">{n.description || ''}</p>
+                                            </div>
+                                            <span className="text-[10px] text-slate-500 font-mono shrink-0">{n.issuedAt ? new Date(n.issuedAt).toLocaleDateString('pt-BR') : ''}</span>
+                                            <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded shrink-0 ${n.status === 'emitida' ? 'bg-emerald-500/20 text-emerald-400' : n.status === 'cancelada' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-400'}`}>{n.status}</span>
+                                            <span className="font-mono text-white w-28 text-right shrink-0">R$ {((n.amountCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}</span>
+                                            {n.status === 'emitida' && <button onClick={() => handleCancelNf(n.id)} className="text-rose-400 hover:text-rose-300 p-1" title="Cancelar"><Ban className="w-4 h-4" /></button>}
+                                        </div>
+                                    ))}
+                                    {!(nf?.items?.length) && <p className="text-slate-500 text-sm py-4 text-center">Nenhuma nota registrada ainda.</p>}
+                                    {/* Registrar nota */}
+                                    <div className="flex items-center gap-2 pt-2 border-t border-white/5 mt-2 flex-wrap">
+                                        <input value={newNf.number} onChange={(e) => setNewNf({...newNf, number: e.target.value})} placeholder="Nº NF" className="w-20 bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-white" />
+                                        <input value={newNf.customerName} onChange={(e) => setNewNf({...newNf, customerName: e.target.value})} placeholder="Cliente/tomador" className="flex-1 min-w-[140px] bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-white" />
+                                        <input value={newNf.description} onChange={(e) => setNewNf({...newNf, description: e.target.value})} placeholder="Descrição do serviço" className="flex-1 min-w-[140px] bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-white" />
+                                        <input value={newNf.amount} onChange={(e) => setNewNf({...newNf, amount: e.target.value})} placeholder="R$ valor" type="number" className="w-28 bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-right text-white" />
+                                        <Button onClick={handleAddNf} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1"><Plus className="w-4 h-4" /> Registrar</Button>
+                                    </div>
+                                    <p className="text-[10px] text-slate-600 pt-1">Rastreador manual — registre as NFS-e emitidas (na Nota Carioca/contador). Emissão automática será integrada quando houver certificado A1 + cadastro municipal.</p>
+                                </div>
                             </Card>
 
                             {/* ===== CUSTOS OPERACIONAIS ===== */}
