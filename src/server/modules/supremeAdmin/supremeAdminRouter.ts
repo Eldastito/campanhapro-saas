@@ -176,8 +176,8 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
 
   router.post('/costs', async (req: Request, res: Response) => {
     try {
-      const { category, description, amountCents, recurrence } = req.body ?? {};
-      const validCats = ['infraestrutura', 'ia', 'impostos', 'pessoal', 'marketing', 'outros'];
+      const { category, description, amountCents, recurrence, currency } = req.body ?? {};
+      const validCats = ['infraestrutura', 'ia', 'impostos', 'pessoal', 'salarios', 'prestadores', 'dominio', 'marketing', 'outros'];
       if (!validCats.includes(category)) return res.status(400).json({ error: 'invalid_category' });
       if (typeof description !== 'string' || !description.trim()) return res.status(400).json({ error: 'invalid_description' });
       const cents = Number(amountCents);
@@ -187,6 +187,7 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         category,
         description: description.trim(),
         amountCents: Math.round(cents),
+        currency: currency === 'USD' ? 'USD' : 'BRL',
         recurrence: recurrence === 'once' ? 'once' : 'monthly',
         createdBy: (req as any).user?.id ?? null,
       }).select('id').single();

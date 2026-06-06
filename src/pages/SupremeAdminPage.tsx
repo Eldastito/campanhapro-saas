@@ -106,7 +106,7 @@ const SupremeAdminPage: React.FC = () => {
     // Financial metrics (F3)
     const [financial, setFinancial] = useState<any | null>(null);
     const [runningLifecycle, setRunningLifecycle] = useState(false);
-    const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amountReais: '' });
+    const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amount: '', currency: 'BRL' });
 
     // Dashboard per-campaign filter (F1)
     const [dashCampaign, setDashCampaign] = useState<string>('all');
@@ -394,8 +394,8 @@ const SupremeAdminPage: React.FC = () => {
     }, [activeTab]);
 
     const handleAddCost = async () => {
-        const reais = parseFloat(String(newCost.amountReais).replace(',', '.'));
-        if (!newCost.description.trim() || !Number.isFinite(reais) || reais < 0) {
+        const val = parseFloat(String(newCost.amount).replace(',', '.'));
+        if (!newCost.description.trim() || !Number.isFinite(val) || val < 0) {
             alert('Preencha descrição e valor válido.');
             return;
         }
@@ -405,20 +405,21 @@ const SupremeAdminPage: React.FC = () => {
                 body: JSON.stringify({
                     category: newCost.category,
                     description: newCost.description.trim(),
-                    amountCents: Math.round(reais * 100),
+                    amountCents: Math.round(val * 100),
+                    currency: newCost.currency,
                     recurrence: 'monthly',
                 }),
             });
-            setNewCost({ category: 'infraestrutura', description: '', amountReais: '' });
+            setNewCost({ category: 'infraestrutura', description: '', amount: '', currency: 'BRL' });
             fetchAllData();
         } catch (e: any) {
             alert(`Erro ao adicionar custo: ${e.message || 'desconhecido'}`);
         }
     };
 
-    const handleUpdateCostAmount = async (id: string, reais: number) => {
+    const handleUpdateCostAmount = async (id: string, val: number) => {
         try {
-            await supremeFetch(`/costs/${id}`, { method: 'PATCH', body: JSON.stringify({ amountCents: Math.round(reais * 100) }) });
+            await supremeFetch(`/costs/${id}`, { method: 'PATCH', body: JSON.stringify({ amountCents: Math.round(val * 100) }) });
             fetchAllData();
         } catch (e: any) { alert(`Erro: ${e.message}`); }
     };
@@ -1166,35 +1167,46 @@ const SupremeAdminPage: React.FC = () => {
                                 <div className="p-4 space-y-2">
                                     {(financial?.costs?.items ?? []).map((c: any) => (
                                         <div key={c.id} className="flex items-center gap-3 p-3 bg-slate-950/50 rounded-lg border border-white/5">
-                                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-slate-700 text-slate-300 w-28 text-center shrink-0">{c.category}</span>
+                                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-slate-700 text-slate-300 w-24 text-center shrink-0">{c.category}</span>
                                             <p className="flex-1 text-sm text-white truncate">{c.description}</p>
+                                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${c.currency === 'USD' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>{c.currency}</span>
                                             <div className="flex items-center gap-1">
-                                                <span className="text-slate-500 text-xs">R$</span>
+                                                <span className="text-slate-500 text-xs">{c.currency === 'USD' ? '$' : 'R$'}</span>
                                                 <input
                                                     type="number"
                                                     defaultValue={(c.amountCents/100).toFixed(2)}
                                                     onBlur={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v) && Math.round(v*100) !== c.amountCents) handleUpdateCostAmount(c.id, v); }}
-                                                    className="w-28 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-right text-white font-mono"
+                                                    className="w-24 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-right text-white font-mono"
                                                 />
-                                                <span className="text-[10px] text-slate-600">/mês</span>
                                             </div>
+                                            {/* Valor convertido pra BRL quando é USD */}
+                                            <span className="text-[10px] text-slate-500 font-mono w-28 text-right shrink-0">
+                                                {c.currency === 'USD' ? `≈ R$ ${((c.brl_cents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}` : '/mês'}
+                                            </span>
                                             <button onClick={() => handleDeleteCost(c.id)} className="text-rose-400 hover:text-rose-300 p-1"><Trash2 className="w-4 h-4" /></button>
                                         </div>
                                     ))}
                                     {/* Adicionar custo */}
-                                    <div className="flex items-center gap-2 pt-2 border-t border-white/5 mt-2">
+                                    <div className="flex items-center gap-2 pt-2 border-t border-white/5 mt-2 flex-wrap">
                                         <select value={newCost.category} onChange={(e) => setNewCost({...newCost, category: e.target.value})} className="bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-slate-200">
                                             <option value="infraestrutura">Infraestrutura</option>
                                             <option value="ia">IA</option>
+                                            <option value="dominio">Domínio</option>
+                                            <option value="salarios">Salários</option>
+                                            <option value="prestadores">Prestadores</option>
                                             <option value="impostos">Impostos</option>
-                                            <option value="pessoal">Pessoal</option>
                                             <option value="marketing">Marketing</option>
                                             <option value="outros">Outros</option>
                                         </select>
-                                        <input value={newCost.description} onChange={(e) => setNewCost({...newCost, description: e.target.value})} placeholder="Descrição (ex: VPS Hostinger)" className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-white" />
-                                        <input value={newCost.amountReais} onChange={(e) => setNewCost({...newCost, amountReais: e.target.value})} placeholder="R$ /mês" type="number" className="w-28 bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-right text-white" />
+                                        <input value={newCost.description} onChange={(e) => setNewCost({...newCost, description: e.target.value})} placeholder="Descrição (ex: VPS Hostinger)" className="flex-1 min-w-[160px] bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-white" />
+                                        <select value={newCost.currency} onChange={(e) => setNewCost({...newCost, currency: e.target.value})} className="bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-slate-200">
+                                            <option value="BRL">R$ BRL</option>
+                                            <option value="USD">$ USD</option>
+                                        </select>
+                                        <input value={newCost.amount} onChange={(e) => setNewCost({...newCost, amount: e.target.value})} placeholder="valor/mês" type="number" className="w-28 bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-right text-white" />
                                         <Button onClick={handleAddCost} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1"><Plus className="w-4 h-4" /> Add</Button>
                                     </div>
+                                    <p className="text-[10px] text-slate-600 pt-1">Custos em USD (Supabase, IAs) são convertidos a R$ {financial?.usdBrlRate ?? '5.40'}/dólar no total e no lucro.</p>
                                 </div>
                             </Card>
 
