@@ -114,38 +114,44 @@ BEGIN
       ) g
     ),
 
+    -- Tokens vêm de agent_runs (o callAgent loga tokensIn/tokensOut/costCentsUsd
+    -- a cada chamada). A tabela ai_usage é legada e fica vazia — agent_runs é a
+    -- fonte real do consumo de IA. Custo em USD = sum(costCentsUsd)/100.
     'tokens', (
       SELECT jsonb_build_object(
-        'totalTokens', coalesce(sum("totalTokens"), 0),
-        'totalCost', coalesce(round(sum("estimatedCost")::numeric, 4), 0),
-        'last30dTokens', coalesce(sum("totalTokens") FILTER (WHERE timestamp > now() - interval '30 days'), 0),
+        'totalTokens', coalesce(sum("tokensIn" + "tokensOut"), 0),
+        'totalCostUsd', coalesce(round(sum("costCentsUsd")/100.0, 4), 0),
+        'totalRuns', count(*),
+        'last30dTokens', coalesce(sum("tokensIn" + "tokensOut") FILTER (WHERE "createdAt" > now() - interval '30 days'), 0),
         'byCampaign', (
           SELECT coalesce(jsonb_agg(row_to_json(c) ORDER BY c.tokens DESC), '[]'::jsonb)
           FROM (
             SELECT "campaignId" AS campaign_id,
-                   sum("totalTokens") AS tokens,
-                   round(sum("estimatedCost")::numeric, 4) AS cost
-            FROM ai_usage GROUP BY "campaignId" LIMIT 20
+                   sum("tokensIn" + "tokensOut") AS tokens,
+                   round(sum("costCentsUsd")/100.0, 4) AS cost_usd,
+                   count(*) AS runs
+            FROM agent_runs GROUP BY "campaignId" ORDER BY 2 DESC LIMIT 20
           ) c
         ),
         'byModel', (
           SELECT coalesce(jsonb_agg(row_to_json(m) ORDER BY m.tokens DESC), '[]'::jsonb)
           FROM (
-            SELECT model, sum("totalTokens") AS tokens, count(*) AS calls
-            FROM ai_usage GROUP BY model LIMIT 20
+            SELECT coalesce(provider,'?') || ' / ' || coalesce(model,'?') AS model,
+                   sum("tokensIn" + "tokensOut") AS tokens, count(*) AS calls
+            FROM agent_runs GROUP BY 1 ORDER BY 2 DESC LIMIT 20
           ) m
         )
       )
-      FROM ai_usage
+      FROM agent_runs
     ),
 
     'peakHours', (
       SELECT coalesce(jsonb_agg(row_to_json(h) ORDER BY h.hour), '[]'::jsonb)
       FROM (
-        SELECT extract(hour FROM timestamp AT TIME ZONE 'America/Sao_Paulo')::int AS hour,
+        SELECT extract(hour FROM "createdAt" AT TIME ZONE 'America/Sao_Paulo')::int AS hour,
                count(*) AS atividades
-        FROM ai_usage
-        WHERE timestamp > now() - interval '30 days'
+        FROM agent_runs
+        WHERE "createdAt" > now() - interval '30 days'
         GROUP BY 1
       ) h
     )
