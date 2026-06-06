@@ -173,11 +173,28 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     };
   }, [fetchOrCreateUser]);
 
+  // Registra evento de acesso na auditoria (best-effort, nunca quebra o fluxo).
+  const logAccessEvent = async (event: 'login' | 'logout') => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return;
+      await fetch('/api/v1/access-event', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ event }),
+      });
+    } catch { /* ignore — auditoria não pode atrapalhar login/logout */ }
+  };
+
   const login = async (email: string, pass: string) => {
     setIsLoading(true);
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
       if (error) throw error;
+      logAccessEvent('login'); // não-bloqueante
     } catch (error: any) {
       console.error("Erro no login:", error);
       throw error;
@@ -228,6 +245,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
 
   const logout = async () => {
     try {
+      await logAccessEvent('logout'); // registra ANTES de invalidar o token
       await supabase.auth.signOut();
       window.location.reload();
     } catch (error) {

@@ -254,6 +254,28 @@ async function startServer() {
     app.use('/l', webhookLimiter, createShortLinksPublicRouter(supabaseAdmin));
     // Supreme Admin (SaaS operator) — every route gated by requireSupremeAdmin.
     app.use('/api/v1/supreme', requireAuth, mutationLimiter, requireSupremeAdmin(), createSupremeAdminRouter(supabaseAdmin));
+
+    // Access logging — any authenticated user reports login/logout so the
+    // Supreme audit feed captures access events ("logs de acesso"). Best-effort,
+    // never blocks the auth flow.
+    app.post('/api/v1/access-event', requireAuth, async (req, res) => {
+      try {
+        const event = req.body?.event === 'logout' ? 'logout' : 'login';
+        await supabaseAdmin.from('audit_logs').insert({
+          campaignId: req.user?.campaignId ?? null,
+          actorId: req.user?.id ?? null,
+          actorType: 'user',
+          action: `auth.${event}`,
+          ipAddress: req.ip ?? req.socket?.remoteAddress ?? null,
+          userAgent: req.get?.('user-agent') ?? null,
+          severity: 'info',
+          metadata: { email: req.user?.email ?? null, userType: req.user?.userType ?? null },
+        });
+        return res.json({ ok: true });
+      } catch {
+        return res.json({ ok: false }); // never surface as an error to the client
+      }
+    });
   }
 
   // --- OAuth Social (Simulação) ---

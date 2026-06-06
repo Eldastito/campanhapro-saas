@@ -117,6 +117,36 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ── GET /audit-logs ─────────────────────────────────────────────────
+  // Enriched audit feed (who did what), filterable by action substring and
+  // severity. Resolves actorId → user name/email.
+  router.get('/audit-logs', async (req: Request, res: Response) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500);
+      const action = req.query.action ? String(req.query.action) : null;
+      const severity = req.query.severity ? String(req.query.severity) : null;
+      const { data, error } = await supabaseAdmin.rpc('supreme_audit_logs', {
+        p_limit: limit, p_action: action, p_severity: severity,
+      });
+      if (error) return res.status(500).json({ error: 'audit_failed', detail: error.message });
+      return res.json({ logs: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'audit_failed' });
+    }
+  });
+
+  // ── GET /access-log ─────────────────────────────────────────────────
+  // Per-user access view: last sign-in, registration, action count.
+  router.get('/access-log', async (_req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin.rpc('supreme_access_log');
+      if (error) return res.status(500).json({ error: 'access_failed', detail: error.message });
+      return res.json({ access: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'access_failed' });
+    }
+  });
+
   // ── GET /financial ──────────────────────────────────────────────────
   // SaaS financial dashboard: MRR/ARR, subscriptions by status, per-plan
   // distribution, overdue (past_due) campaigns, confirmed revenue, AI cost.

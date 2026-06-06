@@ -13,7 +13,7 @@ import {
     Settings, Plus, Search, Lock, Unlock,
     Layout, Cpu, AlertTriangle, Trash2, Mail,
     CreditCard, Layers, TrendingUp as TrendingIcon,
-    Activity, Filter, Download, Brain, RefreshCw
+    Activity, Filter, Download, Brain, RefreshCw, LogOut, ScrollText, Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -79,7 +79,13 @@ async function supremeFetch(path: string, init?: RequestInit): Promise<any> {
 
 const SupremeAdminPage: React.FC = () => {
     const { user, logout, sendPasswordReset } = useAuth();
-    const [activeTab, setActiveTab] = useState<'overview' | 'campaigns' | 'users' | 'platform' | 'financial'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'campaigns' | 'users' | 'platform' | 'financial' | 'audit'>('overview');
+
+    // Auditoria (F2)
+    const [auditLogs, setAuditLogs] = useState<any[]>([]);
+    const [accessLog, setAccessLog] = useState<any[]>([]);
+    const [auditFilter, setAuditFilter] = useState('');
+    const [loadingAudit, setLoadingAudit] = useState(false);
     
     // Campaigns Data
     const [campaigns, setCampaigns] = useState<AuthenticatedUser[]>([]);
@@ -363,6 +369,29 @@ const SupremeAdminPage: React.FC = () => {
         }
     };
 
+    const fetchAudit = async (filter?: string) => {
+        setLoadingAudit(true);
+        try {
+            const q = filter ? `?action=${encodeURIComponent(filter)}&limit=200` : '?limit=200';
+            const [a, ac] = await Promise.all([
+                supremeFetch(`/audit-logs${q}`),
+                supremeFetch('/access-log'),
+            ]);
+            setAuditLogs(a?.logs ?? []);
+            setAccessLog(ac?.access ?? []);
+        } catch (e) {
+            console.warn('[Supreme] audit fetch failed', e);
+        } finally {
+            setLoadingAudit(false);
+        }
+    };
+
+    // Carrega auditoria ao abrir a aba
+    useEffect(() => {
+        if (activeTab === 'audit' && auditLogs.length === 0) fetchAudit();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab]);
+
     const handleRunLifecycle = async () => {
         setRunningLifecycle(true);
         try {
@@ -465,7 +494,13 @@ const SupremeAdminPage: React.FC = () => {
                         >
                             Financeiro & IA
                         </button>
-                        <button 
+                        <button
+                            onClick={() => setActiveTab('audit')}
+                            className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'audit' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Auditoria
+                        </button>
+                        <button
                             onClick={() => setActiveTab('platform')}
                             className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'platform' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
                         >
@@ -478,8 +513,11 @@ const SupremeAdminPage: React.FC = () => {
                             <p className="text-xs font-black text-white leading-none uppercase">{user?.name || 'ADMINISTRADOR'}</p>
                             <p className="text-[10px] text-slate-400 font-medium">GESTÃO SUPREMA</p>
                         </div>
-                        <Button variant="ghost" onClick={logout} className="h-8 w-8 p-0 rounded-full hover:bg-red-500/10">
-                            <Mail className="w-4 h-4 text-slate-500 hover:text-red-500" />
+                        <Button
+                            onClick={() => { if (window.confirm('Encerrar sessão do SUPREME CONTROL?')) logout(); }}
+                            className="h-9 px-4 bg-red-500/10 hover:bg-red-500/20 text-red-400 flex items-center gap-2 text-xs font-bold"
+                        >
+                            <LogOut className="w-4 h-4" /> Sair
                         </Button>
                     </div>
                 </div>
@@ -1190,8 +1228,98 @@ const SupremeAdminPage: React.FC = () => {
                         </motion.div>
                     )}
 
+                    {activeTab === 'audit' && (
+                        <motion.div
+                            key="audit"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="space-y-8"
+                        >
+                            <div className="flex justify-between items-end">
+                                <div>
+                                    <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic">Auditoria & Acessos</h2>
+                                    <p className="text-xs text-slate-500 uppercase tracking-widest font-mono">Quem acessou e o que cada usuário fez na plataforma</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        value={auditFilter}
+                                        onChange={(e) => setAuditFilter(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') fetchAudit(auditFilter); }}
+                                        placeholder="Filtrar ação (ex: auth, billing, whatsapp)…"
+                                        className="bg-slate-900 border border-white/10 rounded-lg px-4 py-2 text-sm outline-none text-slate-200 w-64"
+                                    />
+                                    <Button onClick={() => fetchAudit(auditFilter)} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-2">
+                                        <RefreshCw className={`w-4 h-4 ${loadingAudit ? 'animate-spin' : ''}`} /> Buscar
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {/* Logs de acesso por usuário */}
+                            <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                    <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><Clock className="w-4 h-4 text-sky-400" /> Logs de Acesso (por usuário)</h3>
+                                </div>
+                                <table className="w-full text-left text-sm">
+                                    <thead className="text-[10px] uppercase text-slate-500 border-b border-white/5">
+                                        <tr>
+                                            <th className="px-4 py-2">Usuário</th>
+                                            <th className="px-4 py-2">Perfil</th>
+                                            <th className="px-4 py-2">Último acesso</th>
+                                            <th className="px-4 py-2">Última ação</th>
+                                            <th className="px-4 py-2 text-right">Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {accessLog.map((u: any) => (
+                                            <tr key={u.id} className="border-b border-white/5 hover:bg-white/5">
+                                                <td className="px-4 py-2">
+                                                    <p className="font-bold text-white">{u.name}</p>
+                                                    <p className="text-[10px] text-slate-500">{u.email}</p>
+                                                </td>
+                                                <td className="px-4 py-2 text-slate-300">{u.type}</td>
+                                                <td className="px-4 py-2 text-slate-400 font-mono text-xs">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString('pt-BR') : '—'}</td>
+                                                <td className="px-4 py-2 text-slate-400 font-mono text-xs">{u.last_action_at ? new Date(u.last_action_at).toLocaleString('pt-BR') : '—'}</td>
+                                                <td className="px-4 py-2 text-right font-mono text-white">{u.actions_count}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </Card>
+
+                            {/* Feed de atividade (o que cada usuário fez) */}
+                            <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                    <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><ScrollText className="w-4 h-4 text-indigo-400" /> Trilha de Auditoria ({auditLogs.length})</h3>
+                                </div>
+                                <div className="divide-y divide-white/5 max-h-[600px] overflow-y-auto">
+                                    {loadingAudit ? (
+                                        <p className="text-slate-500 text-sm p-6">Carregando…</p>
+                                    ) : auditLogs.length === 0 ? (
+                                        <p className="text-slate-500 text-sm p-6">Nenhum registro.</p>
+                                    ) : auditLogs.map((l: any) => (
+                                        <div key={l.id} className="px-4 py-3 flex items-start gap-3 hover:bg-white/5">
+                                            <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${l.severity === 'critical' ? 'bg-rose-500' : l.severity === 'warn' ? 'bg-amber-500' : 'bg-slate-500'}`} />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <code className="text-xs font-bold text-indigo-300">{l.action}</code>
+                                                    {l.actor_name && <span className="text-xs text-slate-400">por <strong className="text-slate-200">{l.actor_name}</strong></span>}
+                                                    <span className="text-[10px] text-slate-600">{l.actorType}</span>
+                                                </div>
+                                                {l.resourceType && <p className="text-[10px] text-slate-500">recurso: {l.resourceType} {l.resourceId ? `#${String(l.resourceId).substring(0,8)}` : ''}</p>}
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                <p className="text-[10px] text-slate-500 font-mono">{new Date(l.createdAt).toLocaleString('pt-BR')}</p>
+                                                {l.ipAddress && <p className="text-[9px] text-slate-600 font-mono">{l.ipAddress}</p>}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+                        </motion.div>
+                    )}
+
                     {activeTab === 'platform' && (
-                        <motion.div 
+                        <motion.div
                             key="platform"
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
