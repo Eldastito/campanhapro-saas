@@ -107,6 +107,7 @@ const SupremeAdminPage: React.FC = () => {
     const [financial, setFinancial] = useState<any | null>(null);
     const [runningLifecycle, setRunningLifecycle] = useState(false);
     const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amount: '', currency: 'BRL' });
+    const [taxes, setTaxes] = useState<any | null>(null);
 
     // Dashboard per-campaign filter (F1)
     const [dashCampaign, setDashCampaign] = useState<string>('all');
@@ -200,6 +201,14 @@ const SupremeAdminPage: React.FC = () => {
                 setFinancial(f?.financial ?? null);
             } catch (fErr) {
                 console.warn('[Supreme] financial fetch failed:', fErr);
+            }
+
+            // 7. Impostos (Simples Nacional) — best-effort
+            try {
+                const t = await supremeFetch('/taxes');
+                setTaxes(t?.taxes ?? null);
+            } catch (tErr) {
+                console.warn('[Supreme] taxes fetch failed:', tErr);
             }
 
         } catch (error) {
@@ -1158,6 +1167,41 @@ const SupremeAdminPage: React.FC = () => {
                                 </div>
                                 <p className="text-[10px] text-slate-600 mt-2">Custo IA convertido a US$ 1 = R$ {financial?.usdBrlRate ?? '5.40'} (consumo dos últimos 30 dias).</p>
                             </div>
+
+                            {/* ===== IMPOSTOS (SIMPLES NACIONAL) ===== */}
+                            <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                    <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-amber-400" /> Impostos — Simples Nacional (sede RJ)</h3>
+                                </div>
+                                {taxes ? (
+                                    <div className="p-4">
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                                            {[
+                                                { label: 'DAS a pagar/mês', val: `R$ ${((taxes.dasMesCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-rose-400', big: true },
+                                                { label: 'Anexo', val: taxes.anexo, color: 'text-sky-400' },
+                                                { label: 'Fator R', val: `${(taxes.fatorR*100).toFixed(1)}%`, color: taxes.fatorR >= 0.28 ? 'text-emerald-400' : 'text-amber-400' },
+                                                { label: 'Alíq. efetiva', val: `${(taxes.aliquotaEfetiva*100).toFixed(2)}%`, color: 'text-slate-200' },
+                                                { label: 'RBT12 (base)', val: `R$ ${((taxes.rbt12 ?? 0)).toLocaleString('pt-BR')}`, color: 'text-slate-200' },
+                                            ].map((s, i) => (
+                                                <div key={i} className="bg-slate-950/50 border border-white/5 rounded-lg p-3">
+                                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{s.label}</p>
+                                                    <p className={`${s.big ? 'text-xl' : 'text-lg'} font-black mt-2 font-mono ${s.color}`}>{s.val}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-300/90">
+                                            💡 {taxes.observacao}
+                                        </div>
+                                        <p className="text-[10px] text-slate-600 mt-2">
+                                            RBT12 estimado = MRR × 12. Folha (Fator R) = custos de salários/pessoal × 12.
+                                            A DAS é guia única e já inclui o ISS municipal (RJ) — SaaS não recolhe ICMS.
+                                            Cadastre salários em Custos pra otimizar o Fator R.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 text-sm p-6">Sem dados de imposto (defina receita/assinaturas).</p>
+                                )}
+                            </Card>
 
                             {/* ===== CUSTOS OPERACIONAIS ===== */}
                             <Card className="bg-slate-900 border-white/5 overflow-hidden">

@@ -25,6 +25,7 @@ import { Plan } from '../../../types/user';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { runLifecycleSweep } from '../billing/subscriptionLifecycle';
+import { calcSimplesNacional } from './taxCalculator';
 
 /**
  * System prompt for the campaign-consultant agent. Persona: a senior
@@ -157,6 +158,48 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ financial: data });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'financial_failed' });
+    }
+  });
+
+  // ── GET /taxes ──────────────────────────────────────────────────────
+  // Estima a DAS do Simples Nacional (SaaS, sede RJ). RBT12 = MRR×12,
+  // receita do mês = MRR, folha (Fator R) = custos de salários/pessoal ×12.
+  router.get('/taxes', async (req: Request, res: Response) => {
+    try {
+      const usdBrl = Number(req.query.usd_brl ?? 5.40) || 5.40;
+
+      // MRR (assinaturas ativas pagas) em reais
+      const { data: subs } = await supabaseAdmin
+        .from('subscriptions')
+        .select('planId, status, plans!inner(monthlyCents)')
+        .eq('status', 'active');
+      let mrrReais = 0;
+      for (const s of (subs as any[]) ?? []) {
+        const cents = s.plans?.monthlyCents ?? 0;
+        if (cents > 0) mrrReais += cents / 100;
+      }
+
+      // Folha mensal: custos de salários/pessoal (converte USD→BRL se houver)
+      const { data: costs } = await supabaseAdmin
+        .from('platform_costs')
+        .select('amountCents, currency, category, recurrence, active')
+        .eq('active', true).eq('recurrence', 'monthly')
+        .in('category', ['salarios', 'pessoal']);
+      let folhaMensalReais = 0;
+      for (const c of (costs as any[]) ?? []) {
+        const reais = (c.amountCents ?? 0) / 100 * (c.currency === 'USD' ? usdBrl : 1);
+        folhaMensalReais += reais;
+      }
+
+      const result = calcSimplesNacional({
+        rbt12: mrrReais * 12,
+        receitaMes: mrrReais,
+        folha12: folhaMensalReais * 12,
+      });
+
+      return res.json({ taxes: result });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'taxes_failed' });
     }
   });
 
