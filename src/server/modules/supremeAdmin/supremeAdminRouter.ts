@@ -160,6 +160,77 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ── Custos operacionais (infra, IA, impostos…) ──────────────────────
+  router.get('/costs', async (_req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('platform_costs')
+        .select('id, category, description, amountCents, recurrence, active, createdAt')
+        .order('amountCents', { ascending: false });
+      if (error) return res.status(500).json({ error: 'costs_list_failed', detail: error.message });
+      return res.json({ costs: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'costs_list_failed' });
+    }
+  });
+
+  router.post('/costs', async (req: Request, res: Response) => {
+    try {
+      const { category, description, amountCents, recurrence } = req.body ?? {};
+      const validCats = ['infraestrutura', 'ia', 'impostos', 'pessoal', 'marketing', 'outros'];
+      if (!validCats.includes(category)) return res.status(400).json({ error: 'invalid_category' });
+      if (typeof description !== 'string' || !description.trim()) return res.status(400).json({ error: 'invalid_description' });
+      const cents = Number(amountCents);
+      if (!Number.isFinite(cents) || cents < 0) return res.status(400).json({ error: 'invalid_amount' });
+
+      const { data, error } = await supabaseAdmin.from('platform_costs').insert({
+        category,
+        description: description.trim(),
+        amountCents: Math.round(cents),
+        recurrence: recurrence === 'once' ? 'once' : 'monthly',
+        createdBy: (req as any).user?.id ?? null,
+      }).select('id').single();
+      if (error) return res.status(500).json({ error: 'cost_create_failed', detail: error.message });
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.cost.create', severity: 'info',
+        metadata: { category, description, amountCents: Math.round(cents) },
+      }).catch(() => {});
+      return res.status(201).json({ id: data?.id });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'cost_create_failed' });
+    }
+  });
+
+  router.patch('/costs/:id', async (req: Request, res: Response) => {
+    try {
+      const updates: Record<string, unknown> = {};
+      if (req.body?.amountCents !== undefined) {
+        const c = Number(req.body.amountCents);
+        if (!Number.isFinite(c) || c < 0) return res.status(400).json({ error: 'invalid_amount' });
+        updates.amountCents = Math.round(c);
+      }
+      if (typeof req.body?.active === 'boolean') updates.active = req.body.active;
+      if (typeof req.body?.description === 'string') updates.description = req.body.description.trim();
+      if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'no_fields' });
+      const { error } = await supabaseAdmin.from('platform_costs').update(updates).eq('id', req.params.id);
+      if (error) return res.status(500).json({ error: 'cost_update_failed', detail: error.message });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'cost_update_failed' });
+    }
+  });
+
+  router.delete('/costs/:id', async (req: Request, res: Response) => {
+    try {
+      const { error } = await supabaseAdmin.from('platform_costs').delete().eq('id', req.params.id);
+      if (error) return res.status(500).json({ error: 'cost_delete_failed', detail: error.message });
+      return res.status(204).end();
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'cost_delete_failed' });
+    }
+  });
+
   // ── POST /financial/run-lifecycle ───────────────────────────────────
   // Manually trigger the billing lifecycle sweep (reminders, auto-downgrade
   // of stale past_due, expire canceled). Normally runs every 6h on its own

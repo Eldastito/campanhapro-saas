@@ -106,6 +106,7 @@ const SupremeAdminPage: React.FC = () => {
     // Financial metrics (F3)
     const [financial, setFinancial] = useState<any | null>(null);
     const [runningLifecycle, setRunningLifecycle] = useState(false);
+    const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amountReais: '' });
 
     // Dashboard per-campaign filter (F1)
     const [dashCampaign, setDashCampaign] = useState<string>('all');
@@ -391,6 +392,44 @@ const SupremeAdminPage: React.FC = () => {
         if (activeTab === 'audit' && auditLogs.length === 0) fetchAudit();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab]);
+
+    const handleAddCost = async () => {
+        const reais = parseFloat(String(newCost.amountReais).replace(',', '.'));
+        if (!newCost.description.trim() || !Number.isFinite(reais) || reais < 0) {
+            alert('Preencha descrição e valor válido.');
+            return;
+        }
+        try {
+            await supremeFetch('/costs', {
+                method: 'POST',
+                body: JSON.stringify({
+                    category: newCost.category,
+                    description: newCost.description.trim(),
+                    amountCents: Math.round(reais * 100),
+                    recurrence: 'monthly',
+                }),
+            });
+            setNewCost({ category: 'infraestrutura', description: '', amountReais: '' });
+            fetchAllData();
+        } catch (e: any) {
+            alert(`Erro ao adicionar custo: ${e.message || 'desconhecido'}`);
+        }
+    };
+
+    const handleUpdateCostAmount = async (id: string, reais: number) => {
+        try {
+            await supremeFetch(`/costs/${id}`, { method: 'PATCH', body: JSON.stringify({ amountCents: Math.round(reais * 100) }) });
+            fetchAllData();
+        } catch (e: any) { alert(`Erro: ${e.message}`); }
+    };
+
+    const handleDeleteCost = async (id: string) => {
+        if (!window.confirm('Remover este custo?')) return;
+        try {
+            await supremeFetch(`/costs/${id}`, { method: 'DELETE' });
+            fetchAllData();
+        } catch (e: any) { alert(`Erro: ${e.message}`); }
+    };
 
     const handleRunLifecycle = async () => {
         setRunningLifecycle(true);
@@ -1097,6 +1136,67 @@ const SupremeAdminPage: React.FC = () => {
                                     </div>
                                 </Card>
                             </div>
+
+                            {/* ===== DEMONSTRATIVO DE RESULTADO (P&L) ===== */}
+                            <div>
+                                <h3 className="text-lg font-black text-white mb-1 uppercase">Demonstrativo de Resultado (P&L)</h3>
+                                <p className="text-xs text-slate-500 uppercase tracking-widest font-mono mb-4">Receita − Custos = Lucro Líquido (mensal)</p>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    {[
+                                        { label: 'Receita (MRR)', val: `R$ ${((financial?.profitLoss?.receitaCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-emerald-400' },
+                                        { label: 'Custos Fixos', val: `R$ ${((financial?.profitLoss?.custosFixosCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-rose-400' },
+                                        { label: 'Custo IA (var.)', val: `R$ ${((financial?.profitLoss?.custoIaVariavelCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-amber-400' },
+                                        { label: 'Lucro Líquido', val: `R$ ${((financial?.profitLoss?.lucroLiquidoCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: (financial?.profitLoss?.lucroLiquidoCents ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+                                        { label: 'Margem', val: `${financial?.profitLoss?.margemPct ?? 0}%`, color: 'text-sky-400' },
+                                    ].map((s, i) => (
+                                        <Card key={i} className="bg-slate-900/50 border-white/5 p-4">
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{s.label}</p>
+                                            <p className={`text-lg font-black mt-2 font-mono ${s.color}`}>{s.val}</p>
+                                        </Card>
+                                    ))}
+                                </div>
+                                <p className="text-[10px] text-slate-600 mt-2">Custo IA convertido a US$ 1 = R$ {financial?.usdBrlRate ?? '5.40'} (consumo dos últimos 30 dias).</p>
+                            </div>
+
+                            {/* ===== CUSTOS OPERACIONAIS ===== */}
+                            <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                    <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><CreditCard className="w-4 h-4 text-rose-400" /> Custos Operacionais (infra, IA, impostos…)</h3>
+                                </div>
+                                <div className="p-4 space-y-2">
+                                    {(financial?.costs?.items ?? []).map((c: any) => (
+                                        <div key={c.id} className="flex items-center gap-3 p-3 bg-slate-950/50 rounded-lg border border-white/5">
+                                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-slate-700 text-slate-300 w-28 text-center shrink-0">{c.category}</span>
+                                            <p className="flex-1 text-sm text-white truncate">{c.description}</p>
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-slate-500 text-xs">R$</span>
+                                                <input
+                                                    type="number"
+                                                    defaultValue={(c.amountCents/100).toFixed(2)}
+                                                    onBlur={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v) && Math.round(v*100) !== c.amountCents) handleUpdateCostAmount(c.id, v); }}
+                                                    className="w-28 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-right text-white font-mono"
+                                                />
+                                                <span className="text-[10px] text-slate-600">/mês</span>
+                                            </div>
+                                            <button onClick={() => handleDeleteCost(c.id)} className="text-rose-400 hover:text-rose-300 p-1"><Trash2 className="w-4 h-4" /></button>
+                                        </div>
+                                    ))}
+                                    {/* Adicionar custo */}
+                                    <div className="flex items-center gap-2 pt-2 border-t border-white/5 mt-2">
+                                        <select value={newCost.category} onChange={(e) => setNewCost({...newCost, category: e.target.value})} className="bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-slate-200">
+                                            <option value="infraestrutura">Infraestrutura</option>
+                                            <option value="ia">IA</option>
+                                            <option value="impostos">Impostos</option>
+                                            <option value="pessoal">Pessoal</option>
+                                            <option value="marketing">Marketing</option>
+                                            <option value="outros">Outros</option>
+                                        </select>
+                                        <input value={newCost.description} onChange={(e) => setNewCost({...newCost, description: e.target.value})} placeholder="Descrição (ex: VPS Hostinger)" className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-white" />
+                                        <input value={newCost.amountReais} onChange={(e) => setNewCost({...newCost, amountReais: e.target.value})} placeholder="R$ /mês" type="number" className="w-28 bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-right text-white" />
+                                        <Button onClick={handleAddCost} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1"><Plus className="w-4 h-4" /> Add</Button>
+                                    </div>
+                                </div>
+                            </Card>
 
                             <div className="border-t border-white/5 pt-6" />
 
