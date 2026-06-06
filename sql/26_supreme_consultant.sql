@@ -122,6 +122,37 @@ BEGIN
         'instances', (SELECT count(*) FROM whatsapp_instances WHERE "campaignId"=p_campaign_id AND status <> 'deleted'),
         'messages', (SELECT count(*) FROM channel_messages WHERE "campaignId"=p_campaign_id)
       )
+    ),
+    -- Seções com filtro por campanha (dashboard): pico de IA, crescimento de
+    -- usuários e "consumo de espaço" (nº de registros gerados pela campanha).
+    'peakHours', (
+      SELECT coalesce(jsonb_agg(row_to_json(h) ORDER BY h.hour), '[]'::jsonb)
+      FROM (
+        SELECT extract(hour FROM "createdAt" AT TIME ZONE 'America/Sao_Paulo')::int AS hour, count(*) AS atividades
+        FROM agent_runs WHERE "campaignId" = p_campaign_id AND "createdAt" > now() - interval '30 days'
+        GROUP BY 1
+      ) h
+    ),
+    'userGrowth', (
+      SELECT coalesce(jsonb_agg(row_to_json(g) ORDER BY g.day), '[]'::jsonb)
+      FROM (
+        SELECT date_trunc('day', "createdAt")::date AS day, count(*) AS novos
+        FROM public.users WHERE "campaignId" = v_uuid AND "createdAt" > now() - interval '30 days'
+        GROUP BY 1
+      ) g
+    ),
+    'spaceUsage', (
+      SELECT coalesce(jsonb_agg(row_to_json(t) ORDER BY t.rows DESC), '[]'::jsonb)
+      FROM (
+        SELECT 'contacts' AS tabela, count(*) AS rows FROM contacts WHERE "campaignId"=p_campaign_id
+        UNION ALL SELECT 'visits', count(*) FROM visits WHERE "campaignId"=p_campaign_id
+        UNION ALL SELECT 'street_reports', count(*) FROM street_reports WHERE "campaignId"=p_campaign_id
+        UNION ALL SELECT 'pesquisas', count(*) FROM pesquisas WHERE "campaignId"=p_campaign_id
+        UNION ALL SELECT 'channel_messages', count(*) FROM channel_messages WHERE "campaignId"=p_campaign_id
+        UNION ALL SELECT 'agent_runs', count(*) FROM agent_runs WHERE "campaignId"=p_campaign_id
+        UNION ALL SELECT 'engagement_actions', count(*) FROM engagement_actions WHERE "campaignId"=p_campaign_id
+        UNION ALL SELECT 'voter_journey', count(*) FROM voter_journey WHERE "campaignId"=p_campaign_id
+      ) t WHERE t.rows > 0
     )
   ) INTO result;
 

@@ -567,6 +567,60 @@ const SupremeAdminPage: React.FC = () => {
                                             ) : <p className="text-slate-500 text-sm">Sem reportes.</p>}
                                         </Card>
                                     </div>
+
+                                    {/* Crescimento + Pico + Consumo de espaço — filtrados por esta campanha */}
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                        <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                            <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                                <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><TrendingIcon className="w-4 h-4 text-emerald-400" /> Crescimento de Usuários (30d)</h3>
+                                            </div>
+                                            <div className="p-4 h-56">
+                                                {campaignSnapshot.userGrowth?.length ? (
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <AreaChart data={campaignSnapshot.userGrowth}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                                                            <XAxis dataKey="day" tick={{ fontSize: 9, fill: '#64748b' }} />
+                                                            <YAxis tick={{ fontSize: 9, fill: '#64748b' }} allowDecimals={false} />
+                                                            <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+                                                            <Area type="monotone" dataKey="novos" stroke="#34d399" fill="#34d39933" />
+                                                        </AreaChart>
+                                                    </ResponsiveContainer>
+                                                ) : <div className="h-full flex items-center justify-center text-slate-500 text-sm">Sem novos usuários (30d).</div>}
+                                            </div>
+                                        </Card>
+                                        <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                            <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                                <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><Activity className="w-4 h-4 text-amber-400" /> Horários de Pico (IA, 30d)</h3>
+                                            </div>
+                                            <div className="p-4 h-56">
+                                                {campaignSnapshot.peakHours?.length ? (
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={campaignSnapshot.peakHours}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                                                            <XAxis dataKey="hour" tick={{ fontSize: 9, fill: '#64748b' }} unit="h" />
+                                                            <YAxis tick={{ fontSize: 9, fill: '#64748b' }} allowDecimals={false} />
+                                                            <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} />
+                                                            <Bar dataKey="atividades" fill="#fbbf24" radius={[4, 4, 0, 0]} />
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                ) : <div className="h-full flex items-center justify-center text-slate-500 text-sm text-center px-4">Sem atividade de IA (30d).</div>}
+                                            </div>
+                                        </Card>
+                                        <Card className="bg-slate-900 border-white/5 overflow-hidden">
+                                            <div className="p-4 border-b border-white/5 bg-slate-800/30">
+                                                <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2"><Layers className="w-4 h-4 text-purple-400" /> Consumo de Espaço (registros)</h3>
+                                            </div>
+                                            <div className="p-4 space-y-1.5 max-h-56 overflow-y-auto">
+                                                {campaignSnapshot.spaceUsage?.length ? campaignSnapshot.spaceUsage.map((t: any) => (
+                                                    <div key={t.tabela} className="flex items-center justify-between text-xs">
+                                                        <span className="font-mono text-slate-300">{t.tabela}</span>
+                                                        <span className="font-mono text-slate-500">{Number(t.rows).toLocaleString('pt-BR')}</span>
+                                                    </div>
+                                                )) : <div className="text-slate-500 text-sm py-8 text-center">Sem dados.</div>}
+                                            </div>
+                                        </Card>
+                                    </div>
+
                                     <div className="flex justify-end">
                                         <Button onClick={() => handleAnalyzeCampaign(dashCampaign, campaigns.find(c => c.campaignId === dashCampaign)?.name || '')} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-2">
                                             <Brain className="w-4 h-4" /> Analisar esta campanha com IA
