@@ -10,6 +10,7 @@ import { syncPlanForCampaign, getPlanConfig } from '../utils/planUtils';
 import ConsultantReport from '../components/supreme/ConsultantReport';
 import { ModernArea, ModernBar } from '../components/supreme/Charts';
 import FormBuilder from '../components/supreme/FormBuilder';
+import PublicFormsPanel from '../components/supreme/PublicFormsPanel';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -68,6 +69,7 @@ async function supremeFetch(path: string, init?: RequestInit): Promise<any> {
 const SupremeAdminPage: React.FC = () => {
     const { user, logout, sendPasswordReset } = useAuth();
     const [activeTab, setActiveTab] = useState<'overview' | 'campaigns' | 'users' | 'platform' | 'financial' | 'audit' | 'forms'>('overview');
+    const [formsSubTab, setFormsSubTab] = useState<'internal' | 'public'>('internal');
 
     // Auditoria (F2)
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -1074,13 +1076,36 @@ const SupremeAdminPage: React.FC = () => {
                             animate={{ opacity: 1 }}
                             className="space-y-8"
                         >
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setFormsSubTab('internal')}
+                                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${formsSubTab === 'internal' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white border border-white/5'}`}
+                                >
+                                    Campos internos
+                                </button>
+                                <button
+                                    onClick={() => setFormsSubTab('public')}
+                                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${formsSubTab === 'public' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-slate-900 text-slate-400 hover:text-white border border-white/5'}`}
+                                >
+                                    Formulários públicos
+                                </button>
+                            </div>
                             <Card className="bg-slate-900/40 border-white/5 p-6">
-                                <FormBuilder
-                                    campaigns={campaigns
-                                        .filter((c) => !!c.campaignId)
-                                        .map((c) => ({ id: c.campaignId as string, name: c.name }))}
-                                    supremeFetch={supremeFetch}
-                                />
+                                {formsSubTab === 'internal' ? (
+                                    <FormBuilder
+                                        campaigns={campaigns
+                                            .filter((c) => !!c.campaignId)
+                                            .map((c) => ({ id: c.campaignId as string, name: c.name }))}
+                                        supremeFetch={supremeFetch}
+                                    />
+                                ) : (
+                                    <PublicFormsPanel
+                                        campaigns={campaigns
+                                            .filter((c) => !!c.campaignId)
+                                            .map((c) => ({ id: c.campaignId as string, name: c.name }))}
+                                        supremeFetch={supremeFetch}
+                                    />
+                                )}
                             </Card>
                         </motion.div>
                     )}

@@ -62,6 +62,42 @@ function sanitizeFormSchema(input: any): Record<string, any[]> {
   return out;
 }
 
+// Colunas nativas de contacts que um campo de form público pode preencher.
+const CONTACT_MAPS = ['name', 'email', 'phone', 'neighborhood', 'city'];
+
+/** Sanitiza um array plano de campos (formulário público, aceita `map`). */
+function sanitizePublicFields(arr: any): any[] {
+  if (!Array.isArray(arr)) return [];
+  const out: any[] = [];
+  for (const f of arr) {
+    if (!f || typeof f !== 'object') continue;
+    const label = typeof f.label === 'string' ? f.label.trim().slice(0, 120) : '';
+    if (!label) continue;
+    const type = (FIELD_TYPES as readonly string[]).includes(f.type) ? f.type : 'text';
+    const id = typeof f.id === 'string' && f.id.trim() ? f.id.trim().slice(0, 64) : `f_${Math.random().toString(36).slice(2, 10)}`;
+    const field: any = { id, label, type, required: !!f.required };
+    if (type === 'select') field.options = Array.isArray(f.options) ? f.options.map((o: any) => String(o).trim()).filter(Boolean).slice(0, 50) : [];
+    if (typeof f.placeholder === 'string' && f.placeholder.trim()) field.placeholder = f.placeholder.trim().slice(0, 160);
+    if (typeof f.help === 'string' && f.help.trim()) field.help = f.help.trim().slice(0, 240);
+    if (typeof f.map === 'string' && CONTACT_MAPS.includes(f.map)) field.map = f.map;
+    out.push(field);
+  }
+  return out.slice(0, 50);
+}
+
+/** slug seguro a partir de um título (acentos removidos via NFD, sem char combinante no fonte). */
+function slugify(s: string): string {
+  const norm = (s || 'form').toString().normalize('NFD');
+  let stripped = '';
+  for (const ch of norm) {
+    const code = ch.charCodeAt(0);
+    if (code >= 0x300 && code <= 0x36f) continue; // pula diacríticos combinantes
+    stripped += ch;
+  }
+  const base = stripped.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  return base || 'form';
+}
+
 /**
  * System prompt for the campaign-consultant agent. Persona: a senior
  * political-campaign strategist specialised in converting voters into
@@ -344,6 +380,108 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ ok: true, schema });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'forms_save_failed' });
+    }
+  });
+
+  // ── Formulários públicos (F5b) — gestão pelo Supreme Admin ──────────
+  router.get('/forms/:campaignId/public', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('public_forms')
+        .select('id, slug, title, description, target, schema, success_message, is_active, submissions_count, created_at')
+        .eq('campaign_id', req.params.campaignId)
+        .order('created_at', { ascending: false });
+      if (error) return res.status(500).json({ error: 'public_forms_load_failed', detail: error.message });
+      const forms = (data ?? []).map((f: any) => ({
+        id: f.id, slug: f.slug, title: f.title, description: f.description, target: f.target,
+        schema: f.schema, successMessage: f.success_message, isActive: f.is_active,
+        submissionsCount: f.submissions_count, createdAt: f.created_at,
+      }));
+      return res.json({ forms });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'public_forms_load_failed' });
+    }
+  });
+
+  router.post('/forms/:campaignId/public', async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.campaignId;
+      const title = typeof req.body?.title === 'string' ? req.body.title.trim().slice(0, 120) : '';
+      if (!title) return res.status(400).json({ error: 'missing_title' });
+      const target = ['contacts', 'visits', 'pesquisa'].includes(req.body?.target) ? req.body.target : 'contacts';
+
+      // schema: usa o enviado, ou monta um default (nome/telefone/email + campos internos do alvo)
+      let schema = sanitizePublicFields(req.body?.schema);
+      if (schema.length === 0) {
+        const { data: cfg } = await supabaseAdmin
+          .from('campaign_configs').select('custom_fields').eq('id', campaignId).maybeSingle();
+        const internal = sanitizePublicFields((cfg?.custom_fields?.[target]) || []);
+        schema = [
+          { id: 'name', label: 'Nome completo', type: 'text', required: true, map: 'name' },
+          { id: 'phone', label: 'WhatsApp / Telefone', type: 'phone', required: false, map: 'phone' },
+          { id: 'email', label: 'E-mail', type: 'email', required: false, map: 'email' },
+          ...internal,
+        ];
+      }
+
+      const slug = `${slugify(title)}-${Math.random().toString(36).slice(2, 6)}`;
+      const { data, error } = await supabaseAdmin.from('public_forms').insert({
+        campaign_id: campaignId,
+        slug,
+        title,
+        description: typeof req.body?.description === 'string' ? req.body.description.trim().slice(0, 500) : null,
+        target,
+        schema,
+        success_message: typeof req.body?.successMessage === 'string' ? req.body.successMessage.trim().slice(0, 300) : null,
+      }).select('id, slug').single();
+      if (error) return res.status(500).json({ error: 'public_form_create_failed', detail: error.message });
+      await audit(supabaseAdmin, { ...actorFromRequest(req), action: 'supreme.public_form.create', severity: 'info', metadata: { campaignId, slug, title } }).catch(() => {});
+      return res.status(201).json({ id: data?.id, slug: data?.slug });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'public_form_create_failed' });
+    }
+  });
+
+  router.patch('/public-forms/:id', async (req: Request, res: Response) => {
+    try {
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (typeof req.body?.title === 'string') updates.title = req.body.title.trim().slice(0, 120);
+      if (typeof req.body?.description === 'string') updates.description = req.body.description.trim().slice(0, 500) || null;
+      if (typeof req.body?.successMessage === 'string') updates.success_message = req.body.successMessage.trim().slice(0, 300) || null;
+      if (typeof req.body?.isActive === 'boolean') updates.is_active = req.body.isActive;
+      if (Array.isArray(req.body?.schema)) updates.schema = sanitizePublicFields(req.body.schema);
+      const { error } = await supabaseAdmin.from('public_forms').update(updates).eq('id', req.params.id);
+      if (error) return res.status(500).json({ error: 'public_form_update_failed', detail: error.message });
+      await audit(supabaseAdmin, { ...actorFromRequest(req), action: 'supreme.public_form.update', severity: 'info', metadata: { id: req.params.id } }).catch(() => {});
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'public_form_update_failed' });
+    }
+  });
+
+  router.delete('/public-forms/:id', async (req: Request, res: Response) => {
+    try {
+      const { error } = await supabaseAdmin.from('public_forms').delete().eq('id', req.params.id);
+      if (error) return res.status(500).json({ error: 'public_form_delete_failed', detail: error.message });
+      await audit(supabaseAdmin, { ...actorFromRequest(req), action: 'supreme.public_form.delete', severity: 'warning', metadata: { id: req.params.id } }).catch(() => {});
+      return res.status(204).end();
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'public_form_delete_failed' });
+    }
+  });
+
+  router.get('/public-forms/:id/submissions', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('form_submissions')
+        .select('id, data, contact_id, created_at')
+        .eq('form_id', req.params.id)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) return res.status(500).json({ error: 'submissions_load_failed', detail: error.message });
+      return res.json({ submissions: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'submissions_load_failed' });
     }
   });
 

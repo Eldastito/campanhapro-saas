@@ -24,6 +24,7 @@ import {
   createShortLinksPublicRouter,
 } from './src/server/modules/shortLinks/shortLinksRouter';
 import { createSupremeAdminRouter } from './src/server/modules/supremeAdmin/supremeAdminRouter';
+import { createPublicFormsRouter } from './src/server/modules/publicForms/publicFormsRouter';
 import { requireSupremeAdmin } from './src/server/middleware/requireSupremeAdmin';
 import { setWebhook, isEvolutionConfigured } from './src/server/modules/integrations/evolutionApiClient';
 import { createRagRouter } from './src/server/modules/rag/ragRouter';
@@ -252,6 +253,8 @@ async function startServer() {
     // same: unauthenticated, hot path, must respond fast.
     app.use('/api/v1/short-links', requireAuth, mutationLimiter, createShortLinksAdminRouter(supabaseAdmin));
     app.use('/l', webhookLimiter, createShortLinksPublicRouter(supabaseAdmin));
+    // Public lead-capture forms (F5b) — sem auth, mediado por service_role.
+    app.use('/api/public/forms', webhookLimiter, createPublicFormsRouter(supabaseAdmin));
     // Supreme Admin (SaaS operator) — every route gated by requireSupremeAdmin.
     app.use('/api/v1/supreme', requireAuth, mutationLimiter, requireSupremeAdmin(), createSupremeAdminRouter(supabaseAdmin));
 

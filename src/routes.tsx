@@ -12,6 +12,7 @@ import PublicChatPage from './pages/PublicChatPage';
 import PublicColinhaPage from './pages/PublicColinhaPage';
 import PublicCapturePage from './pages/PublicCapturePage';
 import PublicTeamRegistrationPage from './pages/PublicTeamRegistrationPage';
+import PublicFormPage from './pages/PublicFormPage';
 import UseCasesPage from './pages/UseCasesPage';
 
 /**
@@ -56,6 +57,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/colinha" element={<PublicColinhaPage uid={new URLSearchParams(window.location.search).get('colinha') || ''} onBack={() => window.history.back()} />} />
                 <Route path="/cadastro" element={<PublicCapturePage />} />
                 <Route path="/cadastro-equipe/:campaignId" element={<PublicTeamRegistrationPage />} />
+                <Route path="/f/:slug" element={<PublicFormPage />} />
                 <Route path="/casos-de-uso" element={<UseCasesPage />} />
                 <Route path="/demonstracao" element={<UseCasesPage />} />
 
