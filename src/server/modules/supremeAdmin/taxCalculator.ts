@@ -55,6 +55,11 @@ export interface TaxInput {
   receitaMes: number;
   /** Folha de pagamento dos últimos 12 meses (R$) — para o Fator R. */
   folha12: number;
+  /**
+   * Força o anexo em vez de decidir pelo Fator R. 'auto' (padrão) usa o
+   * Fator R; 'III'/'V' sobrepõe (quando o contador indicar outro enquadramento).
+   */
+  anexoOverride?: 'auto' | 'III' | 'V';
 }
 
 export interface TaxResult {
@@ -88,7 +93,9 @@ export function calcSimplesNacional(input: TaxInput): TaxResult {
   const folha12 = Math.max(0, input.folha12);
 
   const fatorR = rbt12 > 0 ? folha12 / rbt12 : 0;
-  const anexo: Anexo = fatorR >= FATOR_R_LIMIAR ? 'III' : 'V';
+  // Anexo: override manual (config do contador) tem prioridade sobre o Fator R.
+  const override = input.anexoOverride && input.anexoOverride !== 'auto' ? input.anexoOverride : null;
+  const anexo: Anexo = override ?? (fatorR >= FATOR_R_LIMIAR ? 'III' : 'V');
   const tabela = anexo === 'III' ? ANEXO_III : ANEXO_V;
 
   // RBT12 = 0 (sem histórico): usa a 1ª faixa pela própria receita do mês anualizada
@@ -103,11 +110,14 @@ export function calcSimplesNacional(input: TaxInput): TaxResult {
   const dasMes = receitaMes * aliquotaEfetiva;
   const acimaDoTeto = baseRbt > TETO_SIMPLES;
 
+  const fatorTxt = `Fator R ${(fatorR * 100).toFixed(1)}%`;
   const observacao = acimaDoTeto
     ? 'RBT12 acima de R$ 4,8 mi — fora do Simples Nacional. Migrar para Lucro Presumido/Real.'
-    : anexo === 'III'
-      ? `Anexo III (Fator R ${(fatorR * 100).toFixed(1)}% ≥ 28%). DAS unificada já inclui o ISS municipal (RJ).`
-      : `Anexo V (Fator R ${(fatorR * 100).toFixed(1)}% < 28%). Aumentar a folha pode reduzir imposto (migra p/ Anexo III).`;
+    : override
+      ? `Anexo ${anexo} definido manualmente (config fiscal). ${fatorTxt} calculado. DAS unificada já inclui o ISS municipal (RJ).`
+      : anexo === 'III'
+        ? `Anexo III (${fatorTxt} ≥ 28%). DAS unificada já inclui o ISS municipal (RJ).`
+        : `Anexo V (${fatorTxt} < 28%). Aumentar a folha pode reduzir imposto (migra p/ Anexo III).`;
 
   return {
     rbt12: baseRbt,

@@ -101,6 +101,21 @@ function parsePlan(raw: unknown): Plan | null {
 export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
 
+  // Lê a config fiscal (singleton). Fallback seguro se a linha não existir.
+  async function loadTaxSettings() {
+    const { data } = await supabaseAdmin
+      .from('tax_settings')
+      .select('regime, anexo_override, cnae, usdBrlRate')
+      .eq('id', 'global')
+      .maybeSingle();
+    return {
+      regime: data?.regime ?? 'simples',
+      anexoOverride: (data?.anexo_override ?? 'auto') as 'auto' | 'III' | 'V',
+      cnae: data?.cnae ?? null,
+      usdBrlRate: Number(data?.usdBrlRate ?? 5.40) || 5.40,
+    };
+  }
+
   // ── GET /metrics ────────────────────────────────────────────────────
   // One round-trip dashboard: campaigns, users (total/active/blocked),
   // users-by-type, users-by-campaign, DB size + top tables, user &
@@ -153,7 +168,8 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   // distribution, overdue (past_due) campaigns, confirmed revenue, AI cost.
   router.get('/financial', async (_req: Request, res: Response) => {
     try {
-      const { data, error } = await supabaseAdmin.rpc('supreme_financial_metrics');
+      const cfg = await loadTaxSettings();
+      const { data, error } = await supabaseAdmin.rpc('supreme_financial_metrics', { p_usd_brl: cfg.usdBrlRate });
       if (error) return res.status(500).json({ error: 'financial_failed', detail: error.message });
       return res.json({ financial: data });
     } catch (err: any) {
@@ -225,12 +241,46 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ── GET/PUT /tax-config ─────────────────────────────────────────────
+  // Configuração fiscal manual (regime, anexo override, CNAE, taxa USD).
+  router.get('/tax-config', async (_req: Request, res: Response) => {
+    try {
+      const cfg = await loadTaxSettings();
+      return res.json({ config: cfg });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'tax_config_failed' });
+    }
+  });
+
+  router.put('/tax-config', async (req: Request, res: Response) => {
+    try {
+      const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+      if (['simples', 'presumido'].includes(req.body?.regime)) updates.regime = req.body.regime;
+      if (['auto', 'III', 'V'].includes(req.body?.anexoOverride)) updates.anexo_override = req.body.anexoOverride;
+      if (typeof req.body?.cnae === 'string') updates.cnae = req.body.cnae.trim() || null;
+      if (req.body?.usdBrlRate !== undefined) {
+        const r = Number(req.body.usdBrlRate);
+        if (!Number.isFinite(r) || r <= 0) return res.status(400).json({ error: 'invalid_rate' });
+        updates.usdBrlRate = r;
+      }
+      const { error } = await supabaseAdmin.from('tax_settings').update(updates).eq('id', 'global');
+      if (error) return res.status(500).json({ error: 'tax_config_update_failed', detail: error.message });
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.tax_config.update', severity: 'info', metadata: updates,
+      }).catch(() => {});
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'tax_config_update_failed' });
+    }
+  });
+
   // ── GET /taxes ──────────────────────────────────────────────────────
   // Estima a DAS do Simples Nacional (SaaS, sede RJ). RBT12 = MRR×12,
   // receita do mês = MRR, folha (Fator R) = custos de salários/pessoal ×12.
-  router.get('/taxes', async (req: Request, res: Response) => {
+  router.get('/taxes', async (_req: Request, res: Response) => {
     try {
-      const usdBrl = Number(req.query.usd_brl ?? 5.40) || 5.40;
+      const cfg = await loadTaxSettings();
+      const usdBrl = cfg.usdBrlRate;
 
       // MRR (assinaturas ativas pagas) em reais
       const { data: subs } = await supabaseAdmin
@@ -259,9 +309,10 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         rbt12: mrrReais * 12,
         receitaMes: mrrReais,
         folha12: folhaMensalReais * 12,
+        anexoOverride: cfg.anexoOverride,
       });
 
-      return res.json({ taxes: result });
+      return res.json({ taxes: { ...result, regime: cfg.regime, cnae: cfg.cnae, anexoOverride: cfg.anexoOverride } });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'taxes_failed' });
     }

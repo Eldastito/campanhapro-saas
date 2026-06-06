@@ -108,6 +108,8 @@ const SupremeAdminPage: React.FC = () => {
     const [runningLifecycle, setRunningLifecycle] = useState(false);
     const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amount: '', currency: 'BRL' });
     const [taxes, setTaxes] = useState<any | null>(null);
+    const [taxConfig, setTaxConfig] = useState<any>({ regime: 'simples', anexoOverride: 'auto', cnae: '', usdBrlRate: 5.40 });
+    const [savingTaxConfig, setSavingTaxConfig] = useState(false);
     const [nf, setNf] = useState<any | null>(null);
     const [newNf, setNewNf] = useState({ number: '', amount: '', customerName: '', description: '' });
 
@@ -205,10 +207,17 @@ const SupremeAdminPage: React.FC = () => {
                 console.warn('[Supreme] financial fetch failed:', fErr);
             }
 
-            // 7. Impostos (Simples Nacional) — best-effort
+            // 7. Impostos (Simples Nacional) + config fiscal — best-effort
             try {
                 const t = await supremeFetch('/taxes');
                 setTaxes(t?.taxes ?? null);
+                const cfg = await supremeFetch('/tax-config');
+                if (cfg?.config) setTaxConfig({
+                    regime: cfg.config.regime ?? 'simples',
+                    anexoOverride: cfg.config.anexoOverride ?? 'auto',
+                    cnae: cfg.config.cnae ?? '',
+                    usdBrlRate: cfg.config.usdBrlRate ?? 5.40,
+                });
             } catch (tErr) {
                 console.warn('[Supreme] taxes fetch failed:', tErr);
             }
@@ -411,6 +420,27 @@ const SupremeAdminPage: React.FC = () => {
         if (activeTab === 'audit' && auditLogs.length === 0) fetchAudit();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab]);
+
+    const handleSaveTaxConfig = async () => {
+        setSavingTaxConfig(true);
+        try {
+            await supremeFetch('/tax-config', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    regime: taxConfig.regime,
+                    anexoOverride: taxConfig.anexoOverride,
+                    cnae: taxConfig.cnae,
+                    usdBrlRate: parseFloat(String(taxConfig.usdBrlRate).replace(',', '.')) || 5.40,
+                }),
+            });
+            await fetchAllData();
+            alert('Configuração fiscal salva. Impostos e custos recalculados.');
+        } catch (e: any) {
+            alert(`Erro ao salvar config: ${e.message}`);
+        } finally {
+            setSavingTaxConfig(false);
+        }
+    };
 
     const handleAddNf = async () => {
         const val = parseFloat(String(newNf.amount).replace(',', '.'));
@@ -1228,10 +1258,44 @@ const SupremeAdminPage: React.FC = () => {
                                         <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-300/90">
                                             💡 {taxes.observacao}
                                         </div>
-                                        <p className="text-[10px] text-slate-600 mt-2">
+
+                                        {/* Configuração fiscal manual */}
+                                        <div className="mt-4 pt-4 border-t border-white/5">
+                                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Configuração fiscal (ajuste conforme seu contador)</p>
+                                            <div className="flex items-end gap-3 flex-wrap">
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1">Regime</label>
+                                                    <select value={taxConfig.regime} onChange={(e) => setTaxConfig({...taxConfig, regime: e.target.value})} className="bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-slate-200">
+                                                        <option value="simples">Simples Nacional</option>
+                                                        <option value="presumido">Lucro Presumido</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1">Anexo</label>
+                                                    <select value={taxConfig.anexoOverride} onChange={(e) => setTaxConfig({...taxConfig, anexoOverride: e.target.value})} className="bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-slate-200">
+                                                        <option value="auto">Automático (Fator R)</option>
+                                                        <option value="III">Forçar Anexo III</option>
+                                                        <option value="V">Forçar Anexo V</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1">CNAE</label>
+                                                    <input value={taxConfig.cnae} onChange={(e) => setTaxConfig({...taxConfig, cnae: e.target.value})} placeholder="6203-1/00" className="w-32 bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-white" />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-500 mb-1">US$ → R$</label>
+                                                    <input value={taxConfig.usdBrlRate} onChange={(e) => setTaxConfig({...taxConfig, usdBrlRate: e.target.value})} type="number" step="0.01" className="w-24 bg-slate-800 border border-slate-600 rounded px-2 py-2 text-sm text-right text-white" />
+                                                </div>
+                                                <Button onClick={handleSaveTaxConfig} disabled={savingTaxConfig} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-1">
+                                                    {savingTaxConfig ? 'Salvando…' : 'Salvar config'}
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        <p className="text-[10px] text-slate-600 mt-3">
                                             RBT12 estimado = MRR × 12. Folha (Fator R) = custos de salários/pessoal × 12.
                                             A DAS é guia única e já inclui o ISS municipal (RJ) — SaaS não recolhe ICMS.
-                                            Cadastre salários em Custos pra otimizar o Fator R.
+                                            A taxa US$→R$ definida aqui vale também pros custos e o lucro.
                                         </p>
                                     </div>
                                 ) : (
