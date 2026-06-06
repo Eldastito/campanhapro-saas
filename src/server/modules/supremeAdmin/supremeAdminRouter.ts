@@ -323,6 +323,9 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
           campaignId,
           userId: (req as any).user?.id ?? null,
           systemInstruction: CONSULTANT_SYSTEM,
+          // Análise estratégica = entrega em primeiro lugar: usa o provider mais
+          // capaz disponível (entre os que têm API key configurada).
+          complexity: 'premium',
         });
       } catch (aiErr: any) {
         if (aiErr instanceof BudgetExceededError) {
@@ -368,6 +371,21 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     } catch (err: any) {
       console.error('[supreme] analyze error:', err);
       return res.status(500).json({ error: err.message ?? 'analyze_failed' });
+    }
+  });
+
+  // ── GET /campaigns/:id/snapshot ─────────────────────────────────────
+  // Per-campaign analytics snapshot (no AI). Powers the dashboard's
+  // per-campaign filter — same data the consultant analyzes, but cheap.
+  router.get('/campaigns/:id/snapshot', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin.rpc('supreme_campaign_analytics', {
+        p_campaign_id: req.params.id,
+      });
+      if (error) return res.status(500).json({ error: 'snapshot_failed', detail: error.message });
+      return res.json({ snapshot: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'snapshot_failed' });
     }
   });
 

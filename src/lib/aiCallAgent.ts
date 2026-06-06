@@ -41,6 +41,17 @@ export interface CallAgentOpts {
     /** Override pra pular providers (debug). */
     forceProvider?: Provider;
     /**
+     * Roteamento cost-aware. Define como a chain de providers é ordenada:
+     *   - 'cheap'    → tenta o provider MAIS BARATO capaz primeiro (tarefas
+     *                  simples: classificação, extração, respostas curtas)
+     *   - 'premium'  → tenta o provider MAIS CAPAZ primeiro (tarefas complexas:
+     *                  raciocínio multi-step, análise estratégica)
+     *   - 'balanced' → ordem curada padrão (default)
+     * Em todos os casos, providers SEM API key configurada são pulados
+     * automaticamente (evita falhas em cascata quando só 1 key existe).
+     */
+    complexity?: 'cheap' | 'balanced' | 'premium';
+    /**
      * Quando true E o provider for Anthropic, anexa o tool nativo `web_search_20250305`
      * (max 5 buscas por chamada, ~$0.05 USD). Útil pro Manager fazer monitoramento
      * competitivo e defesa de imagem em tempo real.
@@ -89,7 +100,9 @@ const MAX_RETRIES_PER_PROVIDER = 3;
 const DEFAULT_MODELS: Record<Provider, string> = {
     openai: 'gpt-4o-mini',
     anthropic: 'claude-haiku-4-5',
-    gemini: 'gemini-1.5-flash',
+    // gemini-1.5-flash foi descontinuado pelo Google (404 em chaves novas).
+    // gemini-2.0-flash é o substituto barato e estável.
+    gemini: 'gemini-2.0-flash',
 };
 
 /** Tabela de preços (USD por 1M tokens). Atualizar quando mudar. */
@@ -107,6 +120,8 @@ const PRICING: Record<string, { in: number; out: number }> = {
     // Gemini
     'gemini-1.5-flash':           { in: 0.075, out: 0.30 },
     'gemini-1.5-pro':             { in: 1.25, out: 5.00 },
+    'gemini-2.0-flash':           { in: 0.10, out: 0.40 },
+    'gemini-2.5-flash':           { in: 0.30, out: 2.50 },
 };
 
 /** Custo do web_search nativo da Anthropic — US$ 10 por 1.000 buscas = 1 cent USD por busca. */
@@ -117,6 +132,55 @@ const calcCostCents = (model: string, tokensIn: number, tokensOut: number): numb
     if (!p) return 0;
     const usd = (tokensIn / 1_000_000) * p.in + (tokensOut / 1_000_000) * p.out;
     return Math.ceil(usd * 100);
+};
+
+// ---------------------------------------------------------------------------
+// Cost-aware provider routing
+// ---------------------------------------------------------------------------
+
+/** Retorna a API key configurada para o provider, ou undefined se ausente. */
+const keyForProvider = (p: Provider): string | undefined => {
+    if (p === 'openai') return process.env.OPENAI_API_KEY;
+    if (p === 'anthropic') return process.env.ANTHROPIC_API_KEY;
+    return process.env.GEMINI_API_KEY;
+};
+
+/** Modelo que será efetivamente usado por um provider, dado o config do agente. */
+const modelForProvider = (config: AgentConfig, p: Provider): string =>
+    config.model?.[p] || DEFAULT_MODELS[p];
+
+/**
+ * Custo efetivo (USD por 1M tokens) de um modelo, assumindo split ~70% input
+ * / 30% output. Modelo sem preço cadastrado é tratado como caro (vai pro fim
+ * da fila quando o foco é economia).
+ */
+const effectiveCost = (model: string): number => {
+    const p = PRICING[model];
+    if (!p) return 999;
+    return p.in * 0.7 + p.out * 0.3;
+};
+
+/**
+ * Decide a ordem em que os providers serão tentados:
+ *   - forceProvider → só ele
+ *   - filtra para providers COM api key (pula os sem key)
+ *   - 'cheap'   → ordena por custo ascendente (mais barato primeiro)
+ *   - 'premium' → ordena por custo descendente (mais caro/capaz primeiro)
+ *   - 'balanced'→ mantém a ordem curada PROVIDER_CHAIN
+ */
+const orderedProviders = (config: AgentConfig, opts: CallAgentOpts): Provider[] => {
+    if (opts.forceProvider) return [opts.forceProvider];
+    const withKeys = PROVIDER_CHAIN.filter((p) => !!keyForProvider(p));
+    // Se nenhuma key foi detectada (ex.: ambiente sem env no momento da checagem),
+    // cai pra chain completa pra não travar — o erro real aparece na execução.
+    const base = withKeys.length > 0 ? withKeys : [...PROVIDER_CHAIN];
+    const tier = opts.complexity ?? 'balanced';
+    if (tier === 'balanced') return base;
+    return [...base].sort((a, b) => {
+        const ca = effectiveCost(modelForProvider(config, a));
+        const cb = effectiveCost(modelForProvider(config, b));
+        return tier === 'cheap' ? ca - cb : cb - ca;
+    });
 };
 
 // ---------------------------------------------------------------------------
@@ -374,8 +438,9 @@ export async function callAgent(
         }
     }
 
-    // 2. Tenta cada provider em ordem; dentro de cada, retry com backoff.
-    const providers = opts.forceProvider ? [opts.forceProvider] : PROVIDER_CHAIN;
+    // 2. Tenta cada provider em ordem cost-aware (pula providers sem key);
+    //    dentro de cada, retry com backoff.
+    const providers = orderedProviders(config, opts);
     let lastError: any = null;
 
     for (const provider of providers) {

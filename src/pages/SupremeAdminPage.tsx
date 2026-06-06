@@ -96,6 +96,11 @@ const SupremeAdminPage: React.FC = () => {
     // Platform metrics (F1) — real aggregates from supreme_platform_metrics()
     const [metrics, setMetrics] = useState<any | null>(null);
 
+    // Dashboard per-campaign filter (F1)
+    const [dashCampaign, setDashCampaign] = useState<string>('all');
+    const [campaignSnapshot, setCampaignSnapshot] = useState<any | null>(null);
+    const [loadingSnapshot, setLoadingSnapshot] = useState(false);
+
     // AI Consultant (F6)
     const [analyzingId, setAnalyzingId] = useState<string | null>(null);
     const [analysis, setAnalysis] = useState<any | null>(null);
@@ -313,6 +318,22 @@ const SupremeAdminPage: React.FC = () => {
         }
     };
 
+    // When a campaign is picked in the dashboard filter, load its snapshot.
+    const handleDashCampaignChange = async (campaignId: string) => {
+        setDashCampaign(campaignId);
+        if (campaignId === 'all') { setCampaignSnapshot(null); return; }
+        setLoadingSnapshot(true);
+        setCampaignSnapshot(null);
+        try {
+            const r = await supremeFetch(`/campaigns/${campaignId}/snapshot`);
+            setCampaignSnapshot(r?.snapshot ?? null);
+        } catch (e) {
+            console.warn('[Supreme] snapshot failed', e);
+        } finally {
+            setLoadingSnapshot(false);
+        }
+    };
+
     const handleAnalyzeCampaign = async (campaignId: string, campaignName: string) => {
         if (!campaignId) return;
         setAnalyzingId(campaignId);
@@ -442,6 +463,87 @@ const SupremeAdminPage: React.FC = () => {
                             exit={{ opacity: 0, y: -10 }}
                             className="space-y-8"
                         >
+                            {/* Filtro por campanha */}
+                            <div className="flex items-center gap-3">
+                                <Filter className="w-4 h-4 text-slate-500" />
+                                <select
+                                    value={dashCampaign}
+                                    onChange={(e) => handleDashCampaignChange(e.target.value)}
+                                    className="bg-slate-900 border border-white/10 rounded-lg px-4 py-2 text-sm outline-none text-slate-200"
+                                >
+                                    <option value="all">🌐 Toda a plataforma (visão global)</option>
+                                    {campaigns.map((c) => (
+                                        <option key={c.campaignId} value={c.campaignId || ''}>
+                                            {c.name} {c.campaignId ? `(${c.campaignId.substring(0, 8)})` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                {loadingSnapshot && <span className="text-xs text-slate-500">carregando…</span>}
+                            </div>
+
+                            {/* ===== VISÃO POR CAMPANHA ===== */}
+                            {dashCampaign !== 'all' && campaignSnapshot && (
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                                        {[
+                                            { label: 'Contatos (CRM)', val: campaignSnapshot.contacts?.total ?? 0, icon: Users, color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
+                                            { label: 'Visitas', val: campaignSnapshot.visits?.total ?? 0, icon: Activity, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                                            { label: 'Reportes Rua', val: campaignSnapshot.streetReports?.total ?? 0, icon: Globe, color: 'text-rose-400', bg: 'bg-rose-500/10' },
+                                            { label: 'Tokens IA', val: (campaignSnapshot.ai?.tokens ?? 0).toLocaleString('pt-BR'), icon: Cpu, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                                            { label: 'Custo IA', val: `$${(campaignSnapshot.ai?.costUsd ?? 0).toFixed(2)}`, icon: CreditCard, color: 'text-green-400', bg: 'bg-green-500/10' },
+                                            { label: 'WhatsApp Msgs', val: campaignSnapshot.whatsapp?.messages ?? 0, icon: Mail, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+                                        ].map((stat, i) => (
+                                            <Card key={i} className="bg-slate-900/50 border-white/5 p-4 relative overflow-hidden group">
+                                                <div className={`absolute top-0 right-0 p-3 ${stat.bg} rounded-bl-3xl opacity-20`}>
+                                                    <stat.icon className={`w-6 h-6 ${stat.color}`} />
+                                                </div>
+                                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
+                                                <p className="text-2xl font-black text-white mt-2 font-mono tracking-tighter">{stat.val}</p>
+                                            </Card>
+                                        ))}
+                                    </div>
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                        <Card className="bg-slate-900 border-white/5 p-4">
+                                            <p className="text-xs font-black uppercase tracking-widest text-indigo-400 mb-3">Funil do Eleitor</p>
+                                            {Object.keys(campaignSnapshot.voterJourney ?? {}).length ? (
+                                                <div className="space-y-1.5">
+                                                    {Object.entries(campaignSnapshot.voterJourney).map(([stage, n]: any) => (
+                                                        <div key={stage} className="flex justify-between text-sm"><span className="text-slate-300">{stage}</span><span className="font-mono text-white">{n}</span></div>
+                                                    ))}
+                                                </div>
+                                            ) : <p className="text-slate-500 text-sm">Sem dados de jornada.</p>}
+                                        </Card>
+                                        <Card className="bg-slate-900 border-white/5 p-4">
+                                            <p className="text-xs font-black uppercase tracking-widest text-emerald-400 mb-3">Equipe por Perfil</p>
+                                            {Object.keys(campaignSnapshot.team ?? {}).length ? (
+                                                <div className="space-y-1.5">
+                                                    {Object.entries(campaignSnapshot.team).map(([role, n]: any) => (
+                                                        <div key={role} className="flex justify-between text-sm"><span className="text-slate-300">{role}</span><span className="font-mono text-white">{n}</span></div>
+                                                    ))}
+                                                </div>
+                                            ) : <p className="text-slate-500 text-sm">Sem equipe.</p>}
+                                        </Card>
+                                        <Card className="bg-slate-900 border-white/5 p-4">
+                                            <p className="text-xs font-black uppercase tracking-widest text-amber-400 mb-3">Clima nas Ruas</p>
+                                            {Object.keys(campaignSnapshot.streetReports?.byClima ?? {}).length ? (
+                                                <div className="space-y-1.5">
+                                                    {Object.entries(campaignSnapshot.streetReports.byClima).map(([clima, n]: any) => (
+                                                        <div key={clima} className="flex justify-between text-sm"><span className="text-slate-300">{clima}</span><span className="font-mono text-white">{n}</span></div>
+                                                    ))}
+                                                </div>
+                                            ) : <p className="text-slate-500 text-sm">Sem reportes.</p>}
+                                        </Card>
+                                    </div>
+                                    <div className="flex justify-end">
+                                        <Button onClick={() => handleAnalyzeCampaign(dashCampaign, campaigns.find(c => c.campaignId === dashCampaign)?.name || '')} className="bg-indigo-600 hover:bg-indigo-500 flex items-center gap-2">
+                                            <Brain className="w-4 h-4" /> Analisar esta campanha com IA
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ===== VISÃO GLOBAL ===== */}
+                            {dashCampaign === 'all' && <>
                             {/* Stats Grid — dados reais de supreme_platform_metrics() */}
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                                 {[
@@ -450,6 +552,7 @@ const SupremeAdminPage: React.FC = () => {
                                     { label: 'Ativos (30d)', val: metrics?.users?.active30d ?? '—', icon: Activity, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
                                     { label: 'Bloqueados', val: metrics?.users?.blocked ?? globalUsers.filter(u => u.role === 'blocked').length, icon: Ban, color: 'text-rose-400', bg: 'bg-rose-500/10' },
                                     { label: 'Tokens IA', val: (metrics?.tokens?.totalTokens ?? 0).toLocaleString('pt-BR'), icon: Cpu, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                                    { label: 'Custo IA (USD)', val: `$${(metrics?.tokens?.totalCostUsd ?? 0).toFixed(2)}`, icon: CreditCard, color: 'text-green-400', bg: 'bg-green-500/10' },
                                     { label: 'Banco de Dados', val: metrics?.database?.sizePretty ?? '—', icon: Layers, color: 'text-purple-400', bg: 'bg-purple-500/10' },
                                 ].map((stat, i) => (
                                     <Card key={i} className="bg-slate-900/50 border-white/5 p-4 relative overflow-hidden group">
@@ -563,6 +666,7 @@ const SupremeAdminPage: React.FC = () => {
                                     </div>
                                 </Card>
                             </div>
+                            </>}
                         </motion.div>
                     )}
 
