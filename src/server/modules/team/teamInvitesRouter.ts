@@ -184,6 +184,79 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
     res.json({ ok: true });
   });
 
+  // POST /members — cria a IDENTIDADE DE LOGIN de um membro (Supabase Auth + users).
+  // O TeamManager grava os dados operacionais em team_members; sem esta conta o
+  // membro não consegue logar. Admin/Coordenador apenas. Usa service-role.
+  router.post('/members', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    const userType = (req as any).user?.userType;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Admin' && userType !== 'Coordenador') {
+      return res.status(403).json({ error: 'admin_required' });
+    }
+
+    const { name, email, password, role } = req.body as {
+      name?: string; email?: string; password?: string; role?: UserRole;
+    };
+    const nm = (name ?? '').trim();
+    const normalizedEmail = (email ?? '').trim().toLowerCase();
+    if (!nm) return res.status(400).json({ error: 'name_required' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return res.status(400).json({ error: 'invalid_email' });
+    if (!password || password.length < 6) return res.status(400).json({ error: 'password_min_6' });
+    if (!INVITABLE_ROLES.includes(role as UserRole)) {
+      return res.status(400).json({ error: 'role_not_invitable', allowed: INVITABLE_ROLES });
+    }
+
+    // Já existe usuário com esse e-mail?
+    const { data: existing } = await supabase
+      .from('users').select('id, "campaignId"').eq('email', normalizedEmail).maybeSingle();
+    if (existing?.campaignId === campaignId) return res.status(409).json({ error: 'already_a_member' });
+    if (existing?.campaignId) return res.status(409).json({ error: 'email_in_another_campaign' });
+
+    // 1. Identidade no Supabase Auth (e-mail já confirmado → login direto).
+    const { data: created, error: authErr } = await supabase.auth.admin.createUser({
+      email: normalizedEmail,
+      password,
+      email_confirm: true,
+      user_metadata: { name: nm },
+    });
+    if (authErr || !created?.user) {
+      const dup = String(authErr?.message ?? '').toLowerCase().includes('already') ||
+                  String(authErr?.message ?? '').toLowerCase().includes('registered');
+      return res.status(dup ? 409 : 400).json({
+        error: dup ? 'email_already_registered' : 'auth_create_failed',
+        detail: authErr?.message,
+      });
+    }
+
+    // 2. Linha de perfil (login → papel + campanha). Rollback do Auth se falhar.
+    const { error: profErr } = await supabase.from('users').insert({
+      id: created.user.id,
+      name: nm,
+      email: normalizedEmail,
+      type: role,
+      plan: 'Básico',
+      role: 'active',
+      campaignId,
+      isSupremeAdmin: false,
+    });
+    if (profErr) {
+      await supabase.auth.admin.deleteUser(created.user.id).catch(() => {});
+      return res.status(500).json({ error: 'profile_insert_failed', detail: profErr.message });
+    }
+
+    await audit(supabase, {
+      ...actorFromRequest(req),
+      action: 'team.member.create',
+      resourceType: 'user',
+      resourceId: created.user.id,
+      severity: 'info',
+      metadata: { email: normalizedEmail, role },
+    }).catch(() => {});
+
+    return res.status(201).json({ ok: true, userId: created.user.id });
+  });
+
   return router;
 }
 

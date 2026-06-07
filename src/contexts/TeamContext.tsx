@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { TeamMember, Location } from '../types/teams';
 import { RJ_MUNICIPALITIES } from '../data/rj-locations';
 import { handleSupabaseError, sanitizeData, OperationType } from '../utils/supabaseUtils';
+import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from './AuthContext';
 
 interface TeamContextType {
@@ -82,6 +83,34 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
         }
         const assignedLeaderId = user.type === 'Líder' ? user.uid : (member.assignedLeaderId || null);
         const { password, ...memberWithoutPassword } = member as any;
+
+        // Cria a IDENTIDADE DE LOGIN (Supabase Auth + users) via backend, senão o
+        // membro fica só na tabela team_members e NÃO consegue entrar na plataforma.
+        if (memberWithoutPassword.email && password) {
+            const resp = await authedFetch('/api/v1/team/members', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: memberWithoutPassword.name,
+                    email: memberWithoutPassword.email,
+                    password,
+                    role: memberWithoutPassword.role,
+                }),
+            });
+            const json = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                const MAP: Record<string, string> = {
+                    email_already_registered: 'Este e-mail já possui conta. Use outro e-mail ou convide pelo fluxo de convite.',
+                    already_a_member: 'Este e-mail já é membro desta campanha.',
+                    email_in_another_campaign: 'Este e-mail já pertence a outra campanha.',
+                    password_min_6: 'A senha precisa ter no mínimo 6 caracteres.',
+                    invalid_email: 'E-mail inválido.',
+                    admin_required: 'Apenas Admin/Coordenador podem criar membros com acesso.',
+                    role_not_invitable: 'Função não permitida para criação direta.',
+                };
+                throw new Error(MAP[json?.error] || json?.detail || json?.error || 'Falha ao criar o acesso do membro.');
+            }
+        }
+
         const { error } = await supabase.from('team_members').insert(sanitizeData({
             ...memberWithoutPassword,
             campaignId: user.campaignId,
