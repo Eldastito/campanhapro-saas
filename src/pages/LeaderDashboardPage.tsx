@@ -7,7 +7,8 @@
 // - Indicadores de votos planejados vs estimados
 
 import * as React from 'react';
-import { UserPlus, MessageCircle, Loader2, Pencil, KeyRound, Trash2 } from 'lucide-react';
+import { UserPlus, MessageCircle, Loader2, Pencil, KeyRound, Trash2, ListChecks, Plus } from 'lucide-react';
+import { useTeamTasks, TASK_STATUS_LABEL, TeamTask } from '../hooks/useTeamTasks';
 import Header from '../components/Header';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -45,6 +46,7 @@ const STATUS_LABELS: Record<ResourceStatus, string> = {
 const LeaderDashboardPage: React.FC = () => {
     const { user, logout } = useAuth();
     const { teamMembers, addTeamMember, updateTeamMember, resetMemberPassword, removeMemberAccess } = useTeam();
+    const { tasks, createTask, setStatus: setTaskStatus, removeTask } = useTeamTasks();
     const { visits, engagementActions } = useVisits();
     const { headerLogo } = useSettings();
     const [resources, setResources] = React.useState<TeamResource[]>([]);
@@ -117,6 +119,31 @@ const LeaderDashboardPage: React.FC = () => {
             await removeMemberAccess(m);
         } catch (e: any) {
             alert(e?.message || 'Falha ao remover o liderado.');
+        }
+    };
+
+    // ── Tarefas / roteiros ──────────────────────────────────────────────
+    const [newTask, setNewTask] = React.useState({ assignedToUserId: '', title: '', bairro: '', dueDate: '' });
+    const [creatingTask, setCreatingTask] = React.useState(false);
+    const lideratosComLogin = (teamMembers as any[]).filter(m => m.userId);
+
+    const handleCreateTask = async () => {
+        if (!newTask.title.trim()) { alert('Descreva a tarefa.'); return; }
+        const alvo = lideratosComLogin.find(m => m.userId === newTask.assignedToUserId);
+        setCreatingTask(true);
+        try {
+            await createTask({
+                title: newTask.title.trim(),
+                bairro: newTask.bairro.trim() || undefined,
+                dueDate: newTask.dueDate || null,
+                assignedToUserId: newTask.assignedToUserId || null,
+                assignedToName: alvo?.name || null,
+            });
+            setNewTask({ assignedToUserId: '', title: '', bairro: '', dueDate: '' });
+        } catch (e: any) {
+            alert(e?.message || 'Falha ao criar a tarefa.');
+        } finally {
+            setCreatingTask(false);
         }
     };
 
@@ -334,6 +361,53 @@ const LeaderDashboardPage: React.FC = () => {
                                     ))}
                                 </tbody>
                             </table>
+                        </div>
+                    )}
+                </Card>
+
+                {/* Tarefas & roteiros */}
+                <Card className="bg-slate-800 p-4">
+                    <h2 className="text-lg font-bold mb-4 flex items-center gap-2"><ListChecks className="w-5 h-5 text-indigo-400" /> Tarefas & Roteiros da Equipe</h2>
+
+                    {/* Criar tarefa */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-4 bg-slate-900/50 p-3 rounded-lg">
+                        <select value={newTask.assignedToUserId} onChange={(e) => setNewTask({ ...newTask, assignedToUserId: e.target.value })}
+                                className="md:col-span-3 bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-sm">
+                            <option value="">Para a equipe (todos)</option>
+                            {lideratosComLogin.map((m: any) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
+                        </select>
+                        <input value={newTask.title} onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                               placeholder="Tarefa (ex.: visitar quadra 12)" className="md:col-span-4 bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-sm" />
+                        <input value={newTask.bairro} onChange={(e) => setNewTask({ ...newTask, bairro: e.target.value })}
+                               placeholder="Bairro/área" className="md:col-span-2 bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-sm" />
+                        <input type="date" value={newTask.dueDate} onChange={(e) => setNewTask({ ...newTask, dueDate: e.target.value })}
+                               className="md:col-span-2 bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-sm text-slate-300" />
+                        <Button onClick={handleCreateTask} disabled={creatingTask} className="md:col-span-1 flex items-center justify-center">
+                            {creatingTask ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                        </Button>
+                    </div>
+
+                    {tasks.length === 0 ? (
+                        <p className="text-slate-400 text-sm">Nenhuma tarefa criada. Designe roteiros para sua equipe acima.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {tasks.map((t: TeamTask) => (
+                                <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/50 p-3 rounded-lg border border-white/5">
+                                    <div className="min-w-0">
+                                        <p className={`font-semibold ${t.status === 'concluida' ? 'line-through text-slate-500' : ''}`}>{t.title}</p>
+                                        <p className="text-xs text-slate-400">
+                                            {t.assignedToName || 'Equipe'}{t.bairro ? ` · ${t.bairro}` : ''}{t.dueDate ? ` · até ${new Date(t.dueDate + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <select value={t.status} onChange={(e) => setTaskStatus(t.id, e.target.value as TeamTask['status'])}
+                                                className={`text-xs rounded-md py-1 px-2 border bg-slate-700 border-slate-600 ${t.status === 'concluida' ? 'text-emerald-400' : t.status === 'cancelada' ? 'text-rose-400' : t.status === 'em_andamento' ? 'text-indigo-400' : 'text-amber-400'}`}>
+                                            {Object.entries(TASK_STATUS_LABEL).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                                        </select>
+                                        <button onClick={() => removeTask(t.id)} title="Excluir" className="text-rose-400 hover:text-rose-300"><Trash2 className="w-4 h-4" /></button>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </Card>

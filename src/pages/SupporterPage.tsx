@@ -15,12 +15,14 @@ import VisitsTable from '../components/visits/VisitsTable';
 import StreetReportForm from '../components/street/StreetReportForm';
 import ShareLocationButton from '../components/team/ShareLocationButton';
 import { useVisitModal } from '../hooks/useVisitModal';
+import { useTeamTasks, TASK_STATUS_LABEL, TeamTask } from '../hooks/useTeamTasks';
 
 const SupporterPage: React.FC = () => {
     const { user } = useAuth();
     const { visits, addVisit, updateVisit, deleteVisit, addEngagementAction, engagementActions } = useVisits();
     const { headerLogo } = useSettings();
     const { isModalOpen, editingVisit, openAddModal, openEditModal, closeModal, checkVisitLimit } = useVisitModal();
+    const { tasks: myTasks, setStatus: setTaskStatus } = useTeamTasks();
     const [isEngagementModalOpen, setIsEngagementModalOpen] = React.useState(false);
     const [filterInteresse, setFilterInteresse] = React.useState('');
     const [filterEngajamento, setFilterEngajamento] = React.useState('');
@@ -87,6 +89,32 @@ const SupporterPage: React.FC = () => {
                 </Card>
 
                 <ShareLocationButton />
+
+                <Card>
+                    <h3 className="text-lg font-bold text-slate-300 mb-4">Minhas Tarefas ({myTasks.filter(t => t.status !== 'concluida' && t.status !== 'cancelada').length})</h3>
+                    {myTasks.length === 0 ? (
+                        <p className="text-slate-400">Nenhuma tarefa atribuída pelo seu líder.</p>
+                    ) : (
+                        <ul className="space-y-2">
+                            {myTasks.map((t: TeamTask) => (
+                                <li key={t.id} className="flex flex-wrap items-center justify-between gap-3 bg-slate-700/50 p-3 rounded-md">
+                                    <div className="min-w-0">
+                                        <p className={`font-semibold ${t.status === 'concluida' ? 'line-through text-slate-500' : ''}`}>{t.title}</p>
+                                        <p className="text-sm text-slate-400">
+                                            {t.bairro ? `${t.bairro}` : ''}{t.dueDate ? ` · até ${new Date(t.dueDate + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
+                                        </p>
+                                    </div>
+                                    <select value={t.status} onChange={(e) => setTaskStatus(t.id, e.target.value as TeamTask['status'])}
+                                            className="text-sm bg-slate-700 border border-slate-600 rounded-md py-1 px-2">
+                                        <option value="pendente">{TASK_STATUS_LABEL.pendente}</option>
+                                        <option value="em_andamento">{TASK_STATUS_LABEL.em_andamento}</option>
+                                        <option value="concluida">{TASK_STATUS_LABEL.concluida}</option>
+                                    </select>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </Card>
 
                 <StreetReportForm />
 
