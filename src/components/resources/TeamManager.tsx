@@ -167,8 +167,9 @@ const TeamManager: React.FC = () => {
             }
             alert('Membro salvo com sucesso!');
             closeModal();
-        } catch (error) {
-            // Error is handled and alerted by handleSupabaseError inside the context
+        } catch (error: any) {
+            // Mostra o motivo (ex.: e-mail já é membro, senha curta, etc.) em vez de falhar em silêncio.
+            alert(error?.message || 'Não foi possível salvar o membro. Tente novamente.');
         }
     }
 
