@@ -174,12 +174,10 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
 
     const hasFeature = (feature: string) => {
-        if (!config) return true; // Se não tem config, libera tudo (modo dev)
-        if (config.planTier === 'completo') return true;
-        
-        // Se for plano limitado, checa se a feature está na lista permitida
-        const allowedFeatures = PLAN_CONFIGS.limitado.features;
-        return allowedFeatures.includes(feature);
+        if (!config) return true; // Sem config (dev/VIP) → libera
+        if (config.planTier === 'completo') return true; // Total → tudo
+        // Essencial/Estratégico: checa a feature key na lista do plano
+        return (config.features || []).includes(feature);
     };
 
     return (

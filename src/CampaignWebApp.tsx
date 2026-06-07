@@ -56,57 +56,45 @@ const AdminApp: React.FC = () => {
     const tabs = React.useMemo(() => {
         if (!permissions || !userType) return [];
         
-        // 1. Considera as permissões básicas do perfil
+        const isAdmin = userType === 'Admin' || userType === 'Coordenador';
+
+        // 1. Permissões básicas do perfil
         let allowedTabs = permissions[userType] || ['Dashboard'];
-        
-        // 2. Filtra com base nas funcionalidades habilitadas para a campanha (venda/plano)
-        // REGRA: Admins veem tudo o que o perfil permite. Outros perfis são filtrados pelo plano da campanha.
-        if (config?.features && userType !== 'Admin' && userType !== 'Coordenador') {
-            const featureToTabMap: { [key: string]: string[] } = {
-                'ai_agents': ['Agentes IA'],
-                'visits': ['Visitas'],
-                'team': ['Equipes'],
-                'financial': ['Financeiro'],
-                'dashboard': ['Dashboard'],
-                'engagement': ['Engajamento'],
-                'training': ['Treinamento'],
-                'help': ['Ajuda'],
-                'tools': ['Calculadora', 'Ferramentas'],
-                'resources': ['Recursos'],
-                'crm': ['CRM'],
-                'analytics': ['Analytics'],
-                'election_day': ['Dia das Eleições'],
-                'meetings': ['Reuniões'],
-                'content_studio': ['Estúdio']
-            };
 
-            const enabledTabs = ['Permissões', 'Configurações']; 
-            
-            config.features.forEach(feat => {
-                if (featureToTabMap[feat]) {
-                    enabledTabs.push(...featureToTabMap[feat]);
-                } else {
-                    enabledTabs.push(feat);
-                }
-            });
+        // Mapa COMPLETO: feature key (plano) → abas do app
+        const featureToTabMap: { [key: string]: string[] } = {
+            dashboard: ['Dashboard'], crm: ['CRM'], help: ['Ajuda'], visits: ['Visitas'],
+            team: ['Equipes'], engagement: ['Engajamento'], resources: ['Recursos'],
+            goals: ['Objetivos'], routines: ['Rotinas'], ai_agents: ['Agentes IA'],
+            analytics: ['Analytics'], financial: ['Financeiro'], content_studio: ['Estúdio'],
+            meetings: ['Reuniões'], tools: ['Calculadora', 'Ferramentas'], training: ['Treinamento'],
+            whatsapp_omnichannel: ['Caixa de Entrada'], election_day: ['Dia das Eleições'],
+            intelligence: ['Inteligência'], scenarios: ['Cenários'], budget_ceo: ['Plano'],
+            paperclip: ['Agentes (Tarefas)'], compliance: ['Conformidade'],
+        };
+        // Abas de gestão sempre liberadas (qualquer plano) — evita lock-out do admin.
+        const ALWAYS = ['Dashboard', 'Permissões', 'Configurações', 'Ajuda', 'Links Curtos'];
+        // Conjunto completo de abas do admin (plano Total / sem restrição).
+        const FULL_ADMIN = [
+            'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
+            'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
+            'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
+            'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)',
+            'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio', 'Links Curtos',
+        ];
 
-            allowedTabs = allowedTabs.filter(tab => enabledTabs.includes(tab));
+        // Total (planTier 'completo') ou sem config (VIP/dev) → libera tudo.
+        if (!config?.features || config.planTier === 'completo') {
+            if (isAdmin) return FULL_ADMIN;
+            return allowedTabs.length > 0 ? allowedTabs : ['Dashboard'];
         }
-        
-        // Garantia final para Admin
-        if (userType === 'Admin' || userType === 'Coordenador') {
-            // 'Planos' e 'Demonstração' foram movidos para a Landing pública
-            // (rotas /planos e /demonstracao). Não aparecem mais como abas do app.
-            const mandatory = [
-                'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
-                'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
-                'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-                'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)', 'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio', 'Links Curtos'
-            ];
-            mandatory.forEach(tab => {
-                if (!allowedTabs.includes(tab)) allowedTabs.push(tab);
-            });
-        }
+
+        // Essencial / Estratégico ('limitado') → gateia TODOS (inclusive Admin) pelos módulos do plano.
+        const enabledTabs = [...ALWAYS];
+        config.features.forEach(feat => {
+            if (featureToTabMap[feat]) enabledTabs.push(...featureToTabMap[feat]);
+        });
+        allowedTabs = (isAdmin ? FULL_ADMIN : allowedTabs).filter(tab => enabledTabs.includes(tab));
 
         return allowedTabs.length > 0 ? allowedTabs : ['Dashboard'];
     }, [userType, permissions, config]);

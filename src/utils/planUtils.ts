@@ -45,8 +45,37 @@ export const TIER_CONFIG: Record<PlanTier, PlanConfigData> = {
 };
 
 export function getPlanConfig(plan: Plan): PlanConfigData {
-  return TIER_CONFIG[PLAN_TO_TIER[plan]];
+  return {
+    planTier: PLAN_TO_TIER[plan],
+    features: PLAN_FEATURES[plan],
+    limits: TIER_CONFIG[PLAN_TO_TIER[plan]].limits,
+  };
 }
+
+// ============================================================
+// Módulos por plano (3 tiers reais) — alinhado à tabela `plans`.
+// São FEATURE KEYS (não nomes de aba). Cada plano superior inclui os
+// módulos dos inferiores. Total = planTier 'completo' (vê tudo).
+// ============================================================
+const ESSENCIAL_FEATURES = [
+  'dashboard', 'crm', 'help', 'visits', 'team', 'engagement',
+  'resources', 'goals', 'routines', 'ai_agents', 'forms',
+];
+const ESTRATEGICO_FEATURES = [
+  ...ESSENCIAL_FEATURES,
+  'analytics', 'financial', 'content_studio', 'rag', 'meetings',
+  'tools', 'training', 'whatsapp_omnichannel',
+];
+const TOTAL_FEATURES = [
+  ...ESTRATEGICO_FEATURES,
+  'election_day', 'intelligence', 'scenarios', 'budget_ceo', 'paperclip', 'compliance',
+];
+
+export const PLAN_FEATURES: Record<Plan, string[]> = {
+  [Plan.ESSENCIAL]: ESSENCIAL_FEATURES,
+  [Plan.ESTRATEGICO]: ESTRATEGICO_FEATURES,
+  [Plan.TOTAL]: TOTAL_FEATURES,
+};
 
 /**
  * Sincroniza mudança de plano entre users.plan e campaign_configs.
@@ -68,13 +97,20 @@ export async function syncPlanForCampaign(
 
   if (userErr) throw new Error(`Falha ao atualizar users.plan: ${userErr.message}`);
 
-  // 2. Upsert campaign_configs com todos os campos derivados
+  // 2. Upsert campaign_configs com todos os campos derivados.
+  //    planTier 'completo' (Total) libera tudo; 'limitado' gateia por features.
+  //    limits em snake_case pra casar com o schema do banco.
   const { error: cfgErr } = await supabase
     .from('campaign_configs')
     .upsert({
       id: campaignId,
+      planTier: config.planTier,
       features: config.features,
-      limits: config.limits,
+      limits: {
+        ai_calls: config.limits.aiCalls,
+        team_members: config.limits.teamMembers,
+        visits: config.limits.visits,
+      },
       status: 'active',
     }, { onConflict: 'id' });
 
