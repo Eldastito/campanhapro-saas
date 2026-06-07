@@ -58,8 +58,23 @@ export const NATIVE_HIDEABLE: Record<string, NativeHideableField[]> = {
     { key: 'disc', label: 'Perfil Comportamental (DISC)', note: 'bloco inteiro (6 perguntas)' },
     { key: 'observacoes', label: 'Observações de Campo' },
   ],
-  visits: [],
-  contacts: [],
+  visits: [
+    { key: 'hora', label: 'Hora da Visita' },
+    { key: 'tel', label: 'Telefone' },
+    { key: 'nasc', label: 'Data de Nascimento (Resp.)' },
+    { key: 'lider', label: 'Líder de Equipe' },
+    { key: 'petKids', label: 'Tem Crianças? / Tem Pet?', note: 'linha inteira' },
+    { key: 'solicit', label: 'Solicitações / Observações' },
+    { key: 'interesse', label: 'Interesse Principal' },
+    { key: 'nivelEngajamento', label: 'Nível de Engajamento' },
+    { key: 'observacoesQualitativas', label: 'Observações Qualitativas (IA)' },
+    { key: 'conversao', label: 'Conversão de Voto', note: 'bloco inteiro (alimenta a IA)' },
+  ],
+  contacts: [
+    { key: 'neighborhood', label: 'Bairro' },
+    { key: 'zonaSecao', label: 'Zona / Seção eleitoral', note: 'os dois campos' },
+    { key: 'funil', label: 'Funil de Conversão (IA)', note: 'bloco inteiro' },
+  ],
 };
 
 export const PLATFORM_FORMS: PlatformForm[] = [

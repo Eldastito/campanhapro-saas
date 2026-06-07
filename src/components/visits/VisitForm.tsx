@@ -137,16 +137,20 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
 
     const customFields: CustomField[] = config?.customFields?.visits || [];
 
+    // Campos nativos ocultados pelo Supreme Admin para esta campanha (Form Builder).
+    const hiddenV: string[] = ((config?.customFields as any)?._hidden?.visits) || [];
+    const hideV = (k: string) => hiddenV.includes(k);
+
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <Input label="Data da Visita" type="date" name="data" value={formData.data} onChange={handleChange} required />
-                <Input label="Hora" type="time" name="hora" value={formData.hora || ''} onChange={handleChange} />
+                {!hideV('hora') && <Input label="Hora" type="time" name="hora" value={formData.hora || ''} onChange={handleChange} />}
                 <Input label="Responsável (Família)" name="resp" value={formData.resp} onChange={handleChange} required />
             </div>
              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input label="Telefone" type="tel" name="tel" value={formData.tel} onChange={handleChange} />
-                <Input label="Data de Nascimento (Resp.)" type="date" name="nasc" value={formData.nasc} onChange={handleChange} />
+                {!hideV('tel') && <Input label="Telefone" type="tel" name="tel" value={formData.tel} onChange={handleChange} />}
+                {!hideV('nasc') && <Input label="Data de Nascimento (Resp.)" type="date" name="nasc" value={formData.nasc} onChange={handleChange} />}
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -174,6 +178,7 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
                         {supporters.map(name => <option key={name} value={name}>{name}</option>)}
                     </select>
                 </div>
+                {!hideV('lider') && (
                 <div>
                     <label htmlFor="lider" className="block text-sm font-medium text-slate-300 mb-1">Líder de Equipe (Opcional)</label>
                     <select id="lider" name="lider" value={formData.lider} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 focus:ring-1 focus:ring-indigo-500 outline-none">
@@ -181,6 +186,7 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
                         {leaders.map(name => <option key={name} value={name}>{name}</option>)}
                     </select>
                 </div>
+                )}
             </div>
             
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -234,6 +240,7 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
                 </div>
             )}
 
+            {!hideV('petKids') && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
                  <div className="flex items-center gap-2">
                     <label className="text-sm font-medium text-slate-300">Tem Crianças?</label>
@@ -245,13 +252,17 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
                 </div>
                 {formData.pet === 'sim' && <Input label="Qual Pet?" name="tipoPet" value={formData.tipoPet} onChange={handleChange} />}
             </div>
+            )}
+            {!hideV('solicit') && (
              <div>
                 <label htmlFor="solicit" className="block text-sm font-medium text-slate-300 mb-1">Solicitações / Observações</label>
                 <textarea id="solicit" name="solicit" value={formData.solicit} onChange={handleChange} rows={2} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 focus:ring-1 focus:ring-indigo-500 outline-none"></textarea>
             </div>
-            
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input label="Interesse Principal" name="interesse" value={formData.interesse || ''} onChange={handleChange} />
+                {!hideV('interesse') && <Input label="Interesse Principal" name="interesse" value={formData.interesse || ''} onChange={handleChange} />}
+                {!hideV('nivelEngajamento') && (
                 <div>
                     <label htmlFor="nivelEngajamento" className="block text-sm font-medium text-slate-300 mb-1">Nível de Engajamento</label>
                     <select id="nivelEngajamento" name="nivelEngajamento" value={formData.nivelEngajamento || 'baixo'} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 focus:ring-1 focus:ring-indigo-500 outline-none">
@@ -260,13 +271,17 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
                         <option value="alto">Alto</option>
                     </select>
                 </div>
+                )}
             </div>
+            {!hideV('observacoesQualitativas') && (
             <div>
                 <label htmlFor="observacoesQualitativas" className="block text-sm font-medium text-slate-300 mb-1">Observações Qualitativas (para IA)</label>
                 <textarea id="observacoesQualitativas" name="observacoesQualitativas" value={formData.observacoesQualitativas || ''} onChange={handleChange} rows={2} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 focus:ring-1 focus:ring-indigo-500 outline-none"></textarea>
             </div>
+            )}
 
             {/* ===== Conversão de voto (alimenta a IA e o contato) ===== */}
+            {!hideV('conversao') && (
             <div className="p-4 bg-blue-900/10 border border-blue-500/20 rounded-lg space-y-4">
                 <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">Conversão de Voto (alimenta a IA)</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -307,6 +322,7 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
                 </div>
                 <p className="text-[10px] text-slate-500">Esses dados criam/atualizam o contato do eleitor (registro mestre da jornada).</p>
             </div>
+            )}
 
             <div className="bg-slate-700/30 p-4 rounded-lg border border-slate-600 mb-4">
                 <div className="flex items-center justify-between">

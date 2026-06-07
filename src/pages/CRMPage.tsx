@@ -63,6 +63,9 @@ const CRMPage: React.FC = () => {
   const { user } = useAuth();
   const { config } = useProfilePermissions();
   const contactCustomDefs = (config?.customFields?.contacts as any[]) || [];
+  // Campos nativos ocultados pelo Supreme Admin para esta campanha (Form Builder).
+  const hiddenC: string[] = ((config?.customFields as any)?._hidden?.contacts) || [];
+  const hideC = (k: string) => hiddenC.includes(k);
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -709,6 +712,7 @@ const CRMPage: React.FC = () => {
                 </div>
               </div>
               <div className="space-y-4">
+                {!hideC('neighborhood') && (
                 <div>
                   <label className="text-[10px] text-gray-500 font-bold uppercase">Bairro</label>
                   <input
@@ -719,6 +723,8 @@ const CRMPage: React.FC = () => {
                     onChange={(e) => setNewContact({ ...newContact, neighborhood: e.target.value })}
                   />
                 </div>
+                )}
+                {!hideC('zonaSecao') && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] text-gray-500 font-bold uppercase">Zona</label>
@@ -741,8 +747,10 @@ const CRMPage: React.FC = () => {
                     />
                   </div>
                 </div>
+                )}
 
                 {/* ===== Funil / Jornada do eleitor (alimenta a IA) ===== */}
+                {!hideC('funil') && (
                 <div className="pt-3 mt-1 border-t border-white/5">
                   <p className="text-[10px] font-black uppercase text-blue-400 tracking-widest mb-3">Funil de Conversão (para a IA)</p>
                   <div className="grid grid-cols-2 gap-4">
@@ -841,6 +849,7 @@ const CRMPage: React.FC = () => {
                     </label>
                   </div>
                 </div>
+                )}
               </div>
             </div>
             {contactCustomDefs.length > 0 && (
