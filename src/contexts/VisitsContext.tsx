@@ -6,6 +6,73 @@ import { handleSupabaseError, sanitizeData, OperationType } from '../utils/supab
 import { logSubmissionGeo } from '../utils/geoTracking';
 import { useAuth } from './AuthContext';
 
+/**
+ * Cria/atualiza o CONTATO (registro mestre do eleitor) a partir de uma visita,
+ * costurando os dados de funil capturados no porta-a-porta. Identidade pelo
+ * telefone (chave da jornada). Best-effort: nunca deve impedir salvar a visita.
+ * Retorna o id do contato (voterId) ou null.
+ */
+async function upsertVoterFromVisit(
+    campaignId: string,
+    visit: any,
+    funnel: { voteIntention?: string; voteCertainty?: any; objection?: string; isMultiplier?: any; influenceCount?: any; whatsappOptin?: any },
+): Promise<string | null> {
+    const phone = (visit.tel || '').trim();
+    const name = (visit.resp || '').trim();
+    if (!name && !phone) return null;
+
+    const intention = funnel.voteIntention || null;
+    const certainty = funnel.voteCertainty === '' || funnel.voteCertainty == null ? null : Number(funnel.voteCertainty);
+    const isMult = funnel.isMultiplier === 'sim' || funnel.isMultiplier === true;
+    const influence = isMult ? (Number(funnel.influenceCount) || 0) : 0;
+    const optin = funnel.whatsappOptin === 'sim' || funnel.whatsappOptin === true;
+    const objection = (funnel.objection || '').trim() || null;
+    const now = new Date().toISOString();
+
+    // Identidade: procura contato por telefone na campanha.
+    let existingId: string | null = null;
+    if (phone) {
+        const { data } = await supabase.from('contacts').select('id')
+            .eq('campaignId', campaignId).eq('phone', phone).limit(1).maybeSingle();
+        existingId = (data as any)?.id ?? null;
+    }
+
+    if (existingId) {
+        // Atualiza só o que veio preenchido (não apaga dados já existentes).
+        const upd: any = { lastInteractionAt: now };
+        if (intention) upd.voteIntention = intention;
+        if (certainty != null) upd.voteCertainty = certainty;
+        if (objection) upd.objection = objection;
+        if (isMult) { upd.isMultiplier = true; upd.influenceCount = influence; }
+        if (optin) upd.whatsappOptin = true;
+        if (visit.bairro) upd.neighborhood = visit.bairro;
+        if (visit.municipio) upd.city = visit.municipio;
+        await supabase.from('contacts').update(upd).eq('id', existingId);
+        return existingId;
+    }
+
+    const { data: created, error } = await supabase.from('contacts').insert({
+        campaignId,
+        name: name || 'Eleitor (visita)',
+        phone: phone || null,
+        neighborhood: visit.bairro || null,
+        city: visit.municipio || null,
+        birthDate: visit.nasc || null,
+        source: 'visita',
+        funnelStage: 'relacionamento',
+        voteIntention: intention,
+        voteCertainty: certainty,
+        objection,
+        isMultiplier: isMult,
+        influenceCount: influence,
+        whatsappOptin: optin,
+        lastInteractionAt: now,
+        createdAt: now,
+    }).select('id').single();
+    if (error) throw error;
+    return (created as any)?.id ?? null;
+}
+
 interface VisitsContextType {
     visits: Visit[];
     addVisit: (visit: Omit<Visit, 'id'>) => Promise<void>;
@@ -101,8 +168,22 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
     const addVisit = async (visit: Omit<Visit, 'id'>) => {
         if (!user?.campaignId) return;
         try {
+            // Campos de funil NÃO são colunas de `visits` — viram o contato (voterId).
+            const { voteIntention, voteCertainty, objection, isMultiplier, influenceCount, whatsappOptin, ...visitCore } = visit as any;
+
+            // Cria/atualiza o contato do eleitor a partir da visita (best-effort).
+            let voterId: string | null = null;
+            try {
+                voterId = await upsertVoterFromVisit(user.campaignId, visitCore, {
+                    voteIntention, voteCertainty, objection, isMultiplier, influenceCount, whatsappOptin,
+                });
+            } catch (e) {
+                console.warn('[addVisit] upsert do contato falhou (visita segue normal):', e);
+            }
+
             const dataToSave = {
-                ...visit,
+                ...visitCore,
+                ...(voterId ? { voterId } : {}),
                 campaignId: user.campaignId,
                 createdBy: user.uid,
                 leaderId: user.type === 'Líder' ? user.uid : (user.assignedLeaderId || null),

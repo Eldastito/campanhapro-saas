@@ -36,6 +36,13 @@ const emptyVisit: Omit<Visit, 'id'> = {
   interesse: '',
   nivelEngajamento: 'baixo',
   observacoesQualitativas: '',
+  // Funil / jornada (Fase B) — não são colunas de `visits`; viram o contato (voterId)
+  voteIntention: '',
+  voteCertainty: '',
+  objection: '',
+  isMultiplier: 'nao',
+  influenceCount: 0,
+  whatsappOptin: 'nao',
 };
 
 const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
@@ -257,6 +264,48 @@ const VisitForm = ({ onSave, onCancel, initialData }: VisitFormProps) => {
             <div>
                 <label htmlFor="observacoesQualitativas" className="block text-sm font-medium text-slate-300 mb-1">Observações Qualitativas (para IA)</label>
                 <textarea id="observacoesQualitativas" name="observacoesQualitativas" value={formData.observacoesQualitativas || ''} onChange={handleChange} rows={2} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 focus:ring-1 focus:ring-indigo-500 outline-none"></textarea>
+            </div>
+
+            {/* ===== Conversão de voto (alimenta a IA e o contato) ===== */}
+            <div className="p-4 bg-blue-900/10 border border-blue-500/20 rounded-lg space-y-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">Conversão de Voto (alimenta a IA)</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Intenção de voto</label>
+                        <select name="voteIntention" value={formData.voteIntention || ''} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 focus:ring-1 focus:ring-indigo-500 outline-none">
+                            <option value="">—</option>
+                            <option value="apoia">Já apoia</option>
+                            <option value="vai_votar">Vai votar</option>
+                            <option value="indeciso">Indeciso</option>
+                            <option value="rejeita">Rejeita</option>
+                            <option value="nao_disse">Não disse</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Certeza do voto (0–10)</label>
+                        <select name="voteCertainty" value={formData.voteCertainty ?? ''} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 focus:ring-1 focus:ring-indigo-500 outline-none">
+                            <option value="">—</option>
+                            {Array.from({ length: 11 }, (_, i) => <option key={i} value={i}>{i}</option>)}
+                        </select>
+                    </div>
+                </div>
+                {(formData.voteIntention === 'indeciso' || formData.voteIntention === 'rejeita') && (
+                    <Input label="Objeção / barreira" name="objection" value={formData.objection || ''} onChange={handleChange} />
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    <div className="flex items-center gap-2">
+                        <label className="text-sm font-medium text-slate-300">É multiplicador?</label>
+                        <Switch checked={formData.isMultiplier === 'sim'} onChange={(c) => handleSwitchChange('isMultiplier', c)} />
+                    </div>
+                    {formData.isMultiplier === 'sim' && (
+                        <Input label="Influencia ~ (pessoas)" type="number" name="influenceCount" value={formData.influenceCount || 0} onChange={handleChange} min="0" />
+                    )}
+                    <div className="flex items-center gap-2">
+                        <label className="text-sm font-medium text-slate-300">Autoriza WhatsApp?</label>
+                        <Switch checked={formData.whatsappOptin === 'sim'} onChange={(c) => handleSwitchChange('whatsappOptin', c)} />
+                    </div>
+                </div>
+                <p className="text-[10px] text-slate-500">Esses dados criam/atualizam o contato do eleitor (registro mestre da jornada).</p>
             </div>
 
             <div className="bg-slate-700/30 p-4 rounded-lg border border-slate-600 mb-4">
