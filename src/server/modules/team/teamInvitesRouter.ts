@@ -216,7 +216,7 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
 
     // REAPROVEITA: e-mail já é usuário desta campanha (ex.: cadastro anterior que
     // não completou) → reseta a senha + atualiza papel/nome, em vez de barrar.
-    if (existing?.campaignId === campaignId) {
+    if (existing && existing.campaignId === campaignId) {
       await supabase.auth.admin.updateUserById(existing.id, {
         password,
         user_metadata: { name: nm },
