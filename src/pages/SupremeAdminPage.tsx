@@ -711,6 +711,57 @@ const SupremeAdminPage: React.FC = () => {
                                         </Card>
                                     </div>
 
+                                    {/* Funil de Conversão (eleitor) — campos capturados nos formulários */}
+                                    {campaignSnapshot.funnel && (
+                                      <Card className="bg-slate-900 border-white/5 p-5">
+                                        <div className="flex items-center justify-between mb-4">
+                                          <p className="text-xs font-black uppercase tracking-widest text-blue-400">Funil de Conversão do Eleitor</p>
+                                          <span className="text-[10px] text-slate-500">{campaignSnapshot.funnel.total ?? 0} contatos</span>
+                                        </div>
+                                        {/* KPIs */}
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+                                          {[
+                                            { label: 'Certeza média', val: campaignSnapshot.funnel.avgCertainty != null ? `${campaignSnapshot.funnel.avgCertainty}/10` : '—' },
+                                            { label: 'Multiplicadores', val: campaignSnapshot.funnel.multipliers ?? 0 },
+                                            { label: 'Alcance (infl.)', val: campaignSnapshot.funnel.totalInfluence ?? 0 },
+                                            { label: 'Opt-in WhatsApp', val: campaignSnapshot.funnel.whatsappOptin ?? 0 },
+                                            { label: 'C/ zona-seção', val: campaignSnapshot.funnel.comGeoEleitoral ?? 0 },
+                                          ].map((k, i) => (
+                                            <div key={i} className="bg-slate-950 rounded-lg p-3 border border-white/5">
+                                              <p className="text-[9px] uppercase text-slate-500 tracking-widest">{k.label}</p>
+                                              <p className="text-lg font-black text-white mt-1">{k.val}</p>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                          {([
+                                            { title: 'Intenção de voto', data: campaignSnapshot.funnel.byIntention, labels: { apoia: 'Já apoia', vai_votar: 'Vai votar', indeciso: 'Indeciso', rejeita: 'Rejeita', nao_disse: 'Não disse', '(sem)': 'Sem info' } as any, color: 'bg-blue-500' },
+                                            { title: 'Estágio no funil', data: campaignSnapshot.funnel.byStage, labels: {} as any, color: 'bg-indigo-500' },
+                                            { title: 'Origem (canal)', data: campaignSnapshot.funnel.bySource, labels: {} as any, color: 'bg-emerald-500' },
+                                          ]).map((blk, bi) => {
+                                            const entries = Object.entries(blk.data ?? {}) as [string, number][];
+                                            const tot = entries.reduce((s, [, n]) => s + Number(n), 0) || 1;
+                                            return (
+                                              <div key={bi}>
+                                                <p className="text-[10px] font-bold uppercase text-slate-400 mb-2">{blk.title}</p>
+                                                {entries.length ? (
+                                                  <div className="space-y-1.5">
+                                                    {entries.sort((a, b) => Number(b[1]) - Number(a[1])).map(([k, n]) => (
+                                                      <div key={k}>
+                                                        <div className="flex justify-between text-[11px]"><span className="text-slate-300">{blk.labels[k] || k}</span><span className="font-mono text-slate-400">{n}</span></div>
+                                                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full ${blk.color}`} style={{ width: `${(Number(n) / tot) * 100}%` }} /></div>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                ) : <p className="text-slate-600 text-xs">Sem dados.</p>}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <p className="text-[10px] text-slate-600 mt-4">Preenchido pela Visita e pelo CRM (intenção, certeza, multiplicador, opt-in, zona/seção). Quanto mais preenchido, mais precisa a análise da IA.</p>
+                                      </Card>
+                                    )}
+
                                     {/* Crescimento + Pico + Consumo de espaço — filtrados por esta campanha */}
                                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                                         <Card className="bg-slate-900 border-white/5 overflow-hidden">
