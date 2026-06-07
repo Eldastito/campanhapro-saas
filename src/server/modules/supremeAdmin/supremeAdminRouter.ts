@@ -485,6 +485,20 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ── Planos comerciais (#36) ─────────────────────────────────────────
+  router.get('/plans', async (_req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('plans')
+        .select('*')
+        .order('monthlyCents', { ascending: true });
+      if (error) return res.status(500).json({ error: 'plans_load_failed', detail: error.message });
+      return res.json({ plans: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'plans_load_failed' });
+    }
+  });
+
   // ── GET /taxes ──────────────────────────────────────────────────────
   // Estima a DAS do Simples Nacional (SaaS, sede RJ). RBT12 = MRR×12,
   // receita do mês = MRR, folha (Fator R) = custos de salários/pessoal ×12.

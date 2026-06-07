@@ -42,6 +42,18 @@ interface CustomField {
 
 const SUPREME_API = '/api/v1/supreme';
 
+/** Rótulos amigáveis dos módulos (feature keys → PT-BR). */
+const FEATURE_LABELS: Record<string, string> = {
+    dashboard: 'Dashboard', crm: 'CRM', help: 'Ajuda', visits: 'Visitas', team: 'Equipes',
+    engagement: 'Engajamento', resources: 'Recursos', goals: 'Metas', routines: 'Rotinas',
+    ai_agents: 'Agentes IA', forms: 'Formulários', analytics: 'Analytics', financial: 'Financeiro',
+    content_studio: 'Estúdio', rag: 'Base IA (RAG)', meetings: 'Reuniões', tools: 'Ferramentas',
+    training: 'Treinamento', whatsapp_omnichannel: 'WhatsApp', election_day: 'Dia das Eleições',
+    intelligence: 'Inteligência', scenarios: 'Cenários', budget_ceo: 'Orçamento CEO',
+    paperclip: 'Agentes-Tarefas', compliance: 'Conformidade',
+};
+const fmtLimit = (v: number) => (v === -1 || v == null ? '∞' : v.toLocaleString('pt-BR'));
+
 /**
  * Calls a Supreme Admin backend endpoint with the operator's JWT.
  * These actions run server-side with the service_role key (create users
@@ -80,6 +92,7 @@ const SupremeAdminPage: React.FC = () => {
     // Campaigns Data
     const [campaigns, setCampaigns] = useState<AuthenticatedUser[]>([]);
     const [campaignConfigs, setCampaignConfigs] = useState<Record<string, CampaignConfig>>({});
+    const [plans, setPlans] = useState<any[]>([]);
     
     // Global Users Data
     const [globalUsers, setGlobalUsers] = useState<AuthenticatedUser[]>([]);
@@ -385,6 +398,9 @@ const SupremeAdminPage: React.FC = () => {
     // Carrega auditoria ao abrir a aba
     useEffect(() => {
         if (activeTab === 'audit' && auditLogs.length === 0) fetchAudit();
+        if (activeTab === 'platform' && plans.length === 0) {
+            supremeFetch('/plans').then(r => setPlans(r?.plans || [])).catch(e => console.warn('[Supreme] plans fetch:', e));
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab]);
 
@@ -1556,46 +1572,55 @@ const SupremeAdminPage: React.FC = () => {
                             animate={{ opacity: 1 }}
                             className="space-y-8"
                         >
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                <Card className="bg-slate-900 border-white/5 p-6 space-y-4">
-                                    <div className="flex items-center gap-3 border-b border-white/5 pb-4">
-                                        <Layout className="w-6 h-6 text-indigo-400" />
-                                        <h3 className="font-bold text-white uppercase tracking-widest text-sm">Estrutura de Formulários Globais</h3>
-                                    </div>
-                                    <p className="text-xs text-slate-400 leading-relaxed italic">
-                                        Defina campos personalizados para toda a plataforma ou campanhas específicas. 
-                                        A sincronização no cluster é enviada em tempo real para as equipes de rua.
-                                    </p>
-                                    <div className="space-y-3">
-                                        {['Configuração de Visitas', 'Reportes de Rua', 'Pesquisa Quantitativa'].map((f, i) => (
-                                            <div key={i} className="flex items-center justify-between p-3 bg-slate-950 rounded-lg border border-white/5 group">
-                                                <span className="text-xs font-bold text-slate-300">{f}</span>
-                                                <Button variant="ghost" className="h-6 text-[10px] p-0 px-2 opacity-50 group-hover:opacity-100">Configurar Schema</Button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </Card>
+                            {/* Atalho para o Form Builder (a antiga seção estática virou a aba Formulários) */}
+                            <Card className="bg-slate-900 border-white/5 p-6 space-y-3">
+                                <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                                    <Layout className="w-6 h-6 text-indigo-400" />
+                                    <h3 className="font-bold text-white uppercase tracking-widest text-sm">Estrutura de Formulários</h3>
+                                </div>
+                                <p className="text-xs text-slate-400 leading-relaxed">
+                                    A configuração de campos personalizados (Visitas, Contatos, Pesquisa) e os formulários públicos de captação agora ficam na aba <strong className="text-indigo-300">Formulários</strong>.
+                                </p>
+                                <Button onClick={() => setActiveTab('forms')} className="h-9 text-xs">Ir para Formulários →</Button>
+                            </Card>
 
-                                <Card className="bg-slate-900 border-white/5 p-6 space-y-4">
-                                    <div className="flex items-center gap-3 border-b border-white/5 pb-4">
-                                        <CreditCard className="w-6 h-6 text-amber-400" />
-                                        <h3 className="font-bold text-white uppercase tracking-widest text-sm">Planos e Monetização</h3>
-                                    </div>
-                                    <div className="space-y-4">
-                                        {[Plan.ESSENCIAL, Plan.ESTRATEGICO, Plan.TOTAL].map((p, i) => (
-                                            <div key={i} className="p-4 bg-slate-950 rounded-lg border border-white/5 flex justify-between items-center">
-                                                <div>
-                                                    <p className="text-sm font-black text-white">{p}</p>
-                                                    <p className="text-[10px] text-slate-500 font-mono">LEVEL_{i+1}_ACCESS_PROTOCOL</p>
-                                                </div>
-                                                <div className="text-right">
-                                                    <p className="text-xs font-bold text-indigo-400">R$ {i === 0 ? '999' : i === 1 ? '2.490' : '5.900'}/camp</p>
-                                                </div>
+                            {/* Planos e Monetização — dados reais da tabela plans */}
+                            <Card className="bg-slate-900 border-white/5 p-6 space-y-4">
+                                <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                                    <CreditCard className="w-6 h-6 text-amber-400" />
+                                    <h3 className="font-bold text-white uppercase tracking-widest text-sm">Planos e Monetização</h3>
+                                    <span className="text-[10px] text-slate-500">{plans.length} planos ativos</span>
+                                </div>
+                                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
+                                    {plans.length === 0 && <p className="text-xs text-slate-500">Carregando planos…</p>}
+                                    {plans.map((p: any) => (
+                                        <div key={p.id} className="p-4 bg-slate-950 rounded-xl border border-white/5 flex flex-col">
+                                            <div className="flex items-baseline justify-between">
+                                                <p className="text-sm font-black text-white">{p.name}</p>
+                                                <p className="text-[10px] text-slate-600 font-mono">{(p.features?.length ?? 0)} módulos</p>
                                             </div>
-                                        ))}
-                                    </div>
-                                </Card>
-                            </div>
+                                            <p className="text-2xl font-black text-amber-400 mt-1">
+                                                R$ {((p.monthlyCents ?? 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                                                <span className="text-[10px] text-slate-500 font-medium">/mês</span>
+                                            </p>
+                                            <div className="grid grid-cols-2 gap-1 mt-3 text-[10px] text-slate-400">
+                                                <span>Contatos: <strong className="text-slate-200">{fmtLimit(p.limits?.contacts)}</strong></span>
+                                                <span>Equipe: <strong className="text-slate-200">{fmtLimit(p.limits?.team_users)}</strong></span>
+                                                <span>IA/mês: <strong className="text-slate-200">{p.limits?.ai_budget_cents === -1 ? '∞' : 'R$ ' + ((p.limits?.ai_budget_cents ?? 0) / 100).toLocaleString('pt-BR')}</strong></span>
+                                                <span>WhatsApp: <strong className="text-slate-200">{fmtLimit(p.limits?.messages_per_month)}</strong></span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-white/5">
+                                                {(p.features ?? []).map((f: string) => (
+                                                    <span key={f} className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                                        {FEATURE_LABELS[f] || f}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-[10px] text-slate-600">Preços e módulos vêm da tabela <code>plans</code> (fonte de verdade do faturamento). Cada plano superior inclui os módulos dos inferiores.</p>
+                            </Card>
                         </motion.div>
                     )}
                 </AnimatePresence>
