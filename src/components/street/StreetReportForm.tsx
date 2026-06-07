@@ -43,7 +43,7 @@ const StreetReportForm: React.FC = () => {
 
             if (err) throw err;
 
-            setSuccessMessage('Reporte enviado com sucesso! Obrigado.');
+            setSuccessMessage('Reporte enviado ao comando da campanha! Aparece no painel de Inteligência da coordenação.');
             setBairro('');
             setClima('');
             setTema('');

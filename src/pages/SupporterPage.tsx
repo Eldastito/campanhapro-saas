@@ -18,7 +18,7 @@ import { useVisitModal } from '../hooks/useVisitModal';
 
 const SupporterPage: React.FC = () => {
     const { user } = useAuth();
-    const { visits, addVisit, updateVisit, deleteVisit, addEngagementAction } = useVisits();
+    const { visits, addVisit, updateVisit, deleteVisit, addEngagementAction, engagementActions } = useVisits();
     const { headerLogo } = useSettings();
     const { isModalOpen, editingVisit, openAddModal, openEditModal, closeModal, checkVisitLimit } = useVisitModal();
     const [isEngagementModalOpen, setIsEngagementModalOpen] = React.useState(false);
@@ -27,16 +27,27 @@ const SupporterPage: React.FC = () => {
 
     const myVisits = React.useMemo(() => {
         if (!user || user.type === 'Admin') return [];
-        let filtered = visits.filter(v => v.apoiador === user.name);
+        // Robusto: quem REGISTROU (createdBy) OU é o apoiador responsável (nome).
+        let filtered = visits.filter(v => (v as any).createdBy === user.uid || v.apoiador === user.name);
         if (filterInteresse) filtered = filtered.filter(v => v.interesse?.toLowerCase().includes(filterInteresse.toLowerCase()));
         if (filterEngajamento) filtered = filtered.filter(v => v.nivelEngajamento === filterEngajamento);
         return filtered;
     }, [visits, user, filterInteresse, filterEngajamento]);
 
+    // Visitas de hoje (feitas + pendentes) — para o apoiador ver o que registrou hoje.
     const visitsToday = React.useMemo(() => {
         const today = getTodayString();
-        return myVisits.filter(v => v.data === today && v.realizada === 'nao');
+        return myVisits.filter(v => v.data === today);
     }, [myVisits]);
+
+    // Ações rápidas (engajamento) de hoje registradas por este apoiador.
+    const myActionsToday = React.useMemo(() => {
+        if (!user) return [];
+        const today = getTodayString();
+        return (engagementActions || []).filter(
+            (a: any) => (a.createdBy === user.uid || a.apoiador === user.name) && a.data === today
+        );
+    }, [engagementActions, user]);
 
     const handleSaveVisit = async (visitData: Omit<Visit, 'id'> | Visit) => {
         const dataWithSupporter = { ...visitData, apoiador: user?.name || '' };
@@ -84,14 +95,41 @@ const SupporterPage: React.FC = () => {
                      {visitsToday.length > 0 ? (
                         <ul className="space-y-2">
                            {visitsToday.map(v => (
-                               <li key={v.id} className="bg-slate-700/50 p-3 rounded-md">
-                                   <p className="font-semibold">{v.resp}</p>
-                                   <p className="text-sm text-slate-400">{v.bairro}</p>
+                               <li key={v.id} className="bg-slate-700/50 p-3 rounded-md flex items-center justify-between gap-3">
+                                   <div>
+                                       <p className="font-semibold">{v.resp}</p>
+                                       <p className="text-sm text-slate-400">{v.bairro}</p>
+                                   </div>
+                                   <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-full ${v.realizada === 'sim' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                                       {v.realizada === 'sim' ? 'Realizada' : 'Pendente'}
+                                   </span>
                                </li>
                            ))}
                         </ul>
                     ) : (
-                        <p className="text-slate-400">Nenhuma visita pendente para hoje. Bom trabalho!</p>
+                        <p className="text-slate-400">Nenhuma visita registrada hoje ainda.</p>
+                    )}
+                </Card>
+
+                <Card>
+                    <h3 className="text-lg font-bold text-slate-300 mb-4">Minhas Ações Rápidas de Hoje ({myActionsToday.length})</h3>
+                    {myActionsToday.length > 0 ? (
+                        <ul className="space-y-2">
+                            {myActionsToday.map((a: any) => (
+                                <li key={a.id} className="bg-slate-700/50 p-3 rounded-md flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="font-semibold">{a.tipo || 'Ação'}</p>
+                                        <p className="text-sm text-slate-400">
+                                            {a.local || a.nomeEvento || '—'}
+                                            {a.sentimento ? ` · ${a.sentimento}` : ''}
+                                            {a.pessoasContatadas ? ` · ${a.pessoasContatadas} contatos` : ''}
+                                        </p>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p className="text-slate-400">Nenhuma ação rápida registrada hoje. Use "Registrar Ação Rápida" acima.</p>
                     )}
                 </Card>
 

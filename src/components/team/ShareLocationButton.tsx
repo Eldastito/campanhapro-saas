@@ -54,43 +54,58 @@ const ShareLocationButton: React.FC = () => {
         }
         setError(null);
         setAskingConsent(false);
-
-        watchIdRef.current = navigator.geolocation.watchPosition(
-            async (pos) => {
-                const now = Date.now();
-                // Throttle: só envia 1x por PING_INTERVAL_MS (mesmo que GPS dispare mais).
-                if (now - lastSentRef.current < PING_INTERVAL_MS) return;
-                lastSentRef.current = now;
-
-                const { error: upErr } = await supabase
-                    .from('team_locations_live')
-                    .upsert({
-                        userId: user.id,
-                        campaignId: user.campaignId,
-                        lat: pos.coords.latitude,
-                        lng: pos.coords.longitude,
-                        accuracy: pos.coords.accuracy,
-                        recordedAt: new Date().toISOString(),
-                    }, { onConflict: 'user_id' });
-                if (upErr) {
-                    console.error('[ShareLocation] Erro ao gravar posição:', upErr);
-                    setError(upErr.message);
-                } else {
-                    setLastPingAt(now);
-                }
-            },
-            (err) => {
-                console.error('[ShareLocation] Erro do GPS:', err);
-                setError(
-                    err.code === err.PERMISSION_DENIED
-                        ? 'Permissão de localização negada pelo navegador.'
-                        : 'Não foi possível obter sua localização.'
-                );
-                stopSharing();
-            },
-            { enableHighAccuracy: true, maximumAge: 30_000, timeout: 30_000 }
-        );
         setSharing(true);
+
+        const sendPosition = async (pos: GeolocationPosition, force = false) => {
+            const now = Date.now();
+            // Throttle: só envia 1x por PING_INTERVAL_MS (mesmo que GPS dispare mais).
+            if (!force && now - lastSentRef.current < PING_INTERVAL_MS) return;
+            lastSentRef.current = now;
+            const { error: upErr } = await supabase
+                .from('team_locations_live')
+                .upsert({
+                    userId: user.id,
+                    userName: user.name ?? null,
+                    campaignId: user.campaignId,
+                    lat: pos.coords.latitude,
+                    lng: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy,
+                    recordedAt: new Date().toISOString(),
+                }, { onConflict: 'userId' });
+            if (upErr) {
+                console.error('[ShareLocation] Erro ao gravar posição:', upErr);
+                setError(upErr.message);
+            } else {
+                setError(null);
+                setLastPingAt(now);
+            }
+        };
+
+        const onGeoError = (err: GeolocationPositionError) => {
+            console.error('[ShareLocation] Erro do GPS:', err);
+            setError(
+                err.code === err.PERMISSION_DENIED
+                    ? 'Permissão de localização negada pelo navegador.'
+                    : err.code === err.TIMEOUT
+                        ? 'Não foi possível obter um sinal de GPS a tempo. Tente em um celular ou ao ar livre.'
+                        : 'Não foi possível obter sua localização.'
+            );
+            stopSharing();
+        };
+
+        // 1) Tenta uma posição imediata (feedback rápido + erro claro se não houver sinal).
+        navigator.geolocation.getCurrentPosition(
+            (pos) => { void sendPosition(pos, true); },
+            onGeoError,
+            { enableHighAccuracy: true, maximumAge: 60_000, timeout: 20_000 }
+        );
+
+        // 2) Acompanha atualizações enquanto a tela estiver aberta.
+        watchIdRef.current = navigator.geolocation.watchPosition(
+            (pos) => { void sendPosition(pos); },
+            onGeoError,
+            { enableHighAccuracy: true, maximumAge: 30_000, timeout: 60_000 }
+        );
     };
 
     if (sharing) {

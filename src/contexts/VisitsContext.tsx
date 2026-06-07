@@ -191,9 +191,11 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
             const { data: created, error } = await supabase
                 .from('visits')
                 .insert(sanitizeData(dataToSave))
-                .select('id')
+                .select('*')
                 .single();
             if (error) throw error;
+            // Atualização otimista (não depende do realtime chegar).
+            if (created) setVisits(prev => [created as Visit, ...prev.filter(v => v.id !== (created as any).id)]);
             void logSubmissionGeo({
                 campaignId: user.campaignId,
                 userId: user.id ? String(user.id) : null,
@@ -211,6 +213,7 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
             const { id, ...data } = updatedVisit;
             const { error } = await supabase.from('visits').update(sanitizeData(data)).eq('id', id);
             if (error) throw error;
+            setVisits(prev => prev.map(v => (v.id === id ? { ...v, ...data } as Visit : v)));
         } catch (error) {
             handleSupabaseError(error, OperationType.UPDATE, `visits/${updatedVisit.id}`);
         }
@@ -220,6 +223,7 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
         try {
             const { error } = await supabase.from('visits').delete().eq('id', String(id));
             if (error) throw error;
+            setVisits(prev => prev.filter(v => String(v.id) !== String(id)));
         } catch (error) {
             handleSupabaseError(error, OperationType.DELETE, `visits/${id}`);
         }
@@ -235,9 +239,10 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
                     campaignId: user.campaignId,
                     createdBy: user.uid,
                 }))
-                .select('id')
+                .select('*')
                 .single();
             if (error) throw error;
+            if (created) setEngagementActions(prev => [created as EngagementAction, ...prev.filter(a => a.id !== (created as any).id)]);
             void logSubmissionGeo({
                 campaignId: user.campaignId,
                 userId: user.id ? String(user.id) : null,
