@@ -85,7 +85,7 @@ async function buildCampaignContext(supabase: SupabaseClient, campaignId: string
 
   // Election date
   const { data: settings } = await supabase
-    .from('campaign_settings')
+    .from('settings')
     .select('campaignDetails')
     .eq('campaignId', campaignId)
     .maybeSingle();

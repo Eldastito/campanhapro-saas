@@ -84,7 +84,7 @@ function checkCompliance(text: string): Array<{ rule: string; severity: 'warn' |
 async function buildCampaignContext(supabase: SupabaseClient, campaignId: string): Promise<string> {
   const lines: string[] = [];
   const { data: settings } = await supabase
-    .from('campaign_settings')
+    .from('settings')
     .select('campaignDetails')
     .eq('campaignId', campaignId)
     .maybeSingle();

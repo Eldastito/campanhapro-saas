@@ -44,15 +44,17 @@ async function loadCampaignBudget(supabaseAdmin: SupabaseClient, campaignId: str
   let electionDate: string | null = null;
 
   const { data: settings } = await supabaseAdmin
-    .from('campaign_settings')
+    .from('settings')
     .select('campaignDetails')
     .eq('campaignId', campaignId)
     .maybeSingle();
 
   if (settings?.campaignDetails) {
     const cd = settings.campaignDetails as Record<string, unknown>;
-    if (typeof cd.orcamento === 'number') {
-      totalBudgetCents = Math.round(cd.orcamento * 100);
+    // orcamento pode vir como number ou string (input numérico) — coage com segurança.
+    const orc = Number(cd.orcamento);
+    if (Number.isFinite(orc) && orc > 0) {
+      totalBudgetCents = Math.round(orc * 100);
     }
     if (typeof cd.electionDate === 'string') {
       electionDate = cd.electionDate;
