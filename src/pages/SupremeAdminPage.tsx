@@ -152,8 +152,7 @@ const SupremeAdminPage: React.FC = () => {
 
             const configs: Record<string, CampaignConfig> = {};
             configsData?.forEach((c: any) => {
-                // O banco retorna snake_case (custom_fields); a UI usa customFields.
-                configs[c.id] = { ...c, customFields: c.custom_fields ?? c.customFields ?? {} } as CampaignConfig;
+                configs[c.id] = { ...c, customFields: c.customFields ?? {} } as CampaignConfig;
             });
             setCampaignConfigs(configs);
 

@@ -86,8 +86,9 @@ export function createPublicFormsRouter(supabaseAdmin: SupabaseClient) {
       }
 
       // Monta o contato: campos com map → coluna nativa; resto → custom_fields
+      // contacts usa colunas camelCase no projeto ativo (campaignId, customFields…)
       const contactRow: Record<string, any> = {
-        campaign_id: form.campaign_id,
+        campaignId: form.campaign_id,
         source: 'public_form',
         tags: [`form:${slug}`],
       };
@@ -101,7 +102,7 @@ export function createPublicFormsRouter(supabaseAdmin: SupabaseClient) {
           custom[f.id] = v;
         }
       }
-      contactRow.custom_fields = custom;
+      contactRow.customFields = custom;
 
       // name é NOT NULL — se o form não capturou nome, usa um placeholder
       if (!contactRow.name || String(contactRow.name).trim() === '') {

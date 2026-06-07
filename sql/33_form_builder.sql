@@ -1,14 +1,15 @@
 -- 33_form_builder.sql — F5 Form Builder
 --
--- As DEFINIÇÕES de campos personalizáveis por campanha (por alvo: visits,
--- contacts, pesquisa) já vivem em campaign_configs.custom_fields (jsonb).
--- Estrutura: { "visits": [ {id,label,type,required,options?,placeholder?,help?} ], ... }
+-- IMPORTANTE: o projeto ativo (clfivmzwjydtmqobzxzb) usa colunas em camelCase
+-- (campaignId, customFields, createdAt…). campaign_configs JÁ possui a coluna
+-- "customFields" (jsonb) que guarda as DEFINIÇÕES de campos por alvo:
+--   { "visits": [ {id,label,type,required,options?,placeholder?,help?} ], ... }
 --
--- Este arquivo adiciona onde GUARDAR os VALORES capturados por esses campos
--- custom, por registro. Idempotente.
+-- Aqui adicionamos onde GUARDAR os VALORES capturados por esses campos custom,
+-- por registro de visita e de contato. Em camelCase, idempotente.
 
-ALTER TABLE public.visits   ADD COLUMN IF NOT EXISTS custom_fields jsonb NOT NULL DEFAULT '{}'::jsonb;
-ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS custom_fields jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.visits   ADD COLUMN IF NOT EXISTS "customFields" jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS "customFields" jsonb NOT NULL DEFAULT '{}'::jsonb;
 
--- F5b (futuro): formulários públicos (landing/lead capture) terão tabelas
--- próprias (public_forms, form_submissions) com RLS para acesso anônimo.
+-- Recarrega o cache do PostgREST após DDL.
+NOTIFY pgrst, 'reload schema';

@@ -351,11 +351,11 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     try {
       const { data, error } = await supabaseAdmin
         .from('campaign_configs')
-        .select('custom_fields')
+        .select('customFields')
         .eq('id', req.params.campaignId)
         .maybeSingle();
       if (error) return res.status(500).json({ error: 'forms_load_failed', detail: error.message });
-      return res.json({ schema: sanitizeFormSchema(data?.custom_fields) });
+      return res.json({ schema: sanitizeFormSchema(data?.customFields) });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'forms_load_failed' });
     }
@@ -369,7 +369,7 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       // upsert preserva limits/features existentes; cria a linha se não existir.
       const { error } = await supabaseAdmin
         .from('campaign_configs')
-        .upsert({ id: campaignId, custom_fields: schema }, { onConflict: 'id' });
+        .upsert({ id: campaignId, customFields: schema }, { onConflict: 'id' });
       if (error) return res.status(500).json({ error: 'forms_save_failed', detail: error.message });
       await audit(supabaseAdmin, {
         ...actorFromRequest(req),
@@ -414,8 +414,8 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       let schema = sanitizePublicFields(req.body?.schema);
       if (schema.length === 0) {
         const { data: cfg } = await supabaseAdmin
-          .from('campaign_configs').select('custom_fields').eq('id', campaignId).maybeSingle();
-        const internal = sanitizePublicFields((cfg?.custom_fields?.[target]) || []);
+          .from('campaign_configs').select('customFields').eq('id', campaignId).maybeSingle();
+        const internal = sanitizePublicFields((cfg?.customFields?.[target]) || []);
         schema = [
           { id: 'name', label: 'Nome completo', type: 'text', required: true, map: 'name' },
           { id: 'phone', label: 'WhatsApp / Telefone', type: 'phone', required: false, map: 'phone' },
