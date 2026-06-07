@@ -190,8 +190,10 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
   router.post('/members', async (req: Request, res: Response) => {
     const campaignId = (req as any).user?.campaignId;
     const userType = (req as any).user?.userType;
+    const requesterId = (req as any).user?.id;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
-    if (userType !== 'Admin' && userType !== 'Coordenador') {
+    const isLeader = userType === 'Líder';
+    if (userType !== 'Admin' && userType !== 'Coordenador' && !isLeader) {
       return res.status(403).json({ error: 'admin_required' });
     }
 
@@ -206,6 +208,11 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
     if (!INVITABLE_ROLES.includes(role as UserRole)) {
       return res.status(400).json({ error: 'role_not_invitable', allowed: INVITABLE_ROLES });
     }
+    // Um Líder só pode recrutar funções subordinadas (não cria Líder/Candidato/Admin).
+    const LEADER_RECRUITABLE: UserRole[] = ['Apoiador', 'Colaborador', 'Pesquisador'];
+    if (isLeader && !LEADER_RECRUITABLE.includes(role as UserRole)) {
+      return res.status(403).json({ error: 'leader_role_limited', allowed: LEADER_RECRUITABLE });
+    }
 
     // Já existe usuário com esse e-mail?
     const { data: existing } = await supabase
@@ -214,6 +221,10 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
       return res.status(409).json({ error: 'email_in_another_campaign' });
     }
 
+    // Vínculo de liderança: se quem cadastra é Líder, o membro fica sob ele.
+    // (Admin pode passar assignedLeaderId no corpo para atribuir a um líder.)
+    const leaderLink: string | null = isLeader ? requesterId : ((req.body?.assignedLeaderId as string) || null);
+
     // REAPROVEITA: e-mail já é usuário desta campanha (ex.: cadastro anterior que
     // não completou) → reseta a senha + atualiza papel/nome, em vez de barrar.
     if (existing && existing.campaignId === campaignId) {
@@ -221,7 +232,7 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
         password,
         user_metadata: { name: nm },
       }).catch((e) => console.warn('[team] updateUser pwd falhou:', e?.message));
-      await supabase.from('users').update({ name: nm, type: role, role: 'active' }).eq('id', existing.id);
+      await supabase.from('users').update({ name: nm, type: role, role: 'active', assignedLeaderId: leaderLink }).eq('id', existing.id);
       await audit(supabase, {
         ...actorFromRequest(req),
         action: 'team.member.reactivate',
@@ -253,6 +264,7 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
             await supabase.from('users').upsert({
               id: found.id, name: nm, email: normalizedEmail, type: role,
               plan: 'Básico', role: 'active', campaignId, isSupremeAdmin: false,
+              assignedLeaderId: leaderLink,
             }, { onConflict: 'id' });
             return res.status(200).json({ ok: true, userId: found.id, reused: true });
           }
@@ -276,6 +288,7 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
       role: 'active',
       campaignId,
       isSupremeAdmin: false,
+      assignedLeaderId: leaderLink,
     });
     if (profErr) {
       await supabase.auth.admin.deleteUser(created.user.id).catch(() => {});

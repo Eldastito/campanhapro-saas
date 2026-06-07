@@ -7,8 +7,12 @@
 // - Indicadores de votos planejados vs estimados
 
 import * as React from 'react';
+import { UserPlus, MessageCircle, Loader2 } from 'lucide-react';
 import Header from '../components/Header';
 import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
+import Modal from '../components/ui/Modal';
 import { ResourceType, ResourceStatus } from '../types/resources';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeam } from '../contexts/TeamContext';
@@ -17,6 +21,14 @@ import { useSettings } from '../contexts/SettingsContext';
 import { fetchTeamResources } from '../services/teamResourcesService';
 import { TeamResource } from '../types/resources';
 import ShareLocationButton from '../components/team/ShareLocationButton';
+
+/** Monta link wa.me a partir de um telefone BR (best-effort). */
+const waLink = (phone?: string) => {
+    const digits = (phone || '').replace(/\D/g, '');
+    if (!digits) return null;
+    const withDdi = digits.length <= 11 ? `55${digits}` : digits;
+    return `https://wa.me/${withDdi}`;
+};
 
 const TYPE_LABELS: Record<ResourceType, string> = {
     panfleto: 'Panfleto', camiseta: 'Camiseta', kit_rua: 'Kit de Rua',
@@ -32,11 +44,43 @@ const STATUS_LABELS: Record<ResourceStatus, string> = {
 
 const LeaderDashboardPage: React.FC = () => {
     const { user, logout } = useAuth();
-    const { teamMembers } = useTeam();
+    const { teamMembers, addTeamMember } = useTeam();
     const { visits, engagementActions } = useVisits();
     const { headerLogo } = useSettings();
     const [resources, setResources] = React.useState<TeamResource[]>([]);
     const [resourcesLoading, setResourcesLoading] = React.useState(true);
+
+    // Cadastro de liderado (vincula automaticamente ao líder via assignedLeaderId).
+    const [showAdd, setShowAdd] = React.useState(false);
+    const [saving, setSaving] = React.useState(false);
+    const [formErr, setFormErr] = React.useState<string | null>(null);
+    const emptyForm = { name: '', email: '', phone: '', password: '', role: 'Apoiador' as string };
+    const [form, setForm] = React.useState(emptyForm);
+
+    const handleCreateLiderado = async () => {
+        setFormErr(null);
+        if (!form.name.trim()) { setFormErr('Informe o nome.'); return; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { setFormErr('E-mail inválido.'); return; }
+        if (form.password.length < 6) { setFormErr('A senha precisa ter ao menos 6 caracteres.'); return; }
+        setSaving(true);
+        try {
+            await addTeamMember({
+                name: form.name.trim(),
+                email: form.email.trim(),
+                phone: form.phone.trim(),
+                password: form.password,
+                role: form.role,
+                cost: 0,
+            } as any);
+            setShowAdd(false);
+            setForm(emptyForm);
+            alert('Liderado cadastrado! Ele já pode entrar com o e-mail e senha definidos.');
+        } catch (e: any) {
+            setFormErr(e?.message || 'Não foi possível cadastrar o liderado.');
+        } finally {
+            setSaving(false);
+        }
+    };
 
     // teamMembers JÁ vem filtrado pelo TeamContext:
     // se user.type === 'Líder', filtra por assignedLeaderId === user.uid
@@ -106,12 +150,17 @@ const LeaderDashboardPage: React.FC = () => {
                         <h1 className="text-2xl font-bold">Painel do Líder</h1>
                         <p className="text-slate-400">Olá, {user?.name}. Gestão da sua equipe.</p>
                     </div>
-                    <button
-                        onClick={logout}
-                        className="px-4 py-2 text-sm text-slate-300 hover:text-white transition-colors"
-                    >
-                        Sair
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <Button onClick={() => { setForm(emptyForm); setFormErr(null); setShowAdd(true); }} className="flex items-center gap-2">
+                            <UserPlus className="w-4 h-4" /> Cadastrar Liderado
+                        </Button>
+                        <button
+                            onClick={logout}
+                            className="px-4 py-2 text-sm text-slate-300 hover:text-white transition-colors"
+                        >
+                            Sair
+                        </button>
+                    </div>
                 </div>
 
                 <ShareLocationButton />
@@ -151,7 +200,12 @@ const LeaderDashboardPage: React.FC = () => {
                 <Card className="bg-slate-800 p-4">
                     <h2 className="text-lg font-bold mb-4">Meus Liderados — Produtividade</h2>
                     {produtividade.length === 0 ? (
-                        <p className="text-slate-400 text-sm">Nenhum liderado atribuído ainda.</p>
+                        <div className="text-center py-8">
+                            <p className="text-slate-400 text-sm mb-3">Você ainda não tem liderados. Cadastre sua equipe para começar a acompanhar a produção.</p>
+                            <Button onClick={() => { setForm(emptyForm); setFormErr(null); setShowAdd(true); }} className="inline-flex items-center gap-2">
+                                <UserPlus className="w-4 h-4" /> Cadastrar meu primeiro liderado
+                            </Button>
+                        </div>
                     ) : (
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
@@ -159,25 +213,34 @@ const LeaderDashboardPage: React.FC = () => {
                                     <tr className="text-left text-slate-400 border-b border-slate-700">
                                         <th className="py-2">Nome</th>
                                         <th className="py-2">Função</th>
-                                        <th className="py-2">Telefone</th>
                                         <th className="py-2 text-right">Visitas ✓</th>
                                         <th className="py-2 text-right">Visitas ⏳</th>
                                         <th className="py-2 text-right">Engaj.</th>
                                         <th className="py-2 text-right">Total</th>
+                                        <th className="py-2 text-center">Contato</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {produtividade.map(m => (
+                                    {produtividade.map(m => {
+                                        const wa = waLink(m.phone);
+                                        return (
                                         <tr key={m.id} className="border-b border-slate-800 hover:bg-slate-800/50">
                                             <td className="py-2">{m.name}</td>
                                             <td className="py-2 text-slate-400">{m.role}</td>
-                                            <td className="py-2 text-slate-400">{m.phone || '—'}</td>
                                             <td className="py-2 text-right text-emerald-400">{m.visitasRealizadas}</td>
                                             <td className="py-2 text-right text-amber-400">{m.visitasPendentes}</td>
                                             <td className="py-2 text-right">{m.engajamentos}</td>
                                             <td className="py-2 text-right font-bold">{m.total}</td>
+                                            <td className="py-2 text-center">
+                                                {wa ? (
+                                                    <a href={wa} target="_blank" rel="noopener noreferrer"
+                                                       className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-xs">
+                                                        <MessageCircle className="w-4 h-4" /> WhatsApp
+                                                    </a>
+                                                ) : <span className="text-slate-600 text-xs">sem tel.</span>}
+                                            </td>
                                         </tr>
-                                    ))}
+                                    );})}
                                 </tbody>
                             </table>
                         </div>
@@ -228,6 +291,40 @@ const LeaderDashboardPage: React.FC = () => {
                     )}
                 </Card>
             </main>
+
+            {showAdd && (
+                <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Cadastrar Liderado">
+                    <div className="space-y-4">
+                        <p className="text-xs text-slate-400">
+                            O liderado é vinculado automaticamente a você. Ele entra na plataforma com o e-mail e a senha definidos aqui.
+                        </p>
+                        <Input label="Nome completo *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <Input label="E-mail (login) *" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                            <Input label="Telefone / WhatsApp" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <Input label="Senha (mín. 6) *" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                            <div>
+                                <label className="block text-sm font-medium text-slate-300 mb-1">Função</label>
+                                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
+                                        className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3">
+                                    <option value="Apoiador">Apoiador</option>
+                                    <option value="Colaborador">Colaborador</option>
+                                    <option value="Pesquisador">Pesquisador</option>
+                                </select>
+                            </div>
+                        </div>
+                        {formErr && <p className="text-sm bg-red-500/10 text-red-400 rounded-lg p-3">{formErr}</p>}
+                        <div className="flex justify-end gap-3 pt-2">
+                            <Button variant="secondary" onClick={() => setShowAdd(false)} disabled={saving}>Cancelar</Button>
+                            <Button onClick={handleCreateLiderado} disabled={saving} className="flex items-center gap-2">
+                                {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando…</> : <><UserPlus className="w-4 h-4" /> Cadastrar</>}
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 };
