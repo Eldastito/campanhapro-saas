@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { FileText, Eye, Sparkles, Users, ChevronRight } from 'lucide-react';
-import { PLATFORM_FORMS, PlatformForm, CatalogField } from './platformForms';
+import { PLATFORM_FORMS, CatalogField } from './platformForms';
 
 /**
  * Catálogo dos formulários REAIS da plataforma (por perfil), com preview
