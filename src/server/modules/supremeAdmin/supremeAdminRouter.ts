@@ -463,7 +463,7 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     try {
       const { error } = await supabaseAdmin.from('public_forms').delete().eq('id', req.params.id);
       if (error) return res.status(500).json({ error: 'public_form_delete_failed', detail: error.message });
-      await audit(supabaseAdmin, { ...actorFromRequest(req), action: 'supreme.public_form.delete', severity: 'warning', metadata: { id: req.params.id } }).catch(() => {});
+      await audit(supabaseAdmin, { ...actorFromRequest(req), action: 'supreme.public_form.delete', severity: 'warn', metadata: { id: req.params.id } }).catch(() => {});
       return res.status(204).end();
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'public_form_delete_failed' });
