@@ -22,6 +22,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { fetchTeamResources } from '../services/teamResourcesService';
 import { TeamResource } from '../types/resources';
 import ShareLocationButton from '../components/team/ShareLocationButton';
+import TeamLiveMap from '../components/team/TeamLiveMap';
 
 /** Monta link wa.me a partir de um telefone BR (best-effort). */
 const waLink = (phone?: string) => {
@@ -260,6 +261,9 @@ const LeaderDashboardPage: React.FC = () => {
                         <p className="text-xs text-slate-500">{recursosDisponiveis} disponíveis</p>
                     </Card>
                 </div>
+
+                {/* Mapa ao vivo da equipe */}
+                <TeamLiveMap />
 
                 {/* Liderados com produtividade */}
                 <Card className="bg-slate-800 p-4">
