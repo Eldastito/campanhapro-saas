@@ -2,6 +2,8 @@ import * as React from 'react';
 import { PesquisaEleitoral } from '../../types/pesquisa';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
+import { useProfilePermissions } from '../../contexts/PermissionsContext';
+import CustomFieldsRenderer from '../forms/CustomFieldsRenderer';
 
 interface PesquisaFormProps {
   onSave: (pesquisa: Omit<PesquisaEleitoral, 'id'>) => void;
@@ -40,6 +42,11 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
   // Identificação opcional do entrevistado → vira um contato (lead) no CRM.
   const [lead, setLead] = React.useState({ nome: '', telefone: '', zona: '', secao: '', optin: false });
 
+  // Campos personalizados definidos no Form Builder (alvo: pesquisa).
+  const { config } = useProfilePermissions();
+  const customFieldDefs = (config?.customFields?.pesquisa as any[]) || [];
+  const [customValues, setCustomValues] = React.useState<Record<string, any>>({});
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -71,7 +78,7 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
         perfilRespostas: [q1, q2, q3, q4, q5, q6],
         notaBairro: Number(formData.notaBairro) as 1|2|3|4|5
     };
-    onSave({ ...finalData, __lead: lead } as any);
+    onSave({ ...finalData, customFields: customValues, __lead: lead } as any);
   };
 
   return (
@@ -125,6 +132,13 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
         </label>
         <p className="text-[10px] text-slate-500">Se preencher nome/telefone, o entrevistado entra no CRM com a intenção de voto desta pesquisa.</p>
       </div>
+
+      {/* Campos personalizados (Form Builder → alvo Pesquisa) */}
+      <CustomFieldsRenderer
+        fields={customFieldDefs}
+        values={customValues}
+        onChange={(id, val) => setCustomValues((p) => ({ ...p, [id]: val }))}
+      />
 
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
         <h4 className="font-bold text-slate-200">Vetores Mapeáveis (IA)</h4>

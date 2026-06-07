@@ -11,6 +11,8 @@ import {
 } from 'recharts';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
+import { useProfilePermissions } from '../contexts/PermissionsContext';
+import CustomFieldsRenderer from '../components/forms/CustomFieldsRenderer';
 import { askCrmSpecialist } from '../services/agentsClientService';
 import { logSubmissionGeo } from '../utils/geoTracking';
 import { Brain, Loader2 } from 'lucide-react';
@@ -59,6 +61,8 @@ const ClassifyContactsButton: React.FC<ClassifyContactsButtonProps> = ({ campaig
 
 const CRMPage: React.FC = () => {
   const { user } = useAuth();
+  const { config } = useProfilePermissions();
+  const contactCustomDefs = (config?.customFields?.contacts as any[]) || [];
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -89,6 +93,7 @@ const CRMPage: React.FC = () => {
     influenceCount: 0,
     whatsappOptin: false,
     preferredChannel: '',
+    customFields: {} as Record<string, any>,
   });
 
   const pautasInteresse = useMemo(() => {
@@ -207,7 +212,7 @@ const CRMPage: React.FC = () => {
       });
 
       setIsAddModalOpen(false);
-      setNewContact({ name: '', phone: '', classification: 'Neutro', neighborhood: '', electoralZone: '', electoralSection: '', tags: [], funnelStage: 'capturado', voteIntention: '', voteCertainty: '', objection: '', isMultiplier: false, influenceCount: 0, whatsappOptin: false, preferredChannel: '' });
+      setNewContact({ name: '', phone: '', classification: 'Neutro', neighborhood: '', electoralZone: '', electoralSection: '', tags: [], funnelStage: 'capturado', voteIntention: '', voteCertainty: '', objection: '', isMultiplier: false, influenceCount: 0, whatsappOptin: false, preferredChannel: '', customFields: {} });
       fetchContacts();
     } catch (err: any) {
       console.error("Erro ao adicionar contato:", err);
@@ -838,6 +843,15 @@ const CRMPage: React.FC = () => {
                 </div>
               </div>
             </div>
+            {contactCustomDefs.length > 0 && (
+              <div className="px-6 pb-4">
+                <CustomFieldsRenderer
+                  fields={contactCustomDefs}
+                  values={newContact.customFields}
+                  onChange={(id, val) => setNewContact({ ...newContact, customFields: { ...newContact.customFields, [id]: val } })}
+                />
+              </div>
+            )}
             <div className="p-6 bg-white/[0.02] border-t border-white/5 flex gap-3">
               <button
                 onClick={() => setIsAddModalOpen(false)}
