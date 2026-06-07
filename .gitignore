@@ -4,8 +4,11 @@
 # Dependencies
 node_modules/
 
-# Build
-# dist/
+# Build (artefatos não devem ser versionados — Coolify builda do source)
+dist/
+
+# Scripts de dev/throwaway (já contiveram segredos no passado)
+scratch/
 
 # Environment variables
 .env
