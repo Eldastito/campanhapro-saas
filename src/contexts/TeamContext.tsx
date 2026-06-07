@@ -99,8 +99,7 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
             const json = await resp.json().catch(() => ({}));
             if (!resp.ok) {
                 const MAP: Record<string, string> = {
-                    email_already_registered: 'Este e-mail já possui conta. Use outro e-mail ou convide pelo fluxo de convite.',
-                    already_a_member: 'Este e-mail já é membro desta campanha.',
+                    email_already_registered: 'Este e-mail já possui conta em outro contexto. Use outro e-mail.',
                     email_in_another_campaign: 'Este e-mail já pertence a outra campanha.',
                     password_min_6: 'A senha precisa ter no mínimo 6 caracteres.',
                     invalid_email: 'E-mail inválido.',
@@ -109,6 +108,12 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
                 };
                 throw new Error(MAP[json?.error] || json?.detail || json?.error || 'Falha ao criar o acesso do membro.');
             }
+            // Re-adicionar o mesmo e-mail = atualizar: remove a linha de equipe antiga
+            // (evita duplicata; o login foi reaproveitado pelo backend).
+            await supabase.from('team_members')
+                .delete()
+                .eq('campaignId', user.campaignId)
+                .eq('email', memberWithoutPassword.email);
         }
 
         const { error } = await supabase.from('team_members').insert(sanitizeData({

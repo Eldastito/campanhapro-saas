@@ -210,8 +210,28 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
     // Já existe usuário com esse e-mail?
     const { data: existing } = await supabase
       .from('users').select('id, "campaignId"').eq('email', normalizedEmail).maybeSingle();
-    if (existing?.campaignId === campaignId) return res.status(409).json({ error: 'already_a_member' });
-    if (existing?.campaignId) return res.status(409).json({ error: 'email_in_another_campaign' });
+    if (existing?.campaignId && existing.campaignId !== campaignId) {
+      return res.status(409).json({ error: 'email_in_another_campaign' });
+    }
+
+    // REAPROVEITA: e-mail já é usuário desta campanha (ex.: cadastro anterior que
+    // não completou) → reseta a senha + atualiza papel/nome, em vez de barrar.
+    if (existing?.campaignId === campaignId) {
+      await supabase.auth.admin.updateUserById(existing.id, {
+        password,
+        user_metadata: { name: nm },
+      }).catch((e) => console.warn('[team] updateUser pwd falhou:', e?.message));
+      await supabase.from('users').update({ name: nm, type: role, role: 'active' }).eq('id', existing.id);
+      await audit(supabase, {
+        ...actorFromRequest(req),
+        action: 'team.member.reactivate',
+        resourceType: 'user',
+        resourceId: existing.id,
+        severity: 'info',
+        metadata: { email: normalizedEmail, role },
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, userId: existing.id, reused: true });
+    }
 
     // 1. Identidade no Supabase Auth (e-mail já confirmado → login direto).
     const { data: created, error: authErr } = await supabase.auth.admin.createUser({
@@ -221,8 +241,25 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
       user_metadata: { name: nm },
     });
     if (authErr || !created?.user) {
+      // Conta existe no Auth mas sem linha em users (órfã) → tenta localizar e reaproveitar.
       const dup = String(authErr?.message ?? '').toLowerCase().includes('already') ||
                   String(authErr?.message ?? '').toLowerCase().includes('registered');
+      if (dup) {
+        try {
+          const { data: list } = await supabase.auth.admin.listUsers();
+          const found = list?.users?.find((u: any) => (u.email ?? '').toLowerCase() === normalizedEmail);
+          if (found) {
+            await supabase.auth.admin.updateUserById(found.id, { password, user_metadata: { name: nm } }).catch(() => {});
+            await supabase.from('users').upsert({
+              id: found.id, name: nm, email: normalizedEmail, type: role,
+              plan: 'Básico', role: 'active', campaignId, isSupremeAdmin: false,
+            }, { onConflict: 'id' });
+            return res.status(200).json({ ok: true, userId: found.id, reused: true });
+          }
+        } catch (e: any) {
+          console.warn('[team] reaproveitar conta órfã falhou:', e?.message);
+        }
+      }
       return res.status(dup ? 409 : 400).json({
         error: dup ? 'email_already_registered' : 'auth_create_failed',
         detail: authErr?.message,
