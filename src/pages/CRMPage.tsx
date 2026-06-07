@@ -79,7 +79,16 @@ const CRMPage: React.FC = () => {
     neighborhood: '',
     electoralZone: '',
     electoralSection: '',
-    tags: [] as string[]
+    tags: [] as string[],
+    // Funil / jornada (Fase A)
+    funnelStage: 'capturado',
+    voteIntention: '',
+    voteCertainty: '' as string,
+    objection: '',
+    isMultiplier: false,
+    influenceCount: 0,
+    whatsappOptin: false,
+    preferredChannel: '',
   });
 
   const pautasInteresse = useMemo(() => {
@@ -178,7 +187,12 @@ const CRMPage: React.FC = () => {
       const { data: created, error } = await supabase.from('contacts').insert([{
         ...newContact,
         campaignId: user.campaignId,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        // coerções p/ colunas tipadas (evita '' em integer)
+        voteCertainty: newContact.voteCertainty === '' ? null : Number(newContact.voteCertainty),
+        voteIntention: newContact.voteIntention || null,
+        objection: newContact.objection?.trim() || null,
+        influenceCount: newContact.isMultiplier ? (Number(newContact.influenceCount) || 0) : 0,
       }]).select('id').single();
 
       if (error) throw error;
@@ -193,7 +207,7 @@ const CRMPage: React.FC = () => {
       });
 
       setIsAddModalOpen(false);
-      setNewContact({ name: '', phone: '', classification: 'Neutro', neighborhood: '', electoralZone: '', electoralSection: '', tags: [] });
+      setNewContact({ name: '', phone: '', classification: 'Neutro', neighborhood: '', electoralZone: '', electoralSection: '', tags: [], funnelStage: 'capturado', voteIntention: '', voteCertainty: '', objection: '', isMultiplier: false, influenceCount: 0, whatsappOptin: false, preferredChannel: '' });
       fetchContacts();
     } catch (err: any) {
       console.error("Erro ao adicionar contato:", err);
@@ -720,6 +734,106 @@ const CRMPage: React.FC = () => {
                       value={newContact.electoralSection}
                       onChange={(e) => setNewContact({ ...newContact, electoralSection: e.target.value })}
                     />
+                  </div>
+                </div>
+
+                {/* ===== Funil / Jornada do eleitor (alimenta a IA) ===== */}
+                <div className="pt-3 mt-1 border-t border-white/5">
+                  <p className="text-[10px] font-black uppercase text-blue-400 tracking-widest mb-3">Funil de Conversão (para a IA)</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase">Intenção de voto</label>
+                      <select
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                        value={newContact.voteIntention}
+                        onChange={(e) => setNewContact({ ...newContact, voteIntention: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        <option value="apoia">Já apoia</option>
+                        <option value="vai_votar">Vai votar</option>
+                        <option value="indeciso">Indeciso</option>
+                        <option value="rejeita">Rejeita</option>
+                        <option value="nao_disse">Não disse</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase">Certeza do voto (0–10)</label>
+                      <select
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                        value={newContact.voteCertainty}
+                        onChange={(e) => setNewContact({ ...newContact, voteCertainty: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {Array.from({ length: 11 }, (_, i) => <option key={i} value={i}>{i}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase">Estágio no funil</label>
+                      <select
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                        value={newContact.funnelStage}
+                        onChange={(e) => setNewContact({ ...newContact, funnelStage: e.target.value })}
+                      >
+                        <option value="capturado">Capturado</option>
+                        <option value="qualificado">Qualificado</option>
+                        <option value="relacionamento">Relacionamento</option>
+                        <option value="comprometido">Comprometido</option>
+                        <option value="multiplicador">Multiplicador</option>
+                        <option value="votante">Votante</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 font-bold uppercase">Canal preferido</label>
+                      <select
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                        value={newContact.preferredChannel}
+                        onChange={(e) => setNewContact({ ...newContact, preferredChannel: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="ligacao">Ligação</option>
+                        <option value="presencial">Presencial</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {(newContact.voteIntention === 'indeciso' || newContact.voteIntention === 'rejeita') && (
+                    <div className="mt-4">
+                      <label className="text-[10px] text-gray-500 font-bold uppercase">Objeção / barreira</label>
+                      <input
+                        type="text"
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-blue-500"
+                        placeholder="Por que está indeciso / rejeita?"
+                        value={newContact.objection}
+                        onChange={(e) => setNewContact({ ...newContact, objection: e.target.value })}
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-4 mt-4">
+                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                      <input type="checkbox" className="accent-blue-500" checked={newContact.isMultiplier}
+                        onChange={(e) => setNewContact({ ...newContact, isMultiplier: e.target.checked })} />
+                      É multiplicador (influencia outros)
+                    </label>
+                    {newContact.isMultiplier && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] text-gray-500 font-bold uppercase">Influencia ~</label>
+                        <input type="number" min={0}
+                          className="w-20 bg-black/40 border border-white/10 rounded-xl px-2 py-1 text-sm focus:outline-none focus:border-blue-500"
+                          value={newContact.influenceCount}
+                          onChange={(e) => setNewContact({ ...newContact, influenceCount: Number(e.target.value) })} />
+                        <span className="text-[10px] text-gray-500">pessoas</span>
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                      <input type="checkbox" className="accent-blue-500" checked={newContact.whatsappOptin}
+                        onChange={(e) => setNewContact({ ...newContact, whatsappOptin: e.target.checked })} />
+                      Autoriza contato no WhatsApp
+                    </label>
                   </div>
                 </div>
               </div>
