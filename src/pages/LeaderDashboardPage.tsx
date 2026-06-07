@@ -7,7 +7,7 @@
 // - Indicadores de votos planejados vs estimados
 
 import * as React from 'react';
-import { UserPlus, MessageCircle, Loader2, Pencil, KeyRound, Trash2, ListChecks, Plus } from 'lucide-react';
+import { UserPlus, MessageCircle, Loader2, Pencil, KeyRound, Trash2, ListChecks, Plus, AlertTriangle, Trophy } from 'lucide-react';
 import { useTeamTasks, TASK_STATUS_LABEL, TeamTask } from '../hooks/useTeamTasks';
 import Header from '../components/Header';
 import Card from '../components/ui/Card';
@@ -129,8 +129,10 @@ const LeaderDashboardPage: React.FC = () => {
     const lideratosComLogin = (teamMembers as any[]).filter(m => m.userId);
 
     const handleCreateTask = async () => {
+        if (!newTask.assignedToUserId) { alert('Selecione o liderado responsável pela tarefa.'); return; }
         if (!newTask.title.trim()) { alert('Descreva a tarefa.'); return; }
         const alvo = lideratosComLogin.find(m => m.userId === newTask.assignedToUserId);
+        if (!alvo) { alert('Liderado inválido. Selecione um membro da equipe.'); return; }
         setCreatingTask(true);
         try {
             await createTask({
@@ -206,6 +208,23 @@ const LeaderDashboardPage: React.FC = () => {
         }).sort((a, b) => b.total - a.total);
     }, [myLideratos, myTeamVisits, myTeamEngagements]);
 
+    // Acompanhamento: inatividade + produção da semana (últimos 7 dias).
+    const diasDesde = (d?: string | null) => d ? Math.floor((Date.now() - new Date(d + 'T00:00:00').getTime()) / 86400000) : null;
+    const acompanhamento = React.useMemo(() => {
+        return myLideratos.map((m: any) => {
+            const realizadas = myTeamVisits.filter(v => v.apoiador === m.name && v.realizada === 'sim');
+            const datas = realizadas.map(v => v.data).filter(Boolean).sort();
+            const ultima = datas.length ? datas[datas.length - 1] : null;
+            const visSemana = realizadas.filter(v => { const d = diasDesde(v.data); return d !== null && d <= 7; }).length;
+            const engSemana = myTeamEngagements.filter(e => e.apoiador === m.name && (() => { const d = diasDesde(e.data); return d !== null && d <= 7; })()).length;
+            return { ...m, ultimaVisita: ultima, diasInativo: diasDesde(ultima), semana: visSemana + engSemana };
+        });
+    }, [myLideratos, myTeamVisits, myTeamEngagements]);
+
+    const INATIVO_DIAS = 5;
+    const inativos = acompanhamento.filter((m: any) => m.diasInativo === null || m.diasInativo > INATIVO_DIAS);
+    const ranking = [...acompanhamento].filter((m: any) => m.semana > 0).sort((a: any, b: any) => b.semana - a.semana).slice(0, 5);
+
     return (
         <div className="min-h-screen bg-slate-900 text-slate-200">
             <Header logoUrl={headerLogo} />
@@ -261,6 +280,54 @@ const LeaderDashboardPage: React.FC = () => {
                         <p className="text-xs text-slate-500">{recursosDisponiveis} disponíveis</p>
                     </Card>
                 </div>
+
+                {/* Acompanhamento: inatividade + ranking da semana */}
+                {acompanhamento.length > 0 && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <Card className="bg-slate-800 p-4">
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2">
+                                <AlertTriangle className="w-5 h-5 text-amber-400" /> Alertas de Inatividade
+                                <span className="text-xs font-normal text-slate-500">(sem visita há +{INATIVO_DIAS} dias)</span>
+                            </h2>
+                            {inativos.length === 0 ? (
+                                <p className="text-emerald-400/80 text-sm">Equipe toda ativa nos últimos {INATIVO_DIAS} dias. 🎉</p>
+                            ) : (
+                                <ul className="space-y-2">
+                                    {inativos.map((m: any) => {
+                                        const wa = waLink(m.phone);
+                                        return (
+                                        <li key={m.id} className="flex items-center justify-between gap-3 bg-rose-500/5 border border-rose-500/20 rounded-lg p-3">
+                                            <div>
+                                                <p className="font-semibold">{m.name}</p>
+                                                <p className="text-xs text-amber-400">{m.diasInativo === null ? 'Nunca registrou visita' : `Há ${m.diasInativo} dias sem visita`}</p>
+                                            </div>
+                                            {wa && <a href={wa} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-xs shrink-0"><MessageCircle className="w-4 h-4" /> Cobrar</a>}
+                                        </li>
+                                    );})}
+                                </ul>
+                            )}
+                        </Card>
+
+                        <Card className="bg-slate-800 p-4">
+                            <h2 className="text-lg font-bold mb-3 flex items-center gap-2"><Trophy className="w-5 h-5 text-yellow-400" /> Ranking da Semana</h2>
+                            {ranking.length === 0 ? (
+                                <p className="text-slate-400 text-sm">Sem produção registrada nos últimos 7 dias ainda.</p>
+                            ) : (
+                                <ol className="space-y-2">
+                                    {ranking.map((m: any, i: number) => (
+                                        <li key={m.id} className="flex items-center justify-between gap-3 bg-slate-900/50 rounded-lg p-3">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <span className={`text-lg font-black w-6 text-center ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-slate-300' : i === 2 ? 'text-amber-600' : 'text-slate-500'}`}>{i + 1}º</span>
+                                                <span className="font-semibold truncate">{m.name}</span>
+                                            </div>
+                                            <span className="text-sm font-bold text-emerald-400 shrink-0">{m.semana} ações</span>
+                                        </li>
+                                    ))}
+                                </ol>
+                            )}
+                        </Card>
+                    </div>
+                )}
 
                 {/* Mapa ao vivo da equipe */}
                 <TeamLiveMap />
@@ -377,7 +444,7 @@ const LeaderDashboardPage: React.FC = () => {
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-2 mb-4 bg-slate-900/50 p-3 rounded-lg">
                         <select value={newTask.assignedToUserId} onChange={(e) => setNewTask({ ...newTask, assignedToUserId: e.target.value })}
                                 className="md:col-span-3 bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-sm">
-                            <option value="">Para a equipe (todos)</option>
+                            <option value="">Responsável (obrigatório)…</option>
                             {lideratosComLogin.map((m: any) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
                         </select>
                         <input value={newTask.title} onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
