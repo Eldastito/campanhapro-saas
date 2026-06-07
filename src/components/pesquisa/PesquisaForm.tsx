@@ -47,6 +47,9 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
   const customFieldDefs = (config?.customFields?.pesquisa as any[]) || [];
   const [customValues, setCustomValues] = React.useState<Record<string, any>>({});
 
+  // Inteligência competitiva (Fase D).
+  const [comp, setComp] = React.useState({ lembrancaCandidato: '', avaliacaoCandidato: '', avaliacaoAdversario: '', probMudancaVoto: '' });
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -78,7 +81,16 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
         perfilRespostas: [q1, q2, q3, q4, q5, q6],
         notaBairro: Number(formData.notaBairro) as 1|2|3|4|5
     };
-    onSave({ ...finalData, customFields: customValues, __lead: lead } as any);
+    const n = (v: string) => (v === '' ? null : Number(v));
+    onSave({
+      ...finalData,
+      customFields: customValues,
+      lembrancaCandidato: comp.lembrancaCandidato === '' ? null : comp.lembrancaCandidato === 'sim',
+      avaliacaoCandidato: n(comp.avaliacaoCandidato),
+      avaliacaoAdversario: n(comp.avaliacaoAdversario),
+      probMudancaVoto: n(comp.probMudancaVoto),
+      __lead: lead,
+    } as any);
   };
 
   return (
@@ -131,6 +143,42 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
           Autoriza contato no WhatsApp (LGPD)
         </label>
         <p className="text-[10px] text-slate-500">Se preencher nome/telefone, o entrevistado entra no CRM com a intenção de voto desta pesquisa.</p>
+      </div>
+
+      {/* Inteligência competitiva (Fase D — alimenta o SWOT da IA) */}
+      <div className="p-4 bg-amber-900/10 border border-amber-500/20 rounded-lg space-y-3">
+        <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">Inteligência Competitiva</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Conhece/lembra do candidato?</label>
+            <select value={comp.lembrancaCandidato} onChange={(e) => setComp({ ...comp, lembrancaCandidato: e.target.value })} className="w-full bg-slate-700 p-2 rounded">
+              <option value="">—</option>
+              <option value="sim">Sim</option>
+              <option value="nao">Não</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Prob. de mudar o voto (0–10)</label>
+            <select value={comp.probMudancaVoto} onChange={(e) => setComp({ ...comp, probMudancaVoto: e.target.value })} className="w-full bg-slate-700 p-2 rounded">
+              <option value="">—</option>
+              {Array.from({ length: 11 }, (_, i) => <option key={i} value={i}>{i}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Avaliação do candidato (0–10)</label>
+            <select value={comp.avaliacaoCandidato} onChange={(e) => setComp({ ...comp, avaliacaoCandidato: e.target.value })} className="w-full bg-slate-700 p-2 rounded">
+              <option value="">—</option>
+              {Array.from({ length: 11 }, (_, i) => <option key={i} value={i}>{i}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Avaliação do principal adversário (0–10)</label>
+            <select value={comp.avaliacaoAdversario} onChange={(e) => setComp({ ...comp, avaliacaoAdversario: e.target.value })} className="w-full bg-slate-700 p-2 rounded">
+              <option value="">—</option>
+              {Array.from({ length: 11 }, (_, i) => <option key={i} value={i}>{i}</option>)}
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Campos personalizados (Form Builder → alvo Pesquisa) */}
