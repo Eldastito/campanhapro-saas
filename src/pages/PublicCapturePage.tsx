@@ -12,7 +12,10 @@ const PublicCapturePage: React.FC = () => {
     phone: '',
     neighborhood: '',
     birthDate: '',
-    interests: [] as string[]
+    interests: [] as string[],
+    comoConheceu: '',          // origem/canal → ROI por canal
+    jaApoia: '',               // intenção de voto declarada
+    querVoluntario: false,     // quer ajudar como voluntário
   });
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -36,9 +39,12 @@ const PublicCapturePage: React.FC = () => {
           neighborhood: formData.neighborhood,
           birthDate: formData.birthDate,
           campaignId: campaignId,
-          source: 'App Externa',
-          classification: 'Indeciso', // Triagem inicial
-          tags: formData.interests,
+          source: formData.comoConheceu || 'captura_publica',     // origem/canal → ROI
+          classification: formData.jaApoia === 'apoia' ? 'Apoiador' : 'Indeciso',
+          voteIntention: formData.jaApoia || null,                // intenção declarada
+          funnelStage: formData.jaApoia === 'apoia' ? 'qualificado' : 'capturado',
+          whatsappOptin: true,                                    // consentiu o contato
+          tags: [...formData.interests, ...(formData.querVoluntario ? ['voluntario'] : [])],
           createdAt: new Date().toISOString()
         });
   
@@ -209,6 +215,62 @@ const PublicCapturePage: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {/* Como conheceu (origem/canal) */}
+            <div className="mt-8">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Como você conheceu a campanha?</p>
+              <select
+                value={formData.comoConheceu}
+                onChange={e => setFormData({ ...formData, comoConheceu: e.target.value })}
+                className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-4 focus:outline-none focus:border-blue-500 text-gray-300"
+              >
+                <option value="">Selecione (opcional)</option>
+                <option value="redes_sociais">Redes sociais</option>
+                <option value="whatsapp">WhatsApp</option>
+                <option value="indicacao">Indicação de amigo/familiar</option>
+                <option value="evento">Evento / comício</option>
+                <option value="visita">Visita / panfleto na rua</option>
+                <option value="busca">Busca na internet</option>
+                <option value="outro">Outro</option>
+              </select>
+            </div>
+
+            {/* Já apoia? (intenção) */}
+            <div className="mt-6">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Você já pretende votar no nosso candidato?</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {[
+                  { v: 'apoia', l: 'Já apoio!' },
+                  { v: 'vai_votar', l: 'Vou votar' },
+                  { v: 'indeciso', l: 'Ainda indeciso' },
+                  { v: 'nao_disse', l: 'Prefiro não dizer' },
+                ].map(opt => (
+                  <button
+                    key={opt.v}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, jaApoia: formData.jaApoia === opt.v ? '' : opt.v })}
+                    className={`px-3 py-3 rounded-xl text-xs font-bold transition-all border ${
+                      formData.jaApoia === opt.v
+                        ? 'bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-600/20'
+                        : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                    }`}
+                  >
+                    {opt.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Quer ser voluntário? */}
+            <label className="mt-6 flex items-center gap-3 p-4 bg-black/30 border border-white/10 rounded-2xl cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-5 h-5 rounded border-white/10 bg-black/40 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                checked={formData.querVoluntario}
+                onChange={e => setFormData({ ...formData, querVoluntario: e.target.checked })}
+              />
+              <span className="text-sm text-gray-300 font-medium">Quero ajudar como <strong className="text-emerald-400">voluntário</strong> na campanha</span>
+            </label>
           </div>
 
           <div className="flex items-start gap-3 p-4 bg-[#161b22]/50 border border-white/10 rounded-2xl">
