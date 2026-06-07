@@ -96,6 +96,7 @@ const CRMPage: React.FC = () => {
     influenceCount: 0,
     whatsappOptin: false,
     preferredChannel: '',
+    source: 'crm_manual',  // origem/canal de aquisição (ROI por canal)
     customFields: {} as Record<string, any>,
   });
 
@@ -215,7 +216,7 @@ const CRMPage: React.FC = () => {
       });
 
       setIsAddModalOpen(false);
-      setNewContact({ name: '', phone: '', classification: 'Neutro', neighborhood: '', electoralZone: '', electoralSection: '', tags: [], funnelStage: 'capturado', voteIntention: '', voteCertainty: '', objection: '', isMultiplier: false, influenceCount: 0, whatsappOptin: false, preferredChannel: '', customFields: {} });
+      setNewContact({ name: '', phone: '', classification: 'Neutro', neighborhood: '', electoralZone: '', electoralSection: '', tags: [], funnelStage: 'capturado', voteIntention: '', voteCertainty: '', objection: '', isMultiplier: false, influenceCount: 0, whatsappOptin: false, preferredChannel: '', source: 'crm_manual', customFields: {} });
       fetchContacts();
     } catch (err: any) {
       console.error("Erro ao adicionar contato:", err);
@@ -811,6 +812,26 @@ const CRMPage: React.FC = () => {
                         <option value="presencial">Presencial</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="text-[10px] text-gray-500 font-bold uppercase">Origem do contato (de onde veio)</label>
+                    <select
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                      value={newContact.source}
+                      onChange={(e) => setNewContact({ ...newContact, source: e.target.value })}
+                    >
+                      <option value="crm_manual">Cadastro manual</option>
+                      <option value="indicacao">Indicação</option>
+                      <option value="evento">Evento / comício</option>
+                      <option value="visita">Visita porta a porta</option>
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="redes_sociais">Redes sociais</option>
+                      <option value="public_form">Formulário público</option>
+                      <option value="pesquisa">Pesquisa</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                    <p className="text-[9px] text-gray-600 mt-1">Alimenta o ROI por canal (custo por lead) na análise da IA.</p>
                   </div>
 
                   {(newContact.voteIntention === 'indeciso' || newContact.voteIntention === 'rejeita') && (
