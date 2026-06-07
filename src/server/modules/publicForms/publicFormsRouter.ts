@@ -124,12 +124,12 @@ export function createPublicFormsRouter(supabaseAdmin: SupabaseClient) {
         contact_id: contact?.id ?? null,
         ip: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null,
         user_agent: (req.headers['user-agent'] as string)?.slice(0, 300) || null,
-      }).catch(() => {});
+      }).then(() => {}, () => {});
 
       // Incrementa contador (não-atômico; ok pra métrica)
       await supabaseAdmin.from('public_forms')
         .update({ submissions_count: (form.submissions_count ?? 0) + 1, updated_at: new Date().toISOString() })
-        .eq('id', form.id).catch(() => {});
+        .eq('id', form.id).then(() => {}, () => {});
 
       return res.status(201).json({ ok: true, message: form.success_message || 'Recebemos seu cadastro. Obrigado!' });
     } catch (err: any) {
