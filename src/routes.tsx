@@ -13,6 +13,7 @@ import PublicColinhaPage from './pages/PublicColinhaPage';
 import PublicCapturePage from './pages/PublicCapturePage';
 import PublicTeamRegistrationPage from './pages/PublicTeamRegistrationPage';
 import PublicFormPage from './pages/PublicFormPage';
+import SubscribePage from './pages/SubscribePage';
 import UseCasesPage from './pages/UseCasesPage';
 
 /**
@@ -49,6 +50,13 @@ export const AppRoutes: React.FC = () => {
                 <Route
                     path="/welcome"
                     element={user ? <WelcomePage /> : <Navigate to="/login" replace />}
+                />
+                {/* Onboarding pago — escolher plano + pagar (gate de acesso) */}
+                <Route
+                    path="/assinar"
+                    element={user
+                        ? (user.campaignId ? <SubscribePage /> : <Navigate to="/welcome" replace />)
+                        : <Navigate to="/login" replace />}
                 />
                 <Route path="/invite/:token" element={<InvitePage />} />
                 

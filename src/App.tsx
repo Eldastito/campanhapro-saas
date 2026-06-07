@@ -1,5 +1,7 @@
 import * as React from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
+import { useProfilePermissions } from './contexts/PermissionsContext';
 import CampaignWebApp from './CampaignWebApp';
 import { DataProvider } from './contexts/DataContext';
 import SupporterPage from './pages/SupporterPage';
@@ -16,6 +18,7 @@ import LoadingScreen from './components/ui/LoadingScreen';
  */
 const App: React.FC = () => {
     const { user, isInitializing, userType } = useAuth();
+    const { config, isLoading: permsLoading } = useProfilePermissions();
 
     if (isInitializing) {
         return <LoadingScreen />;
@@ -24,7 +27,7 @@ const App: React.FC = () => {
     // Se não houver usuário, as rotas (routes.tsx) já redirecionam para o login.
     if (!user) return null;
 
-    // Prioridade máxima: Gestor da Plataforma (Supreme Admin)
+    // Prioridade máxima: Gestor da Plataforma (Supreme Admin) — nunca é barrado.
     if (user?.isSupremeAdmin) {
         return <SupremeAdminPage />;
     }
@@ -32,6 +35,15 @@ const App: React.FC = () => {
     // Conta bloqueada — sai antes de qualquer outra view
     if (userType === 'blocked') {
         return <BlockedPage />;
+    }
+
+    // Onboarding pago: campanha sem pagamento confirmado não acessa o app.
+    // Só barra quando sabemos que está pendente (fail-open enquanto carrega/sem config).
+    if (permsLoading) {
+        return <LoadingScreen />;
+    }
+    if (config?.status === 'pending_payment') {
+        return <Navigate to="/assinar" replace />;
     }
 
     // Roteamento por tipo de usuário (Profile-based)

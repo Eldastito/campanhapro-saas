@@ -24,7 +24,7 @@ export interface CampaignConfig {
     };
     customFields: Record<string, CustomField[]>;
     profilePermissions?: ProfilePermissions;
-    status: 'active' | 'blocked';
+    status: 'active' | 'blocked' | 'pending_payment';
     planTier: 'limitado' | 'completo';
 }
 

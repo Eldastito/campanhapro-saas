@@ -69,9 +69,9 @@ const WelcomePage: React.FC = () => {
       if (!res.ok) throw new Error(json.error ?? 'Erro ao criar campanha');
 
       setDone(true);
-      // Brief celebration, then force AuthContext to re-fetch user (page reload)
+      // Onboarding pago: após criar a campanha, vai escolher o plano e pagar.
       setTimeout(() => {
-        window.location.href = '/app';
+        window.location.href = '/assinar';
       }, 1500);
     } catch (err: any) {
       setError(err.message);
@@ -141,8 +141,8 @@ const WelcomePage: React.FC = () => {
           )}
 
           <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-3 text-xs text-slate-400">
-            <p className="font-medium text-slate-300 mb-1">Você começa no plano Gratuito</p>
-            <p>Dashboard + CRM básico. Faça upgrade para Pro ou Enterprise na aba <span className="text-slate-200">Plano</span> a qualquer momento para liberar IA, WhatsApp, simulações de cenários e mais.</p>
+            <p className="font-medium text-slate-300 mb-1">Próximo passo: escolher seu plano</p>
+            <p>Depois de criar a campanha, você escolhe entre <span className="text-slate-200">Essencial, Estratégico ou Total</span> e ativa o acesso pagando com PIX, cartão ou boleto.</p>
           </div>
 
           <Button type="submit" className="w-full" disabled={submitting}>

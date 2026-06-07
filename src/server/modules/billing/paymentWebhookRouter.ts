@@ -95,6 +95,28 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
             .update({ status: nextStatus, updatedAt: new Date().toISOString() })
             .eq('id', subscriptionRowId);
         }
+
+        // Pagamento CONFIRMADO → libera o acesso da campanha (gate do onboarding pago):
+        // campaign_configs.status 'pending_payment' → 'active' + aplica os módulos do plano.
+        if (event.status === 'paid' && campaignId) {
+          try {
+            const { data: subRow } = await supabase
+              .from('subscriptions').select('"planId"').eq('id', subscriptionRowId).maybeSingle();
+            const planId = (subRow as any)?.planId as string | undefined;
+            let features: string[] = [];
+            if (planId) {
+              const { data: plan } = await supabase.from('plans').select('features').eq('id', planId).maybeSingle();
+              features = (plan as any)?.features ?? [];
+            }
+            const planTier = planId === 'enterprise' ? 'completo' : 'limitado';
+            await supabase.from('campaign_configs').upsert(
+              { id: campaignId, status: 'active', planTier, features },
+              { onConflict: 'id' },
+            );
+          } catch (e) {
+            console.warn('[webhook] ativar campaign_configs falhou:', e);
+          }
+        }
       }
 
       await audit(supabase, {

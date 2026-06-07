@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { subscribeCampaign } from '../billing/billingService';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { sendWelcomeEmail } from '../email/emailService';
 
@@ -108,14 +107,18 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
       return res.status(500).json({ error: 'user_upsert_failed', detail: userErr.message });
     }
 
-    // 3. Activate the free subscription
+    // 3. Cria a config da campanha em estado PENDENTE DE PAGAMENTO.
+    //    Sem assinatura grátis automática — o acesso só libera após o pagamento
+    //    do plano escolhido (webhook do Asaas seta status='active').
     try {
-      await subscribeCampaign(supabase, campaignId, 'free', {
-        provider: 'stub',
-      });
+      await supabase.from('campaign_configs').upsert({
+        id: campaignId,
+        status: 'pending_payment',
+        planTier: 'limitado',
+        features: [],
+      }, { onConflict: 'id' });
     } catch (err: any) {
-      // Free plan failure is non-fatal — user can pick a plan later from Billing tab
-      console.warn('[onboarding] free subscription failed (non-fatal):', err.message);
+      console.warn('[onboarding] campaign_configs pending falhou (não-fatal):', err.message);
     }
 
     // 4. Audit
