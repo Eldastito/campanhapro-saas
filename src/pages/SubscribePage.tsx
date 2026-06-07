@@ -64,14 +64,16 @@ const SubscribePage: React.FC = () => {
     });
     const json = await res.json();
     if (!res.ok) { setError(json.error || 'Falha no checkout'); throw new Error(json.error); }
-    if (json.checkoutUrl) { window.location.href = json.checkoutUrl; return; }
     if (json.pixQrCode || json.pixCopyPaste) {
       setPix({ qr: json.pixQrCode, copyPaste: json.pixCopyPaste });
       setSelected(null);
       return;
     }
-    // stub/sem url → recarrega pra checar acesso
-    window.location.href = '/app';
+    if (json.checkoutUrl) { window.location.href = json.checkoutUrl; return; }
+    // Sem link nem PIX: NÃO redireciona (evitaria loop /app→/assinar).
+    // A cobrança foi criada no Asaas; mostra orientação e o botão de já paguei.
+    setSelected(null);
+    setError('A cobrança foi criada, mas o link de pagamento ainda não ficou pronto. Aguarde alguns segundos e clique em "Assinar" de novo, ou pague pela cobrança em aberto no Asaas. O acesso libera automaticamente após a confirmação.');
   };
 
   return (

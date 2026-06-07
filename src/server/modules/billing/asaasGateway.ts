@@ -138,24 +138,29 @@ export class AsaasGateway implements PaymentGateway {
     let checkoutUrl: string | null = null;
     let pixQrCode: string | undefined;
     let pixCopyPaste: string | undefined;
-    try {
-      const payments = await this.request<{ data?: Array<{ id: string; invoiceUrl?: string }> }>(
-        'GET', `/subscriptions/${data.id}/payments`,
-      );
-      const first = payments?.data?.[0];
-      if (first) {
-        checkoutUrl = first.invoiceUrl ?? null;
-        if (billingType === 'PIX') {
-          try {
-            const pix = await this.request<{ encodedImage?: string; payload?: string }>(
-              'GET', `/payments/${first.id}/pixQrCode`,
-            );
-            pixQrCode = pix?.encodedImage;
-            pixCopyPaste = pix?.payload;
-          } catch { /* PIX QR é opcional — o invoiceUrl já permite pagar */ }
-        }
+    // A 1ª cobrança da assinatura pode levar 1-2s pra ser gerada — tenta algumas vezes.
+    let first: { id: string; invoiceUrl?: string } | undefined;
+    for (let attempt = 0; attempt < 4 && !first; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 900));
+      try {
+        const payments = await this.request<{ data?: Array<{ id: string; invoiceUrl?: string }> }>(
+          'GET', `/subscriptions/${data.id}/payments`,
+        );
+        first = payments?.data?.[0];
+      } catch { /* tenta de novo */ }
+    }
+    if (first) {
+      checkoutUrl = first.invoiceUrl ?? null;
+      if (billingType === 'PIX') {
+        try {
+          const pix = await this.request<{ encodedImage?: string; payload?: string }>(
+            'GET', `/payments/${first.id}/pixQrCode`,
+          );
+          pixQrCode = pix?.encodedImage;
+          pixCopyPaste = pix?.payload;
+        } catch { /* PIX QR é opcional — o invoiceUrl já permite pagar */ }
       }
-    } catch { /* sem link imediato — frontend trata via fallback */ }
+    }
 
     return {
       providerSubscriptionId: data.id,
