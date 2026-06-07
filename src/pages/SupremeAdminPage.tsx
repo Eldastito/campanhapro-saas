@@ -12,6 +12,7 @@ import { ModernArea, ModernBar } from '../components/supreme/Charts';
 import FormBuilder from '../components/supreme/FormBuilder';
 import PublicFormsPanel from '../components/supreme/PublicFormsPanel';
 import PlatformFormsCatalog from '../components/supreme/PlatformFormsCatalog';
+import BusinessKpis from '../components/supreme/BusinessKpis';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -81,8 +82,28 @@ async function supremeFetch(path: string, init?: RequestInit): Promise<any> {
 
 const SupremeAdminPage: React.FC = () => {
     const { user, logout, sendPasswordReset } = useAuth();
-    const [activeTab, setActiveTab] = useState<'overview' | 'campaigns' | 'users' | 'platform' | 'financial' | 'audit' | 'forms'>('overview');
+    // Aba ativa persistida na URL (?tab=) → sobrevive a refresh e é compartilhável.
+    const VALID_TABS = ['overview', 'campaigns', 'users', 'platform', 'financial', 'audit', 'forms'] as const;
+    type SupremeTab = typeof VALID_TABS[number];
+    const [activeTab, setActiveTab] = useState<SupremeTab>(() => {
+        try {
+            const t = new URLSearchParams(window.location.search).get('tab');
+            if (t && (VALID_TABS as readonly string[]).includes(t)) return t as SupremeTab;
+        } catch { /* ignore */ }
+        return 'overview';
+    });
     const [formsSubTab, setFormsSubTab] = useState<'internal' | 'public'>('internal');
+
+    // Sincroniza a aba ativa com a URL (sem empilhar histórico) p/ persistir no refresh.
+    useEffect(() => {
+        try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get('tab') !== activeTab) {
+                url.searchParams.set('tab', activeTab);
+                window.history.replaceState({}, '', url.toString());
+            }
+        } catch { /* ignore */ }
+    }, [activeTab]);
 
     // Auditoria (F2)
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
@@ -1283,6 +1304,9 @@ const SupremeAdminPage: React.FC = () => {
                                 </div>
                                 <p className="text-[10px] text-slate-600 mt-2">Custo IA convertido a US$ 1 = R$ {financial?.usdBrlRate ?? '5.40'} (consumo dos últimos 30 dias).</p>
                             </div>
+
+                            {/* ===== KPIs DE SAÚDE DO NEGÓCIO (CAC/LTV/ROI/Equilíbrio) ===== */}
+                            <BusinessKpis financial={financial} />
 
                             {/* ===== IMPOSTOS (SIMPLES NACIONAL) ===== */}
                             <Card className="bg-slate-900 border-white/5 overflow-hidden">
