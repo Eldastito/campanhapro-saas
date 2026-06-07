@@ -153,6 +153,11 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
       if (!name || !email) {
         return res.status(400).json({ error: 'name e email obrigatórios para gateways de pagamento' });
       }
+      // CPF/CNPJ é obrigatório no Asaas para PIX/cartão/boleto — sanitiza (só dígitos).
+      const cpf = (cpfCnpj || '').replace(/\D/g, '');
+      if (gateway.providerName === 'asaas' && !cpf) {
+        return res.status(400).json({ error: 'cpf_obrigatorio', detail: 'CPF ou CNPJ é obrigatório para pagamento.' });
+      }
 
       // Re-use the gateway customer id if we already have one for this campaign
       const existingSub = await getActiveSubscription(supabase, campaignId);
@@ -166,9 +171,13 @@ export function createBillingRouter(supabase: SupabaseClient): Router {
       }
       if (!providerCustomerId) {
         const customer = await gateway.createCustomer({
-          campaignId, name, email, cpfCnpj, phone,
+          campaignId, name, email, cpfCnpj: cpf, phone,
         });
         providerCustomerId = customer.providerCustomerId;
+      } else if (cpf && typeof (gateway as any).updateCustomer === 'function') {
+        // Cliente reusado pode ter sido criado sem CPF (ex.: método UNDEFINED) —
+        // garante o CPF antes de gerar a cobrança, senão o Asaas recusa.
+        await (gateway as any).updateCustomer({ providerCustomerId, cpfCnpj: cpf, name, email, phone });
       }
 
       const subResult = await gateway.createSubscription({

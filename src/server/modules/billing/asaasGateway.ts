@@ -99,6 +99,17 @@ export class AsaasGateway implements PaymentGateway {
     return { providerCustomerId: data.id };
   }
 
+  /** Atualiza um cliente existente (ex.: preencher o CPF que faltava). */
+  async updateCustomer(params: { providerCustomerId: string; name?: string; email?: string; cpfCnpj?: string; phone?: string }): Promise<void> {
+    const body: Record<string, any> = {};
+    if (params.name) body.name = params.name;
+    if (params.email) body.email = params.email;
+    if (params.cpfCnpj) body.cpfCnpj = params.cpfCnpj;
+    if (params.phone) body.mobilePhone = params.phone;
+    if (Object.keys(body).length === 0) return;
+    await this.request('POST', `/customers/${params.providerCustomerId}`, body);
+  }
+
   async createSubscription(params: CreateSubscriptionParams): Promise<CreateSubscriptionResult> {
     // Asaas wants the next due date in YYYY-MM-DD.
     // Use tomorrow so the user has time to pay the first invoice.
