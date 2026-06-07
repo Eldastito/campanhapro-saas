@@ -32,6 +32,36 @@ export interface PlatformForm {
   fields: CatalogField[];
 }
 
+/**
+ * Campos NATIVOS (hardcoded) que o Supreme Admin pode OCULTAR por campanha,
+ * por alvo do Form Builder. A `key` precisa bater com a checada no componente
+ * do formulário (ex.: PesquisaForm lê config.customFields._hidden.pesquisa).
+ * Alguns keys representam um BLOCO inteiro (lead, competitiva, disc).
+ */
+export interface NativeHideableField {
+  key: string;
+  label: string;
+  note?: string;
+}
+export const NATIVE_HIDEABLE: Record<string, NativeHideableField[]> = {
+  pesquisa: [
+    { key: 'bairro', label: 'Bairro da Coleta', note: 'campo obrigatório se visível' },
+    { key: 'genero', label: 'Gênero' },
+    { key: 'faixaEtaria', label: 'Faixa Etária' },
+    { key: 'notaBairro', label: 'Nota para o Bairro (1-5)' },
+    { key: 'lead', label: 'Identificação do entrevistado', note: 'bloco inteiro — vira contato/lead no CRM' },
+    { key: 'competitiva', label: 'Inteligência Competitiva', note: 'bloco inteiro (alimenta o SWOT da IA)' },
+    { key: 'intencaoVoto', label: 'Intenção de Voto' },
+    { key: 'fatorRejeicao', label: 'Fator de Rejeição' },
+    { key: 'consumoNoticias', label: 'Principal Fonte de Informação' },
+    { key: 'dorImediata', label: 'Dor Imediata' },
+    { key: 'disc', label: 'Perfil Comportamental (DISC)', note: 'bloco inteiro (6 perguntas)' },
+    { key: 'observacoes', label: 'Observações de Campo' },
+  ],
+  visits: [],
+  contacts: [],
+};
+
 export const PLATFORM_FORMS: PlatformForm[] = [
   {
     id: 'visita', name: 'Visita de Campo', profiles: ['Apoiador', 'Líder', 'Colaborador'],

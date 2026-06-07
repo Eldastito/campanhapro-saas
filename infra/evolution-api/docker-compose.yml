@@ -44,7 +44,7 @@ services:
       - "8080:8080"
     environment:
       # ===== TROQUE ESTA CHAVE por algo aleatório longo (UUID, etc) =====
-      AUTHENTICATION_API_KEY: "TROQUE_POR_UMA_CHAVE_ALEATORIA_LONGA_AQUI"
+      AUTHENTICATION_API_KEY: "6049f2f42ccf4a6ca0e066bac3df38a9"
 
       SERVER_URL: "http://localhost:8080"
       SERVER_PORT: 8080

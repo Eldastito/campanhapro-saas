@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Plus, Trash2, ArrowUp, ArrowDown, Save, Eye, ListChecks,
+  Plus, Trash2, ArrowUp, ArrowDown, Save, Eye, EyeOff, ListChecks,
   Asterisk, Loader2, CheckCircle2, Type as TypeIcon,
 } from 'lucide-react';
+import { NATIVE_HIDEABLE } from './platformForms';
 
 /**
  * Form Builder (F5a) — Supreme Admin define campos personalizáveis por
@@ -62,6 +63,7 @@ const FormBuilder: React.FC<Props> = ({ campaigns, supremeFetch }) => {
   const [selCampaign, setSelCampaign] = useState<string>(campaigns[0]?.id ?? '');
   const [target, setTarget] = useState<string>('visits');
   const [schema, setSchema] = useState<Schema>(emptySchema());
+  const [hidden, setHidden] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -76,7 +78,7 @@ const FormBuilder: React.FC<Props> = ({ campaigns, supremeFetch }) => {
     let cancelled = false;
     setLoading(true); setError(null);
     supremeFetch(`/forms/${selCampaign}`)
-      .then((r) => { if (!cancelled) { setSchema({ ...emptySchema(), ...(r?.schema || {}) }); setDirty(false); } })
+      .then((r) => { if (!cancelled) { setSchema({ ...emptySchema(), ...(r?.schema || {}) }); setHidden(r?.hidden || {}); setDirty(false); } })
       .catch((e) => { if (!cancelled) setError(e?.message || 'Falha ao carregar'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -98,15 +100,29 @@ const FormBuilder: React.FC<Props> = ({ campaigns, supremeFetch }) => {
     mutate(copy);
   };
 
+  // ── Campos NATIVOS (hardcoded) que podem ser ocultados por campanha ──
+  const nativeFields = NATIVE_HIDEABLE[target] ?? [];
+  const hiddenForTarget = hidden[target] ?? [];
+  const isHidden = (key: string) => hiddenForTarget.includes(key);
+  const toggleHidden = (key: string) => {
+    setHidden((h) => {
+      const cur = h[target] ?? [];
+      const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+      return { ...h, [target]: next };
+    });
+    setDirty(true);
+  };
+
   const save = async () => {
     if (!selCampaign) return;
     setSaving(true); setError(null);
     try {
       const r = await supremeFetch(`/forms/${selCampaign}`, {
         method: 'PUT',
-        body: JSON.stringify({ schema }),
+        body: JSON.stringify({ schema, hidden }),
       });
       if (r?.schema) setSchema({ ...emptySchema(), ...r.schema });
+      if (r?.hidden) setHidden(r.hidden);
       setDirty(false);
       setSavedAt(Date.now());
     } catch (e: any) {
@@ -169,6 +185,47 @@ const FormBuilder: React.FC<Props> = ({ campaigns, supremeFetch }) => {
 
       {error && (
         <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-3">{error}</div>
+      )}
+
+      {/* CAMPOS NATIVOS — ocultar/mostrar campos fixos (hardcoded) do formulário */}
+      {nativeFields.length > 0 ? (
+        <div className="bg-slate-900/40 border border-white/5 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <EyeOff className="w-4 h-4 text-amber-400" />
+            <span className="text-[11px] font-black uppercase tracking-widest text-amber-400">Campos nativos do formulário</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mb-3">
+            Desligue os campos que esta campanha não deve ver. O formulário real ({activeTargetMeta.label}) deixa de exibi-los.
+            <span className="text-slate-600"> {hiddenForTarget.length} oculto(s).</span>
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {nativeFields.map((nf) => {
+              const off = isHidden(nf.key);
+              return (
+                <button
+                  key={nf.key}
+                  onClick={() => toggleHidden(nf.key)}
+                  disabled={!selCampaign || loading}
+                  className={`flex items-center justify-between gap-2 text-left px-3 py-2 rounded-lg border transition-all disabled:opacity-40 ${
+                    off ? 'bg-slate-950/60 border-white/5 opacity-60' : 'bg-slate-900 border-white/10 hover:border-amber-500/40'
+                  }`}
+                >
+                  <span>
+                    <span className={`text-xs font-semibold ${off ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{nf.label}</span>
+                    {nf.note && <span className="block text-[10px] text-slate-600">{nf.note}</span>}
+                  </span>
+                  {off
+                    ? <EyeOff className="w-4 h-4 shrink-0 text-slate-600" />
+                    : <Eye className="w-4 h-4 shrink-0 text-emerald-400" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-slate-600 italic">
+          (Ocultar campos nativos ainda não disponível para “{activeTargetMeta.label}”. Disponível na Pesquisa.)
+        </p>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

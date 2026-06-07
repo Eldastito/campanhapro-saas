@@ -47,6 +47,11 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
   const customFieldDefs = (config?.customFields?.pesquisa as any[]) || [];
   const [customValues, setCustomValues] = React.useState<Record<string, any>>({});
 
+  // Campos nativos que o Supreme Admin ocultou para esta campanha (Form Builder).
+  const hiddenPesq: string[] = ((config?.customFields as any)?._hidden?.pesquisa) || [];
+  const hide = (k: string) => hiddenPesq.includes(k);
+  const showVetores = !['intencaoVoto', 'fatorRejeicao', 'consumoNoticias', 'dorImediata'].every((k) => hide(k));
+
   // Inteligência competitiva (Fase D).
   const [comp, setComp] = React.useState({ lembrancaCandidato: '', avaliacaoCandidato: '', avaliacaoAdversario: '', probMudancaVoto: '' });
 
@@ -97,7 +102,8 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
     <form onSubmit={handleSubmit} className="space-y-6">
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Bairro da Coleta" name="bairro" value={formData.bairro} onChange={handleChange} required />
+          {!hide('bairro') && <Input label="Bairro da Coleta" name="bairro" value={formData.bairro} onChange={handleChange} required />}
+          {!hide('genero') && (
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Gênero</label>
             <select name="genero" value={formData.genero} onChange={handleChange} className="w-full bg-slate-700 p-2 rounded">
@@ -107,6 +113,8 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
               <option value="nao_informado">Não informar</option>
             </select>
           </div>
+          )}
+          {!hide('faixaEtaria') && (
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Faixa Etária</label>
             <select name="faixaEtaria" value={formData.faixaEtaria} onChange={handleChange} className="w-full bg-slate-700 p-2 rounded">
@@ -117,6 +125,8 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
               <option value="60+">60+ anos</option>
             </select>
           </div>
+          )}
+          {!hide('notaBairro') && (
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Nota para o Bairro (1-5)</label>
             <select name="notaBairro" value={formData.notaBairro} onChange={handleChange} className="w-full bg-slate-700 p-2 rounded">
@@ -127,9 +137,11 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
               <option value="5">5 - Excelente</option>
             </select>
           </div>
+          )}
       </div>
 
       {/* Identificação opcional → cria contato/lead no CRM (alimenta o funil) */}
+      {!hide('lead') && (
       <div className="p-4 bg-blue-900/10 border border-blue-500/20 rounded-lg space-y-3">
         <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">Identificação (opcional — vira contato/lead)</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -144,8 +156,10 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
         </label>
         <p className="text-[10px] text-slate-500">Se preencher nome/telefone, o entrevistado entra no CRM com a intenção de voto desta pesquisa.</p>
       </div>
+      )}
 
       {/* Inteligência competitiva (Fase D — alimenta o SWOT da IA) */}
+      {!hide('competitiva') && (
       <div className="p-4 bg-amber-900/10 border border-amber-500/20 rounded-lg space-y-3">
         <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">Inteligência Competitiva</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -180,6 +194,7 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
           </div>
         </div>
       </div>
+      )}
 
       {/* Campos personalizados (Form Builder → alvo Pesquisa) */}
       <CustomFieldsRenderer
@@ -188,10 +203,12 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
         onChange={(id, val) => setCustomValues((p) => ({ ...p, [id]: val }))}
       />
 
+      {showVetores && (
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
         <h4 className="font-bold text-slate-200">Vetores Mapeáveis (IA)</h4>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {!hide('intencaoVoto') && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">Intenção de Voto</label>
               <select name="intencaoVoto" value={formData.intencaoVoto} onChange={handleChange} className="w-full bg-slate-700 p-2 rounded">
@@ -201,7 +218,9 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
                 <option value="indeciso">Indeciso</option>
               </select>
             </div>
-            
+            )}
+
+            {!hide('fatorRejeicao') && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">Fator de Rejeição (Não votaria se...)</label>
               <select name="fatorRejeicao" value={formData.fatorRejeicao} onChange={handleChange} className="w-full bg-slate-700 p-2 rounded">
@@ -212,7 +231,9 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
                 <option value="nenhum">Sem grande rejeição</option>
               </select>
             </div>
+            )}
 
+            {!hide('consumoNoticias') && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">Principal Fonte de Informação</label>
               <select name="consumoNoticias" value={formData.consumoNoticias} onChange={handleChange} className="w-full bg-slate-700 p-2 rounded">
@@ -225,7 +246,9 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
                 <option value="outros">Outros</option>
               </select>
             </div>
+            )}
 
+            {!hide('dorImediata') && (
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-1">Dor Imediata (O que falta hoje?)</label>
               <select name="dorImediata" value={formData.dorImediata} onChange={handleChange} className="w-full bg-slate-700 p-2 rounded">
@@ -238,9 +261,12 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
                 <option value="lazer">Parques, Praças e Lazer Seguro</option>
               </select>
             </div>
+            )}
         </div>
       </div>
+      )}
 
+      {!hide('disc') && (
       <div className="border-t border-slate-700 pt-4">
         <h4 className="text-md font-bold text-slate-200 mb-2">Perfil Comportamental (Leitura Rápida DISC)</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -300,8 +326,9 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
           </div>
         </div>
       </div>
+      )}
 
-      <Input label="Observações de Campo" name="observacoes" value={formData.observacoes} onChange={handleChange} />
+      {!hide('observacoes') && <Input label="Observações de Campo" name="observacoes" value={formData.observacoes} onChange={handleChange} />}
 
       <div className="flex justify-end gap-3 pt-4">
         <Button type="button" variant="secondary" onClick={onCancel} disabled={isSaving}>Cancelar</Button>

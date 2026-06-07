@@ -62,6 +62,17 @@ function sanitizeFormSchema(input: any): Record<string, any[]> {
   return out;
 }
 
+/** Normaliza o mapa de campos NATIVOS ocultos por alvo: { pesquisa: ['bairro', ...] }. */
+function sanitizeHidden(input: any): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const src = input && typeof input === 'object' ? input : {};
+  for (const target of FORM_TARGETS) {
+    const arr = Array.isArray(src[target]) ? src[target] : [];
+    out[target] = Array.from(new Set(arr.map((s: any) => String(s).trim()).filter(Boolean))).slice(0, 100);
+  }
+  return out;
+}
+
 // Colunas nativas de contacts que um campo de form público pode preencher.
 const CONTACT_MAPS = ['name', 'email', 'phone', 'neighborhood', 'city'];
 
@@ -355,7 +366,10 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         .eq('id', req.params.campaignId)
         .maybeSingle();
       if (error) return res.status(500).json({ error: 'forms_load_failed', detail: error.message });
-      return res.json({ schema: sanitizeFormSchema(data?.customFields) });
+      return res.json({
+        schema: sanitizeFormSchema(data?.customFields),
+        hidden: sanitizeHidden((data?.customFields as any)?._hidden),
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'forms_load_failed' });
     }
@@ -366,18 +380,21 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       const campaignId = req.params.campaignId;
       if (!campaignId) return res.status(400).json({ error: 'missing_campaign' });
       const schema = sanitizeFormSchema(req.body?.schema);
+      const hidden = sanitizeHidden(req.body?.hidden);
+      // _hidden = campos NATIVOS ocultos por alvo; vive junto do schema no jsonb.
+      const customFields = { ...schema, _hidden: hidden };
       // upsert preserva limits/features existentes; cria a linha se não existir.
       const { error } = await supabaseAdmin
         .from('campaign_configs')
-        .upsert({ id: campaignId, customFields: schema }, { onConflict: 'id' });
+        .upsert({ id: campaignId, customFields }, { onConflict: 'id' });
       if (error) return res.status(500).json({ error: 'forms_save_failed', detail: error.message });
       await audit(supabaseAdmin, {
         ...actorFromRequest(req),
         action: 'supreme.forms.update',
         severity: 'info',
-        metadata: { campaignId, counts: Object.fromEntries(Object.entries(schema).map(([k, v]) => [k, (v as any[]).length])) },
+        metadata: { campaignId, counts: Object.fromEntries(Object.entries(schema).map(([k, v]) => [k, (v as any[]).length])), hidden },
       }).catch(() => {});
-      return res.json({ ok: true, schema });
+      return res.json({ ok: true, schema, hidden });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'forms_save_failed' });
     }
