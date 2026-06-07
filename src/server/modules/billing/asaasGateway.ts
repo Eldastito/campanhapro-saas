@@ -130,16 +130,38 @@ export class AsaasGateway implements PaymentGateway {
       externalReference: `${params.campaignId}:${params.planId}`,
     };
 
-    const data = await this.request<{
-      id: string;
-      invoiceUrl?: string;
-      bankSlipUrl?: string;
-    }>('POST', '/subscriptions', body);
+    const data = await this.request<{ id: string }>('POST', '/subscriptions', body);
+
+    // A assinatura NÃO retorna o link de pagamento direto — ele vive na 1ª
+    // cobrança gerada. Buscamos a primeira cobrança para obter o invoiceUrl
+    // (página de pagamento) e, se for PIX, o QR Code + copia-e-cola.
+    let checkoutUrl: string | null = null;
+    let pixQrCode: string | undefined;
+    let pixCopyPaste: string | undefined;
+    try {
+      const payments = await this.request<{ data?: Array<{ id: string; invoiceUrl?: string }> }>(
+        'GET', `/subscriptions/${data.id}/payments`,
+      );
+      const first = payments?.data?.[0];
+      if (first) {
+        checkoutUrl = first.invoiceUrl ?? null;
+        if (billingType === 'PIX') {
+          try {
+            const pix = await this.request<{ encodedImage?: string; payload?: string }>(
+              'GET', `/payments/${first.id}/pixQrCode`,
+            );
+            pixQrCode = pix?.encodedImage;
+            pixCopyPaste = pix?.payload;
+          } catch { /* PIX QR é opcional — o invoiceUrl já permite pagar */ }
+        }
+      }
+    } catch { /* sem link imediato — frontend trata via fallback */ }
 
     return {
       providerSubscriptionId: data.id,
-      // Asaas returns invoiceUrl on the first invoice; we fetch it lazily.
-      checkoutUrl: data.invoiceUrl ?? null,
+      checkoutUrl,
+      pixQrCode,
+      pixCopyPaste,
     };
   }
 
