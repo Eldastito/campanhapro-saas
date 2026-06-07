@@ -55,18 +55,60 @@ const ResearcherPage: React.FC = () => {
     const handleSavePesquisa = async (data: any) => {
         setIsSaving(true);
         try {
-            // Sincronizando com o schema oficial do banco de dados (camelCase)
-            // Removendo campos de auditoria não presentes no schema para evitar erro 400
+            // __lead = identificação opcional do entrevistado (não é coluna de pesquisas)
+            const { __lead, ...pesquisaData } = data;
+
             const { error } = await supabase
                 .from('pesquisas')
                 .insert({
-                    ...data,
+                    ...pesquisaData,
                     entrevistadorId: user.id,
                     campaignId: user.campaignId
                 });
-            
+
             if (error) throw error;
-            
+
+            // Se o entrevistado se identificou, cria/atualiza um contato (lead) no CRM
+            // com a intenção de voto desta pesquisa — alimenta o funil.
+            const leadNome = (__lead?.nome || '').trim();
+            const leadTel = (__lead?.telefone || '').trim();
+            if ((leadNome || leadTel) && user.campaignId) {
+                try {
+                    const intentionMap: Record<string, string> = {
+                        candidato: 'apoia', outro: 'rejeita', 'branco/nulo': 'nao_disse', indeciso: 'indeciso',
+                    };
+                    const voteIntention = intentionMap[pesquisaData.intencaoVoto] || null;
+                    const now = new Date().toISOString();
+                    let existingId: string | null = null;
+                    if (leadTel) {
+                        const { data: ex } = await supabase.from('contacts').select('id')
+                            .eq('campaignId', user.campaignId).eq('phone', leadTel).limit(1).maybeSingle();
+                        existingId = (ex as any)?.id ?? null;
+                    }
+                    const base: any = {
+                        neighborhood: pesquisaData.bairro || null,
+                        electoralZone: __lead?.zona || null,
+                        electoralSection: __lead?.secao || null,
+                        whatsappOptin: !!__lead?.optin,
+                        voteIntention,
+                        lastInteractionAt: now,
+                    };
+                    if (existingId) {
+                        await supabase.from('contacts').update(base).eq('id', existingId);
+                    } else {
+                        await supabase.from('contacts').insert({
+                            ...base,
+                            campaignId: user.campaignId,
+                            name: leadNome || 'Entrevistado (pesquisa)',
+                            phone: leadTel || null,
+                            source: 'pesquisa',
+                            funnelStage: 'qualificado',
+                            createdAt: now,
+                        });
+                    }
+                } catch (e) { console.warn('[pesquisa] upsert contato falhou:', e); }
+            }
+
             // Atualizar jornada do eleitor se houver identificação
             if (data.nomeEleitor) {
                 await updateVoterJourney(data.nomeEleitor, user.campaignId!);

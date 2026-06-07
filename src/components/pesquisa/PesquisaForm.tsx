@@ -37,6 +37,9 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
   const [q5, setQ5] = React.useState('D');
   const [q6, setQ6] = React.useState('I');
 
+  // Identificação opcional do entrevistado → vira um contato (lead) no CRM.
+  const [lead, setLead] = React.useState({ nome: '', telefone: '', zona: '', secao: '', optin: false });
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -68,7 +71,7 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
         perfilRespostas: [q1, q2, q3, q4, q5, q6],
         notaBairro: Number(formData.notaBairro) as 1|2|3|4|5
     };
-    onSave(finalData as any);
+    onSave({ ...finalData, __lead: lead } as any);
   };
 
   return (
@@ -105,6 +108,22 @@ const PesquisaForm: React.FC<PesquisaFormProps> = ({ onSave, onCancel, onStart, 
               <option value="5">5 - Excelente</option>
             </select>
           </div>
+      </div>
+
+      {/* Identificação opcional → cria contato/lead no CRM (alimenta o funil) */}
+      <div className="p-4 bg-blue-900/10 border border-blue-500/20 rounded-lg space-y-3">
+        <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">Identificação (opcional — vira contato/lead)</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input label="Nome do entrevistado" name="nome" value={lead.nome} onChange={(e) => setLead({ ...lead, nome: e.target.value })} />
+          <Input label="WhatsApp / Telefone" name="telefone" value={lead.telefone} onChange={(e) => setLead({ ...lead, telefone: e.target.value })} />
+          <Input label="Zona eleitoral" name="zona" value={lead.zona} onChange={(e) => setLead({ ...lead, zona: e.target.value })} />
+          <Input label="Seção eleitoral" name="secao" value={lead.secao} onChange={(e) => setLead({ ...lead, secao: e.target.value })} />
+        </div>
+        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+          <input type="checkbox" className="accent-blue-500" checked={lead.optin} onChange={(e) => setLead({ ...lead, optin: e.target.checked })} />
+          Autoriza contato no WhatsApp (LGPD)
+        </label>
+        <p className="text-[10px] text-slate-500">Se preencher nome/telefone, o entrevistado entra no CRM com a intenção de voto desta pesquisa.</p>
       </div>
 
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
