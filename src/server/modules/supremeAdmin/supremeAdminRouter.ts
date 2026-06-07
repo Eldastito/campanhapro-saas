@@ -864,6 +864,7 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
             reportes: prev.snapshot.streetReports?.total,
             whatsappMsgs: prev.snapshot.whatsapp?.messages,
             funil: prev.snapshot.voterJourney,
+            funnel: prev.snapshot.funnel,
           } : null,
         };
         previousBlock =
@@ -874,7 +875,14 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       // 2. Ask the consultant agent (multi-provider chain inside callAgent)
       const prompt =
         `Analise esta campanha e devolva o JSON conforme instruído.\n\n` +
-        `DADOS DA CAMPANHA (atuais):\n${JSON.stringify(snapshot, null, 2)}` +
+        `DADOS DA CAMPANHA (atuais):\n${JSON.stringify(snapshot, null, 2)}\n\n` +
+        `ATENÇÃO ao bloco "funnel" (registro mestre do eleitor): byIntention ` +
+        `(intenção de voto), byStage (estágio no funil), avgCertainty (certeza ` +
+        `média 0-10), multipliers/totalInfluence (multiplicadores e alcance), ` +
+        `whatsappOptin (contactáveis), comGeoEleitoral (com zona/seção), bySource ` +
+        `(canal de origem). Use ESSES números para diagnosticar a conversão real, ` +
+        `o maior gargalo do funil e onde investir. Quando "byIntention" tiver muitos ` +
+        `"(sem)" ou comGeoEleitoral baixo, aponte como lacuna de dados que cega a decisão.` +
         previousBlock;
 
       let result;

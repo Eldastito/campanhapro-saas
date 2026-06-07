@@ -1,0 +1,25 @@
+-- 38_analytics_funnel_block.sql
+-- Adiciona o bloco "funnel" à supreme_campaign_analytics(), alimentando o
+-- Consultor IA, o dashboard e o comparativo histórico com os campos de funil
+-- capturados nos formulários (Fases A/B):
+--   byIntention, byStage, bySource, avgCertainty, multipliers, totalInfluence,
+--   whatsappOptin, comGeoEleitoral, comObjecao.
+--
+-- (A definição completa da função é recriada via migração; ver o histórico de
+--  migrations do projeto. Este arquivo documenta a adição do bloco.)
+--
+-- Bloco inserido logo após 'contacts':
+--   'funnel', (
+--     SELECT jsonb_build_object(
+--       'total', count(*),
+--       'byIntention', ... ("voteIntention"),
+--       'byStage', ... ("funnelStage"),
+--       'bySource', ... (source),
+--       'avgCertainty', round(avg("voteCertainty"),1),
+--       'multipliers', count(*) FILTER (WHERE "isMultiplier"),
+--       'totalInfluence', sum("influenceCount") FILTER (WHERE "isMultiplier"),
+--       'whatsappOptin', count(*) FILTER (WHERE "whatsappOptin"),
+--       'comGeoEleitoral', count(*) FILTER (WHERE "electoralZone" OR "electoralSection"),
+--       'comObjecao', count(*) FILTER (WHERE objection <> '')
+--     ) FROM contacts WHERE "campaignId" = p_campaign_id
+--   )
