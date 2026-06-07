@@ -97,6 +97,15 @@ const EngagementForm = ({ onSave, onCancel, initialData }: EngagementFormProps) 
                 </div>
             )}
 
+            {/* Resultado / conversões geradas — alimenta o funil */}
+            <div className="p-4 bg-blue-900/10 border border-blue-500/20 rounded-lg">
+                <p className="text-[10px] font-black uppercase tracking-widest text-blue-400 mb-3">Resultado da Ação (conversões)</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input label="Novos apoiadores" type="number" name="novosApoiadores" value={formData.novosApoiadores ?? ''} onChange={handleChange} min="0" />
+                    <Input label="Contatos coletados" type="number" name="contatosColetados" value={formData.contatosColetados ?? ''} onChange={handleChange} min="0" />
+                </div>
+            </div>
+
             <div className="flex justify-end gap-3 pt-4">
                 <Button type="button" variant="secondary" onClick={onCancel}>Cancelar</Button>
                 <Button type="submit">Salvar Ação</Button>

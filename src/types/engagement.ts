@@ -14,6 +14,8 @@ export interface EngagementAction {
     materialDistribuido?: number;
     eventoNome?: string;
     pessoasContatadas?: number;
+    novosApoiadores?: number;    // conversões: viraram apoiador nesta ação
+    contatosColetados?: number;  // contatos coletados nesta ação
     targetAudience?: string;
     createdAt?: string;
     createdBy?: string;

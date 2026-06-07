@@ -50,6 +50,9 @@ export interface CampaignDetails {
     electionState?: string;       // UF da eleição (ex: 'RJ')
     electionCity?: string;        // município (cargos municipais)
     electionRound?: 1 | 2;        // 1º ou 2º turno
+
+    // Inteligência competitiva — principais adversários (um por linha: "Nome - Número")
+    adversarios?: string;
 }
 
 export type AdvisorTipType = 'success' | 'warning' | 'info' | 'sparkles' | 'error';

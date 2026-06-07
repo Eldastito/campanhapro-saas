@@ -128,9 +128,21 @@ const CampaignDetailsForm: React.FC<CampaignDetailsFormProps> = ({ initialDetail
                             containerClassName="max-w-xs"
                          />
                     </div>
+                    <div className="pt-4 border-t border-slate-700">
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Principais adversários (inteligência competitiva)</label>
+                        <textarea
+                            name="adversarios"
+                            value={details.adversarios || ''}
+                            onChange={(e) => setDetails(prev => ({ ...prev, adversarios: e.target.value }))}
+                            rows={3}
+                            placeholder="Um por linha: Nome - Número (ex: Maria Santos - 45)"
+                            className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-1">A IA usa para análise comparativa e SWOT.</p>
+                    </div>
                 </div>
                 <div className="lg:col-span-1">
-                    <ImageUpload 
+                    <ImageUpload
                         label="Foto do Candidato"
                         currentImage={details.candidatePhotoUrl}
                         onImageUpload={handleImageUpload}
