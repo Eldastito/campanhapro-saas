@@ -11,6 +11,7 @@ import ConsultantReport from '../components/supreme/ConsultantReport';
 import { ModernArea, ModernBar } from '../components/supreme/Charts';
 import FormBuilder from '../components/supreme/FormBuilder';
 import PublicFormsPanel from '../components/supreme/PublicFormsPanel';
+import PlatformFormsCatalog from '../components/supreme/PlatformFormsCatalog';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -1105,23 +1106,30 @@ const SupremeAdminPage: React.FC = () => {
                                     Formulários públicos
                                 </button>
                             </div>
-                            <Card className="bg-slate-900/40 border-white/5 p-6">
-                                {formsSubTab === 'internal' ? (
-                                    <FormBuilder
-                                        campaigns={campaigns
-                                            .filter((c) => !!c.campaignId)
-                                            .map((c) => ({ id: c.campaignId as string, name: c.name }))}
-                                        supremeFetch={supremeFetch}
-                                    />
-                                ) : (
+                            {formsSubTab === 'internal' ? (
+                                <>
+                                    <Card className="bg-slate-900/40 border-white/5 p-6">
+                                        <FormBuilder
+                                            campaigns={campaigns
+                                                .filter((c) => !!c.campaignId)
+                                                .map((c) => ({ id: c.campaignId as string, name: c.name }))}
+                                            supremeFetch={supremeFetch}
+                                        />
+                                    </Card>
+                                    <Card className="bg-slate-900/40 border-white/5 p-6">
+                                        <PlatformFormsCatalog />
+                                    </Card>
+                                </>
+                            ) : (
+                                <Card className="bg-slate-900/40 border-white/5 p-6">
                                     <PublicFormsPanel
                                         campaigns={campaigns
                                             .filter((c) => !!c.campaignId)
                                             .map((c) => ({ id: c.campaignId as string, name: c.name }))}
                                         supremeFetch={supremeFetch}
                                     />
-                                )}
-                            </Card>
+                                </Card>
+                            )}
                         </motion.div>
                     )}
 
