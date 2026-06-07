@@ -901,7 +901,11 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         `o maior gargalo do funil e onde investir. Quando "byIntention" tiver muitos ` +
         `"(sem)" ou comGeoEleitoral baixo, aponte como lacuna de dados que cega a decisão. ` +
         `Cruze "expenses.byCanal" (gasto por canal) com "funnel.bySource" (leads por canal) ` +
-        `para estimar CUSTO POR LEAD e recomendar realocação de verba para o canal mais eficiente.` +
+        `para estimar CUSTO POR LEAD e recomendar realocação de verba para o canal mais eficiente. ` +
+        `No bloco "streetReports": use byTema (mapa de calor das dores por território) cruzando ` +
+        `com pesquisas.dorImediata para confirmar prioridades de pauta por bairro, e ` +
+        `adversarioSightings (avistamentos de ação adversária) como sinal de presença competitiva ` +
+        `onde reforçar território.` +
         previousBlock;
 
       let result;

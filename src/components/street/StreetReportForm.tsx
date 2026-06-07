@@ -9,7 +9,10 @@ const StreetReportForm: React.FC = () => {
     const { user } = useAuth();
     const [bairro, setBairro] = useState('');
     const [clima, setClima] = useState<'Positivo' | 'Neutro' | 'Negativo' | ''>('');
+    const [tema, setTema] = useState('');
     const [reclamacao, setReclamacao] = useState('');
+    const [viuAdversario, setViuAdversario] = useState(false);
+    const [adversarioDetalhe, setAdversarioDetalhe] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [successMessage, setSuccessMessage] = useState('');
     const [error, setError] = useState('');
@@ -29,18 +32,24 @@ const StreetReportForm: React.FC = () => {
             const { error: err } = await supabase.from('street_reports').insert({
                 bairro,
                 clima,
+                tema: tema || null,
                 reclamacao,
+                viuAdversario,
+                adversarioDetalhe: viuAdversario ? (adversarioDetalhe.trim() || null) : null,
                 createdBy: user?.id,
                 createdAt: new Date().toISOString(),
                 campaignId: user?.campaignId
             });
-            
+
             if (err) throw err;
-            
+
             setSuccessMessage('Reporte enviado com sucesso! Obrigado.');
             setBairro('');
             setClima('');
+            setTema('');
             setReclamacao('');
+            setViuAdversario(false);
+            setAdversarioDetalhe('');
             
             // Clear success message after 3 seconds
             setTimeout(() => setSuccessMessage(''), 3000);
@@ -109,6 +118,26 @@ const StreetReportForm: React.FC = () => {
                 </div>
 
                 <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Tema principal (categoriza p/ o mapa de calor da IA)</label>
+                    <select
+                        value={tema}
+                        onChange={(e) => setTema(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-slate-100 focus:outline-none focus:border-blue-500"
+                    >
+                        <option value="">— Selecione (opcional)</option>
+                        <option value="saude">Saúde</option>
+                        <option value="educacao">Educação / creche</option>
+                        <option value="seguranca">Segurança</option>
+                        <option value="transporte">Transporte / mobilidade</option>
+                        <option value="emprego">Emprego / renda</option>
+                        <option value="infraestrutura">Infraestrutura (asfalto, lixo, luz)</option>
+                        <option value="lazer">Lazer / praças</option>
+                        <option value="outro">Outro</option>
+                    </select>
+                    <p className="text-[10px] text-slate-500 mt-1">Cruza com as "dores" da Pesquisa → mapa de calor por bairro.</p>
+                </div>
+
+                <div>
                     <label className="block text-sm font-medium text-slate-300 mb-1">Principal reclamação ouvida (Opcional)</label>
                     <textarea
                         value={reclamacao}
@@ -116,6 +145,23 @@ const StreetReportForm: React.FC = () => {
                         placeholder="Ex: Falta de asfalto na rua X..."
                         className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-slate-100 focus:outline-none focus:border-blue-500 h-24 resize-none"
                     />
+                </div>
+
+                {/* Inteligência competitiva — presença do adversário no território */}
+                <div className="p-3 bg-amber-900/10 border border-amber-500/20 rounded-md space-y-2">
+                    <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                        <input type="checkbox" className="accent-amber-500" checked={viuAdversario} onChange={(e) => setViuAdversario(e.target.checked)} />
+                        Viu ação/material de adversário aqui?
+                    </label>
+                    {viuAdversario && (
+                        <input
+                            type="text"
+                            value={adversarioDetalhe}
+                            onChange={(e) => setAdversarioDetalhe(e.target.value)}
+                            placeholder="O que viu? (boca de urna, panfleto, carro de som, evento...)"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-slate-100 text-sm focus:outline-none focus:border-amber-500"
+                        />
+                    )}
                 </div>
 
                 <Button type="submit" className="w-full flex items-center justify-center gap-2" disabled={isSubmitting}>
