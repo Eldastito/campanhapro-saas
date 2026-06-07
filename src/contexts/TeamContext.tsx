@@ -11,6 +11,8 @@ interface TeamContextType {
     addTeamMember: (member: Omit<TeamMember, 'id'>) => Promise<void>;
     updateTeamMember: (member: TeamMember) => Promise<void>;
     deleteTeamMember: (id: string | number) => Promise<void>;
+    resetMemberPassword: (userId: string, password: string) => Promise<void>;
+    removeMemberAccess: (member: TeamMember) => Promise<void>;
     locations: Location[];
     addLocation: (location: Omit<Location, 'id'>) => Promise<void>;
     deleteLocation: (id: string | number) => Promise<void>;
@@ -83,6 +85,7 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
         }
         const assignedLeaderId = user.type === 'Líder' ? user.uid : (member.assignedLeaderId || null);
         const { password, ...memberWithoutPassword } = member as any;
+        let linkedUserId: string | null = null;
 
         // Cria a IDENTIDADE DE LOGIN (Supabase Auth + users) via backend, senão o
         // membro fica só na tabela team_members e NÃO consegue entrar na plataforma.
@@ -108,6 +111,7 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
                 };
                 throw new Error(MAP[json?.error] || json?.detail || json?.error || 'Falha ao criar o acesso do membro.');
             }
+            linkedUserId = json?.userId ?? null;
             // Re-adicionar o mesmo e-mail = atualizar: remove a linha de equipe antiga
             // (evita duplicata; o login foi reaproveitado pelo backend).
             await supabase.from('team_members')
@@ -116,13 +120,15 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
                 .eq('email', memberWithoutPassword.email);
         }
 
-        const { error } = await supabase.from('team_members').insert(sanitizeData({
+        const { data: createdRow, error } = await supabase.from('team_members').insert(sanitizeData({
             ...memberWithoutPassword,
+            ...(linkedUserId ? { userId: linkedUserId } : {}),
             campaignId: user.campaignId,
             addedBy: user.uid,
             assignedLeaderId,
-        }));
-        if (error) await handleSupabaseError(error, OperationType.CREATE, 'team_members');
+        })).select('*').single();
+        if (error) { await handleSupabaseError(error, OperationType.CREATE, 'team_members'); return; }
+        if (createdRow) setTeamMembers(prev => [...prev.filter(m => m.id !== (createdRow as any).id), createdRow as TeamMember]);
     };
 
     const updateTeamMember = async (updatedMember: TeamMember) => {
@@ -130,6 +136,7 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
             const { id, password, ...data } = updatedMember as any;
             const { error } = await supabase.from('team_members').update(sanitizeData(data)).eq('id', id);
             if (error) throw error;
+            setTeamMembers(prev => prev.map(m => (m.id === id ? { ...m, ...data } as TeamMember : m)));
         } catch (error) {
             handleSupabaseError(error, OperationType.UPDATE, `team_members/${updatedMember.id}`);
         }
@@ -139,9 +146,42 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
         try {
             const { error } = await supabase.from('team_members').delete().eq('id', String(id));
             if (error) throw error;
+            setTeamMembers(prev => prev.filter(m => String(m.id) !== String(id)));
         } catch (error) {
             handleSupabaseError(error, OperationType.DELETE, `team_members/${id}`);
         }
+    };
+
+    // Redefine a senha de login de um membro (Admin/Coord, ou o Líder dono dele).
+    const resetMemberPassword = async (userId: string, password: string) => {
+        const resp = await authedFetch(`/api/v1/team/members/${userId}/reset-password`, {
+            method: 'POST',
+            body: JSON.stringify({ password }),
+        });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            const MAP: Record<string, string> = {
+                password_min_6: 'A senha precisa ter no mínimo 6 caracteres.',
+                forbidden: 'Você não pode alterar a senha deste membro.',
+                member_not_found: 'Membro não encontrado.',
+            };
+            throw new Error(MAP[json?.error] || json?.detail || json?.error || 'Falha ao redefinir a senha.');
+        }
+    };
+
+    // Remove o ACESSO (Auth+users) e a linha de equipe de um membro.
+    const removeMemberAccess = async (member: TeamMember) => {
+        const uid = (member as any).userId as string | undefined;
+        if (uid) {
+            const resp = await authedFetch(`/api/v1/team/members/${uid}`, { method: 'DELETE' });
+            if (!resp.ok) {
+                const json = await resp.json().catch(() => ({}));
+                throw new Error(json?.error === 'forbidden' ? 'Você não pode remover este membro.' : (json?.detail || json?.error || 'Falha ao remover o acesso.'));
+            }
+        }
+        const { error } = await supabase.from('team_members').delete().eq('id', String(member.id));
+        if (error) throw error;
+        setTeamMembers(prev => prev.filter(m => String(m.id) !== String(member.id)));
     };
 
     const addLocation = async (location: Omit<Location, 'id'>) => {
@@ -184,6 +224,7 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
 
     const value = {
         teamMembers, addTeamMember, updateTeamMember, deleteTeamMember,
+        resetMemberPassword, removeMemberAccess,
         locations, addLocation, deleteLocation, loadRioBairros,
     };
 

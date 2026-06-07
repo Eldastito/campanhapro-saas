@@ -307,6 +307,50 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
     return res.status(201).json({ ok: true, userId: created.user.id });
   });
 
+  // Autorização p/ gerenciar um membro-alvo: Admin/Coordenador, ou o Líder dono dele.
+  async function authorizeManage(req: Request, targetUserId: string) {
+    const campaignId = (req as any).user?.campaignId;
+    const userType = (req as any).user?.userType;
+    const requesterId = (req as any).user?.id;
+    if (!campaignId) return { status: 401 as const, error: 'Unauthorized' };
+    const { data: target } = await supabase
+      .from('users').select('id, "campaignId", "assignedLeaderId"').eq('id', targetUserId).maybeSingle();
+    if (!target || target.campaignId !== campaignId) return { status: 404 as const, error: 'member_not_found' };
+    const isAdmin = userType === 'Admin' || userType === 'Coordenador';
+    const isOwningLeader = userType === 'Líder' && target.assignedLeaderId === requesterId;
+    if (!isAdmin && !isOwningLeader) return { status: 403 as const, error: 'forbidden' };
+    return { status: 200 as const, target };
+  }
+
+  // POST /members/:userId/reset-password — redefine a senha de um liderado.
+  router.post('/members/:userId/reset-password', async (req: Request, res: Response) => {
+    const password = (req.body?.password ?? '') as string;
+    if (!password || password.length < 6) return res.status(400).json({ error: 'password_min_6' });
+    const auth = await authorizeManage(req, req.params.userId);
+    if (auth.status !== 200) return res.status(auth.status).json({ error: auth.error });
+    const { error } = await supabase.auth.admin.updateUserById(req.params.userId, { password });
+    if (error) return res.status(500).json({ error: 'reset_failed', detail: error.message });
+    await audit(supabase, {
+      ...actorFromRequest(req), action: 'team.member.reset_password',
+      resourceType: 'user', resourceId: req.params.userId, severity: 'warn',
+    }).catch(() => {});
+    return res.json({ ok: true });
+  });
+
+  // DELETE /members/:userId — remove o ACESSO do membro (Auth + users).
+  // A linha em team_members é removida pelo cliente.
+  router.delete('/members/:userId', async (req: Request, res: Response) => {
+    const auth = await authorizeManage(req, req.params.userId);
+    if (auth.status !== 200) return res.status(auth.status).json({ error: auth.error });
+    await supabase.from('users').delete().eq('id', req.params.userId);
+    await supabase.auth.admin.deleteUser(req.params.userId).catch(() => {});
+    await audit(supabase, {
+      ...actorFromRequest(req), action: 'team.member.delete',
+      resourceType: 'user', resourceId: req.params.userId, severity: 'warn',
+    }).catch(() => {});
+    return res.json({ ok: true });
+  });
+
   return router;
 }
 

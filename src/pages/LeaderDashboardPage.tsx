@@ -7,7 +7,7 @@
 // - Indicadores de votos planejados vs estimados
 
 import * as React from 'react';
-import { UserPlus, MessageCircle, Loader2 } from 'lucide-react';
+import { UserPlus, MessageCircle, Loader2, Pencil, KeyRound, Trash2 } from 'lucide-react';
 import Header from '../components/Header';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -44,41 +44,79 @@ const STATUS_LABELS: Record<ResourceStatus, string> = {
 
 const LeaderDashboardPage: React.FC = () => {
     const { user, logout } = useAuth();
-    const { teamMembers, addTeamMember } = useTeam();
+    const { teamMembers, addTeamMember, updateTeamMember, resetMemberPassword, removeMemberAccess } = useTeam();
     const { visits, engagementActions } = useVisits();
     const { headerLogo } = useSettings();
     const [resources, setResources] = React.useState<TeamResource[]>([]);
     const [resourcesLoading, setResourcesLoading] = React.useState(true);
 
-    // Cadastro de liderado (vincula automaticamente ao líder via assignedLeaderId).
+    // Cadastro / edição de liderado (vincula automaticamente via assignedLeaderId).
     const [showAdd, setShowAdd] = React.useState(false);
+    const [editingId, setEditingId] = React.useState<string | number | null>(null);
     const [saving, setSaving] = React.useState(false);
     const [formErr, setFormErr] = React.useState<string | null>(null);
-    const emptyForm = { name: '', email: '', phone: '', password: '', role: 'Apoiador' as string };
+    const emptyForm = { name: '', email: '', phone: '', password: '', role: 'Apoiador' as string, visitsTarget: 0, votesTarget: 0 };
     const [form, setForm] = React.useState(emptyForm);
 
-    const handleCreateLiderado = async () => {
+    const openAddModal = () => { setEditingId(null); setForm(emptyForm); setFormErr(null); setShowAdd(true); };
+    const openEditModal = (m: any) => {
+        setEditingId(m.id);
+        setForm({ name: m.name || '', email: m.email || '', phone: m.phone || '', password: '', role: m.role || 'Apoiador', visitsTarget: m.visitsTarget || 0, votesTarget: m.votesTarget || 0 });
+        setFormErr(null);
+        setShowAdd(true);
+    };
+
+    const handleSaveLiderado = async () => {
         setFormErr(null);
         if (!form.name.trim()) { setFormErr('Informe o nome.'); return; }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { setFormErr('E-mail inválido.'); return; }
-        if (form.password.length < 6) { setFormErr('A senha precisa ter ao menos 6 caracteres.'); return; }
         setSaving(true);
         try {
-            await addTeamMember({
-                name: form.name.trim(),
-                email: form.email.trim(),
-                phone: form.phone.trim(),
-                password: form.password,
-                role: form.role,
-                cost: 0,
-            } as any);
+            if (editingId) {
+                await updateTeamMember({
+                    id: editingId,
+                    name: form.name.trim(),
+                    phone: form.phone.trim(),
+                    role: form.role,
+                    visitsTarget: Number(form.visitsTarget) || 0,
+                    votesTarget: Number(form.votesTarget) || 0,
+                } as any);
+            } else {
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { setFormErr('E-mail inválido.'); setSaving(false); return; }
+                if (form.password.length < 6) { setFormErr('A senha precisa ter ao menos 6 caracteres.'); setSaving(false); return; }
+                await addTeamMember({
+                    name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim(),
+                    password: form.password, role: form.role, cost: 0,
+                    visitsTarget: Number(form.visitsTarget) || 0, votesTarget: Number(form.votesTarget) || 0,
+                } as any);
+            }
             setShowAdd(false);
             setForm(emptyForm);
-            alert('Liderado cadastrado! Ele já pode entrar com o e-mail e senha definidos.');
+            setEditingId(null);
         } catch (e: any) {
-            setFormErr(e?.message || 'Não foi possível cadastrar o liderado.');
+            setFormErr(e?.message || 'Não foi possível salvar o liderado.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleResetPwd = async (m: any) => {
+        if (!m.userId) { alert('Este liderado ainda não tem login vinculado. Edite e recadastre com e-mail/senha.'); return; }
+        const pwd = prompt(`Nova senha para ${m.name} (mín. 6 caracteres):`);
+        if (!pwd) return;
+        try {
+            await resetMemberPassword(m.userId, pwd);
+            alert('Senha redefinida com sucesso.');
+        } catch (e: any) {
+            alert(e?.message || 'Falha ao redefinir a senha.');
+        }
+    };
+
+    const handleRemove = async (m: any) => {
+        if (!confirm(`Remover ${m.name} da sua equipe? O acesso dele à plataforma também será removido.`)) return;
+        try {
+            await removeMemberAccess(m);
+        } catch (e: any) {
+            alert(e?.message || 'Falha ao remover o liderado.');
         }
     };
 
@@ -151,7 +189,7 @@ const LeaderDashboardPage: React.FC = () => {
                         <p className="text-slate-400">Olá, {user?.name}. Gestão da sua equipe.</p>
                     </div>
                     <div className="flex items-center gap-3">
-                        <Button onClick={() => { setForm(emptyForm); setFormErr(null); setShowAdd(true); }} className="flex items-center gap-2">
+                        <Button onClick={openAddModal} className="flex items-center gap-2">
                             <UserPlus className="w-4 h-4" /> Cadastrar Liderado
                         </Button>
                         <button
@@ -202,7 +240,7 @@ const LeaderDashboardPage: React.FC = () => {
                     {produtividade.length === 0 ? (
                         <div className="text-center py-8">
                             <p className="text-slate-400 text-sm mb-3">Você ainda não tem liderados. Cadastre sua equipe para começar a acompanhar a produção.</p>
-                            <Button onClick={() => { setForm(emptyForm); setFormErr(null); setShowAdd(true); }} className="inline-flex items-center gap-2">
+                            <Button onClick={openAddModal} className="inline-flex items-center gap-2">
                                 <UserPlus className="w-4 h-4" /> Cadastrar meu primeiro liderado
                             </Button>
                         </div>
@@ -214,30 +252,39 @@ const LeaderDashboardPage: React.FC = () => {
                                         <th className="py-2">Nome</th>
                                         <th className="py-2">Função</th>
                                         <th className="py-2 text-right">Visitas ✓</th>
-                                        <th className="py-2 text-right">Visitas ⏳</th>
                                         <th className="py-2 text-right">Engaj.</th>
-                                        <th className="py-2 text-right">Total</th>
-                                        <th className="py-2 text-center">Contato</th>
+                                        <th className="py-2 w-40">Meta de visitas</th>
+                                        <th className="py-2 text-center">Ações</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {produtividade.map(m => {
+                                    {produtividade.map((m: any) => {
                                         const wa = waLink(m.phone);
+                                        const meta = m.visitsTarget || 0;
+                                        const pct = meta > 0 ? Math.min(100, Math.round((m.visitasRealizadas / meta) * 100)) : 0;
                                         return (
                                         <tr key={m.id} className="border-b border-slate-800 hover:bg-slate-800/50">
                                             <td className="py-2">{m.name}</td>
                                             <td className="py-2 text-slate-400">{m.role}</td>
-                                            <td className="py-2 text-right text-emerald-400">{m.visitasRealizadas}</td>
-                                            <td className="py-2 text-right text-amber-400">{m.visitasPendentes}</td>
+                                            <td className="py-2 text-right text-emerald-400">{m.visitasRealizadas}<span className="text-slate-600"> / {m.visitasPendentes}⏳</span></td>
                                             <td className="py-2 text-right">{m.engajamentos}</td>
-                                            <td className="py-2 text-right font-bold">{m.total}</td>
-                                            <td className="py-2 text-center">
-                                                {wa ? (
-                                                    <a href={wa} target="_blank" rel="noopener noreferrer"
-                                                       className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-xs">
-                                                        <MessageCircle className="w-4 h-4" /> WhatsApp
-                                                    </a>
-                                                ) : <span className="text-slate-600 text-xs">sem tel.</span>}
+                                            <td className="py-2">
+                                                {meta > 0 ? (
+                                                    <div>
+                                                        <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                                                            <div className={`h-full ${pct >= 100 ? 'bg-emerald-500' : pct >= 50 ? 'bg-indigo-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }} />
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-500 mt-0.5">{m.visitasRealizadas}/{meta} ({pct}%)</p>
+                                                    </div>
+                                                ) : <span className="text-[10px] text-slate-600">sem meta</span>}
+                                            </td>
+                                            <td className="py-2">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    {wa && <a href={wa} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="text-emerald-400 hover:text-emerald-300"><MessageCircle className="w-4 h-4" /></a>}
+                                                    <button onClick={() => openEditModal(m)} title="Editar / definir meta" className="text-indigo-400 hover:text-indigo-300"><Pencil className="w-4 h-4" /></button>
+                                                    <button onClick={() => handleResetPwd(m)} title="Resetar senha" className="text-amber-400 hover:text-amber-300"><KeyRound className="w-4 h-4" /></button>
+                                                    <button onClick={() => handleRemove(m)} title="Remover" className="text-rose-400 hover:text-rose-300"><Trash2 className="w-4 h-4" /></button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );})}
@@ -293,18 +340,18 @@ const LeaderDashboardPage: React.FC = () => {
             </main>
 
             {showAdd && (
-                <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Cadastrar Liderado">
+                <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title={editingId ? 'Editar Liderado' : 'Cadastrar Liderado'}>
                     <div className="space-y-4">
                         <p className="text-xs text-slate-400">
-                            O liderado é vinculado automaticamente a você. Ele entra na plataforma com o e-mail e a senha definidos aqui.
+                            {editingId
+                                ? 'Atualize os dados e defina a meta. Para trocar a senha, use o botão de chave na lista.'
+                                : 'O liderado é vinculado automaticamente a você. Ele entra na plataforma com o e-mail e a senha definidos aqui.'}
                         </p>
                         <Input label="Nome completo *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <Input label="E-mail (login) *" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                            {!editingId && <Input label="E-mail (login) *" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />}
                             <Input label="Telefone / WhatsApp" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <Input label="Senha (mín. 6) *" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                            {!editingId && <Input label="Senha (mín. 6) *" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />}
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-1">Função</label>
                                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
@@ -315,11 +362,15 @@ const LeaderDashboardPage: React.FC = () => {
                                 </select>
                             </div>
                         </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-700">
+                            <Input label="Meta de visitas" type="number" value={String(form.visitsTarget)} onChange={(e) => setForm({ ...form, visitsTarget: Number(e.target.value) })} />
+                            <Input label="Meta de votos" type="number" value={String(form.votesTarget)} onChange={(e) => setForm({ ...form, votesTarget: Number(e.target.value) })} />
+                        </div>
                         {formErr && <p className="text-sm bg-red-500/10 text-red-400 rounded-lg p-3">{formErr}</p>}
                         <div className="flex justify-end gap-3 pt-2">
                             <Button variant="secondary" onClick={() => setShowAdd(false)} disabled={saving}>Cancelar</Button>
-                            <Button onClick={handleCreateLiderado} disabled={saving} className="flex items-center gap-2">
-                                {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando…</> : <><UserPlus className="w-4 h-4" /> Cadastrar</>}
+                            <Button onClick={handleSaveLiderado} disabled={saving} className="flex items-center gap-2">
+                                {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando…</> : <><UserPlus className="w-4 h-4" /> {editingId ? 'Salvar' : 'Cadastrar'}</>}
                             </Button>
                         </div>
                     </div>
