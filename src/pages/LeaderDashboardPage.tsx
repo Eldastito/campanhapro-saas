@@ -7,7 +7,7 @@
 // - Indicadores de votos planejados vs estimados
 
 import * as React from 'react';
-import { UserPlus, MessageCircle, Loader2, Pencil, KeyRound, Trash2, ListChecks, Plus, AlertTriangle, Trophy } from 'lucide-react';
+import { UserPlus, MessageCircle, Loader2, Pencil, KeyRound, Trash2, ListChecks, Plus, AlertTriangle, Trophy, Activity } from 'lucide-react';
 import { useTeamTasks, TASK_STATUS_LABEL, TeamTask } from '../hooks/useTeamTasks';
 import Header from '../components/Header';
 import Card from '../components/ui/Card';
@@ -225,6 +225,30 @@ const LeaderDashboardPage: React.FC = () => {
     const inativos = acompanhamento.filter((m: any) => m.diasInativo === null || m.diasInativo > INATIVO_DIAS);
     const ranking = [...acompanhamento].filter((m: any) => m.semana > 0).sort((a: any, b: any) => b.semana - a.semana).slice(0, 5);
 
+    // Feed de atividade da equipe (visitas + ações + tarefas concluídas) em tempo real.
+    const timeAgo = (ts?: string | null) => {
+        if (!ts) return '';
+        const min = (Date.now() - new Date(ts).getTime()) / 60000;
+        if (min < 1) return 'agora';
+        if (min < 60) return `${Math.round(min)} min`;
+        if (min < 1440) return `${Math.round(min / 60)} h`;
+        return `${Math.round(min / 1440)} d`;
+    };
+    const feed = React.useMemo(() => {
+        const items: { ts: string; kind: 'visit' | 'eng' | 'task'; who: string; text: string }[] = [];
+        myTeamVisits.forEach((v: any) => items.push({
+            ts: v.createdAt || v.data, kind: 'visit', who: v.apoiador || 'Membro',
+            text: `${v.realizada === 'sim' ? 'realizou' : 'agendou'} visita${v.bairro ? ` em ${v.bairro}` : ''}`,
+        }));
+        myTeamEngagements.forEach((e: any) => items.push({
+            ts: e.createdAt || e.data, kind: 'eng', who: e.apoiador || 'Membro', text: `ação: ${e.tipo || 'engajamento'}`,
+        }));
+        tasks.filter((t: any) => t.status === 'concluida').forEach((t: any) => items.push({
+            ts: t.createdAt, kind: 'task', who: t.assignedToName || 'Membro', text: `concluiu: ${t.title}`,
+        }));
+        return items.filter(i => i.ts).sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime()).slice(0, 15);
+    }, [myTeamVisits, myTeamEngagements, tasks]);
+
     return (
         <div className="min-h-screen bg-slate-900 text-slate-200">
             <Header logoUrl={headerLogo} />
@@ -327,6 +351,22 @@ const LeaderDashboardPage: React.FC = () => {
                             )}
                         </Card>
                     </div>
+                )}
+
+                {/* Feed de atividade da equipe (ao vivo) */}
+                {feed.length > 0 && (
+                    <Card className="bg-slate-800 p-4">
+                        <h2 className="text-lg font-bold mb-3 flex items-center gap-2"><Activity className="w-5 h-5 text-sky-400" /> Atividade da Equipe (ao vivo)</h2>
+                        <ul className="space-y-1.5">
+                            {feed.map((it, i) => (
+                                <li key={i} className="flex items-center gap-3 text-sm py-1.5 border-b border-slate-800 last:border-0">
+                                    <span className={`w-2 h-2 rounded-full shrink-0 ${it.kind === 'visit' ? 'bg-emerald-400' : it.kind === 'eng' ? 'bg-indigo-400' : 'bg-yellow-400'}`} />
+                                    <span className="flex-1 min-w-0 truncate"><strong className="text-slate-200">{it.who}</strong> <span className="text-slate-400">{it.text}</span></span>
+                                    <span className="text-[11px] text-slate-500 shrink-0">{timeAgo(it.ts)}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </Card>
                 )}
 
                 {/* Mapa ao vivo da equipe */}
