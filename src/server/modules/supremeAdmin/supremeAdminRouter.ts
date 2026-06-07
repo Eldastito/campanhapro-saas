@@ -882,7 +882,9 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         `whatsappOptin (contactáveis), comGeoEleitoral (com zona/seção), bySource ` +
         `(canal de origem). Use ESSES números para diagnosticar a conversão real, ` +
         `o maior gargalo do funil e onde investir. Quando "byIntention" tiver muitos ` +
-        `"(sem)" ou comGeoEleitoral baixo, aponte como lacuna de dados que cega a decisão.` +
+        `"(sem)" ou comGeoEleitoral baixo, aponte como lacuna de dados que cega a decisão. ` +
+        `Cruze "expenses.byCanal" (gasto por canal) com "funnel.bySource" (leads por canal) ` +
+        `para estimar CUSTO POR LEAD e recomendar realocação de verba para o canal mais eficiente.` +
         previousBlock;
 
       let result;

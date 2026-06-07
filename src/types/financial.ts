@@ -28,6 +28,8 @@ export interface Expense {
     notaFiscalUrl?: string;
     statusDocumento?: 'Pendente' | 'Validado' | 'Recusado';
     tipoDocumento?: 'Nota Fiscal' | 'Cupom Fiscal' | 'Recibo' | 'Contrato' | 'Outro';
+    canal?: string;   // atribuição p/ ROI: visita|evento|whatsapp|redes_sociais|marketing_digital|...
+    regiao?: string;  // bairro/região do gasto
     createdBy?: string;
     createdAt?: string;
 }

@@ -23,6 +23,8 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ onSave, onCancel }) => {
         tipoDocumento: 'Nota Fiscal' as Expense['tipoDocumento'],
         notaFiscalUrl: undefined as string | undefined,
         statusDocumento: 'Pendente' as Expense['statusDocumento'],
+        canal: '',
+        regiao: '',
     });
     const [fileName, setFileName] = React.useState('');
 
@@ -71,7 +73,27 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ onSave, onCancel }) => {
             </div>
             
             <Input label="Descrição" name="descricao" value={formData.descricao} onChange={handleChange} required placeholder="Ex: Abastecimento carro da equipe" />
-            
+
+            {/* Atribuição p/ ROI (custo por lead/voto) — alimenta a IA */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label htmlFor="canal" className="block text-sm font-medium text-slate-300 mb-1">Canal / Origem (p/ ROI)</label>
+                    <select id="canal" name="canal" value={formData.canal} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3">
+                        <option value="">— (sem atribuição)</option>
+                        <option value="visita">Visita / Porta a porta</option>
+                        <option value="evento">Evento</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="redes_sociais">Redes Sociais</option>
+                        <option value="marketing_digital">Marketing Digital (ads)</option>
+                        <option value="material_grafico">Material Gráfico</option>
+                        <option value="radio_tv">Rádio / TV</option>
+                        <option value="estrutura">Estrutura / Operação</option>
+                        <option value="outro">Outro</option>
+                    </select>
+                </div>
+                <Input label="Região / Bairro (opcional)" name="regiao" value={formData.regiao} onChange={handleChange} placeholder="Ex: Zona Norte" />
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label htmlFor="tipoDocumento" className="block text-sm font-medium text-slate-300 mb-1">Tipo de Comprovante</label>
