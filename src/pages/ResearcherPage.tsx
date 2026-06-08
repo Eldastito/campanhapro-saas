@@ -58,15 +58,19 @@ const ResearcherPage: React.FC = () => {
             // __lead = identificação opcional do entrevistado (não é coluna de pesquisas)
             const { __lead, ...pesquisaData } = data;
 
-            const { error } = await supabase
+            const { data: created, error } = await supabase
                 .from('pesquisas')
                 .insert({
                     ...pesquisaData,
                     entrevistadorId: user.id,
                     campaignId: user.campaignId
-                });
+                })
+                .select('*')
+                .single();
 
             if (error) throw error;
+            // Atualização otimista — a estatística reflete na hora (não depende do realtime).
+            if (created) setPesquisas(prev => [created, ...prev]);
 
             // Se o entrevistado se identificou, cria/atualiza um contato (lead) no CRM
             // com a intenção de voto desta pesquisa — alimenta o funil.
