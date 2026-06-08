@@ -130,10 +130,12 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
     const campaignId = campaignIdOf(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
-    const { title, scheduledAt, generateAgenda } = req.body as {
+    const { title, scheduledAt, generateAgenda, bairro, municipio } = req.body as {
       title?: string;
       scheduledAt?: string;
       generateAgenda?: boolean;
+      bairro?: string;
+      municipio?: string;
     };
 
     try {
@@ -143,6 +145,8 @@ export function createMeetingsRouter(supabase: SupabaseClient) {
           campaignId,
           title: title?.trim() || 'Reunião de Planejamento',
           scheduledAt: scheduledAt ?? null,
+          bairro: (bairro || '').trim() || null,
+          municipio: (municipio || '').trim() || null,
           status: 'draft',
           updatedAt: new Date().toISOString(),
         })

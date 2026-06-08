@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import { supabase } from '../../lib/supabaseClient';
+import { RJ_MUNICIPALITIES } from '../../data/rj-locations';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,6 +88,8 @@ export const MeetingPlanningTab: React.FC = () => {
   const [showNew, setShowNew] = React.useState(false);
   const [newTitle, setNewTitle] = React.useState('');
   const [newScheduledAt, setNewScheduledAt] = React.useState('');
+  const [newMunicipio, setNewMunicipio] = React.useState('');
+  const [newBairro, setNewBairro] = React.useState('');
   const [creating, setCreating] = React.useState(false);
 
   // Recording state
@@ -156,6 +159,8 @@ export const MeetingPlanningTab: React.FC = () => {
         body: JSON.stringify({
           title: newTitle.trim(),
           scheduledAt: newScheduledAt || undefined,
+          municipio: newMunicipio || undefined,
+          bairro: newBairro || undefined,
           generateAgenda: true,
         }),
       });
@@ -164,6 +169,8 @@ export const MeetingPlanningTab: React.FC = () => {
       setShowNew(false);
       setNewTitle('');
       setNewScheduledAt('');
+      setNewMunicipio('');
+      setNewBairro('');
       await loadMeetings();
       setSelected(json.meeting);
       setTranscript('');
@@ -734,6 +741,31 @@ export const MeetingPlanningTab: React.FC = () => {
                   onChange={e => setNewScheduledAt(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Município (p/ o mapa)</label>
+                  <select
+                    value={newMunicipio}
+                    onChange={e => { setNewMunicipio(e.target.value); setNewBairro(''); }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">—</option>
+                    {RJ_MUNICIPALITIES.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Bairro</label>
+                  <select
+                    value={newBairro}
+                    onChange={e => setNewBairro(e.target.value)}
+                    disabled={!newMunicipio}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-40"
+                  >
+                    <option value="">{newMunicipio ? '—' : 'Selecione o município'}</option>
+                    {(RJ_MUNICIPALITIES.find(m => m.name === newMunicipio)?.neighborhoods || []).map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
 

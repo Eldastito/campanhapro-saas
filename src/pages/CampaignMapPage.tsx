@@ -30,8 +30,9 @@ const CampaignMapPage: React.FC = () => {
 
   const [coords, setCoords] = React.useState<Record<string, LatLng>>({});
   const [geocoding, setGeocoding] = React.useState(false);
-  const [layers, setLayers] = React.useState({ equipe: true, visitas: true, live: true, votos: false });
+  const [layers, setLayers] = React.useState({ equipe: true, visitas: true, live: true, votos: false, reunioes: true });
   const [live, setLive] = React.useState<LiveLoc[]>([]);
+  const [meetings, setMeetings] = React.useState<any[]>([]);
 
   // Filtros (cascata município→bairro, igual ao formulário, + por líder)
   const [fMunicipio, setFMunicipio] = React.useState('');
@@ -58,7 +59,7 @@ const CampaignMapPage: React.FC = () => {
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const mapDivRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<any>(null);
-  const lgRef = React.useRef<{ equipe?: any; visitas?: any; votos?: any; live?: any }>({});
+  const lgRef = React.useRef<{ equipe?: any; visitas?: any; votos?: any; reunioes?: any; live?: any }>({});
   const doneRef = React.useRef<Set<string>>(new Set());
 
   // ── Agrupamentos ───────────────────────────────────────────────────
@@ -89,6 +90,19 @@ const CampaignMapPage: React.FC = () => {
     return Array.from(map.entries()).map(([key, v]) => ({ key, ...v }));
   }, [visits, matchFilters]);
 
+  const meetingGroups = React.useMemo(() => {
+    const map = new Map<string, { municipio: string; bairro: string; total: number; titulos: string[] }>();
+    (meetings as any[]).forEach((mt) => {
+      const municipio = norm(mt.municipio); const bairro = norm(mt.bairro);
+      if (!municipio && !bairro) return;
+      if (!matchFilters(municipio, bairro, null)) return;
+      const key = qStr(bairro, municipio);
+      if (!map.has(key)) map.set(key, { municipio, bairro, total: 0, titulos: [] });
+      const g = map.get(key)!; g.total++; if (mt.title) g.titulos.push(mt.title);
+    });
+    return Array.from(map.entries()).map(([key, v]) => ({ key, ...v }));
+  }, [meetings, matchFilters]);
+
   const semLocalizacao = (teamMembers as any[]).filter((m) => !norm(m.municipio) && !norm(m.bairro)).length;
 
   // ── Geocodificação (cacheada) ──────────────────────────────────────
@@ -96,6 +110,7 @@ const CampaignMapPage: React.FC = () => {
     const targets = new Set<string>();
     equipeGroups.forEach((g) => targets.add(g.key));
     visitaGroups.forEach((g) => targets.add(g.key));
+    meetingGroups.forEach((g) => targets.add(g.key));
     const todo = Array.from(targets).filter((q) => !doneRef.current.has(q));
     if (!todo.length) return;
     todo.forEach((q) => doneRef.current.add(q));
@@ -119,6 +134,13 @@ const CampaignMapPage: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [user?.campaignId]);
 
+  // ── Reuniões ───────────────────────────────────────────────────────
+  React.useEffect(() => {
+    if (!user?.campaignId) return;
+    supabase.from('meeting_records').select('id, title, bairro, municipio').eq('campaignId', user.campaignId)
+      .then(({ data }) => setMeetings(data ?? []), () => {});
+  }, [user?.campaignId]);
+
   // ── Mapa (init uma vez) ────────────────────────────────────────────
   React.useEffect(() => {
     const L = (window as any).L;
@@ -128,6 +150,7 @@ const CampaignMapPage: React.FC = () => {
     lgRef.current.equipe = L.layerGroup().addTo(map);
     lgRef.current.visitas = L.layerGroup().addTo(map);
     lgRef.current.votos = L.layerGroup().addTo(map);
+    lgRef.current.reunioes = L.layerGroup().addTo(map);
     lgRef.current.live = L.layerGroup().addTo(map);
     mapRef.current = map;
   }, []);
@@ -172,6 +195,16 @@ const CampaignMapPage: React.FC = () => {
       mk.addTo(lgRef.current.votos); pts.push([c.lat, c.lng]);
     });
 
+    // Reuniões
+    lgRef.current.reunioes?.clearLayers();
+    if (layers.reunioes) meetingGroups.forEach((g) => {
+      const c = coords[g.key]; if (!c) return;
+      const mk = L.circleMarker([c.lat, c.lng], { radius: Math.min(8 + g.total * 2, 22), fillColor: '#f472b6', color: '#fff', weight: 2, fillOpacity: 0.85 });
+      const lista = g.titulos.slice(0, 8).map((t) => `<li>${esc(t)}</li>`).join('');
+      mk.bindPopup(`<div style="min-width:180px"><b>${esc(g.bairro || g.municipio)}</b><br/><span style="color:#f472b6">${g.total} reunião(ões)</span><ul style="margin:6px 0 0;padding-left:16px">${lista}</ul></div>`);
+      mk.addTo(lgRef.current.reunioes); pts.push([c.lat, c.lng]);
+    });
+
     // Ao vivo
     lgRef.current.live?.clearLayers();
     if (layers.live) live.forEach((loc) => {
@@ -185,7 +218,7 @@ const CampaignMapPage: React.FC = () => {
 
     if (pts.length) { try { map.fitBounds(pts, { padding: [50, 50], maxZoom: 13 }); } catch { /* ignore */ } }
     setTimeout(() => { try { map.invalidateSize(); } catch { /* ignore */ } }, 120);
-  }, [coords, layers, equipeGroups, visitaGroups, live]);
+  }, [coords, layers, equipeGroups, visitaGroups, meetingGroups, live]);
 
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
   const goFullscreen = () => { try { wrapRef.current?.requestFullscreen?.(); } catch { /* ignore */ } };
@@ -247,6 +280,10 @@ const CampaignMapPage: React.FC = () => {
           <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
             <input type="checkbox" checked={layers.visitas} onChange={() => toggle('visitas')} className="accent-emerald-500" />
             <span className="flex items-center gap-1"><MapPin className="w-4 h-4 text-emerald-400" /> Visitas</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
+            <input type="checkbox" checked={layers.reunioes} onChange={() => toggle('reunioes')} className="accent-pink-500" />
+            <span className="flex items-center gap-1"><Users className="w-4 h-4 text-pink-400" /> Reuniões</span>
           </label>
           <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
             <input type="checkbox" checked={layers.votos} onChange={() => toggle('votos')} className="accent-orange-500" />
