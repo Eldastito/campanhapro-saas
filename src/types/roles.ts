@@ -9,6 +9,7 @@ export const USER_ROLES = [
   'Apoiador',
   'Colaborador',
   'Pesquisador',
+  'Fiscal',
   'Suporte',
   'Manutenção',
   'blocked',
@@ -22,6 +23,7 @@ export const TEAM_MEMBER_ROLES = [
   'Apoiador',
   'Colaborador',
   'Pesquisador',
+  'Fiscal',
   'blocked',
 ] as const;
 
@@ -31,7 +33,7 @@ export type TeamMemberRole = (typeof TEAM_MEMBER_ROLES)[number];
 export const ADMIN_ROLES: UserRole[] = ['Admin', 'Coordenador'];
 
 // Roles that can be assigned to field team members
-export const FIELD_ROLES: UserRole[] = ['Líder', 'Apoiador', 'Colaborador', 'Pesquisador'];
+export const FIELD_ROLES: UserRole[] = ['Líder', 'Apoiador', 'Colaborador', 'Pesquisador', 'Fiscal'];
 
 // Roles that receive dedicated pages instead of CampaignWebApp
-export const DEDICATED_PAGE_ROLES: UserRole[] = ['Candidato', 'Suporte', 'Manutenção', 'blocked'];
+export const DEDICATED_PAGE_ROLES: UserRole[] = ['Candidato', 'Fiscal', 'Suporte', 'Manutenção', 'blocked'];

@@ -8,6 +8,7 @@ import SupporterPage from './pages/SupporterPage';
 import ResearcherPage from './pages/ResearcherPage';
 import CandidateDashboardPage from './pages/CandidateDashboardPage';
 import LeaderDashboardPage from './pages/LeaderDashboardPage';
+import FiscalPage from './pages/FiscalPage';
 import SupremeAdminPage from './pages/SupremeAdminPage';
 import BlockedPage from './pages/BlockedPage';
 import LoadingScreen from './components/ui/LoadingScreen';
@@ -70,6 +71,13 @@ const App: React.FC = () => {
             return (
                 <DataProvider>
                     <ResearcherPage />
+                </DataProvider>
+            );
+
+        case 'Fiscal':
+            return (
+                <DataProvider>
+                    <FiscalPage />
                 </DataProvider>
             );
 

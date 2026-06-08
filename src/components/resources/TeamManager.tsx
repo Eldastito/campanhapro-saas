@@ -60,7 +60,7 @@ const TeamMemberForm: React.FC<{ onSave: (member: Omit<TeamMember, 'id'> | TeamM
                     <div>
                         <label htmlFor="role" className="block text-sm font-medium text-slate-300 mb-1">Função</label>
                         <select id="role" name="role" value={formData.role} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3">
-                            {(['Apoiador', 'Líder', 'Colaborador'] as TeamMemberRole[]).map(role => <option key={role} value={role}>{role}</option>)}
+                            {(['Apoiador', 'Líder', 'Colaborador', 'Pesquisador', 'Fiscal'] as TeamMemberRole[]).map(role => <option key={role} value={role}>{role}</option>)}
                         </select>
                     </div>
                 </div>

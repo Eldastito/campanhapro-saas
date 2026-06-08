@@ -21,7 +21,7 @@ import { sendTeamInviteEmail } from '../email/emailService';
 const INVITE_TTL_DAYS = 7;
 /** Roles an Admin is allowed to invite. Excludes 'Admin', 'Coordenador',
  *  'Suporte', 'Manutenção', 'blocked' — promoting to those needs Supreme Admin. */
-const INVITABLE_ROLES: UserRole[] = ['Líder', 'Apoiador', 'Colaborador', 'Pesquisador', 'Candidato'];
+const INVITABLE_ROLES: UserRole[] = ['Líder', 'Apoiador', 'Colaborador', 'Pesquisador', 'Fiscal', 'Candidato'];
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString('base64url');
@@ -209,7 +209,7 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
       return res.status(400).json({ error: 'role_not_invitable', allowed: INVITABLE_ROLES });
     }
     // Um Líder só pode recrutar funções subordinadas (não cria Líder/Candidato/Admin).
-    const LEADER_RECRUITABLE: UserRole[] = ['Apoiador', 'Colaborador', 'Pesquisador'];
+    const LEADER_RECRUITABLE: UserRole[] = ['Apoiador', 'Colaborador', 'Pesquisador', 'Fiscal'];
     if (isLeader && !LEADER_RECRUITABLE.includes(role as UserRole)) {
       return res.status(403).json({ error: 'leader_role_limited', allowed: LEADER_RECRUITABLE });
     }

@@ -50,6 +50,7 @@ export const DEFAULT_PERMISSIONS: ProfilePermissions = {
     'Apoiador':    ['Dashboard', 'Visitas', 'Engajamento', 'Ajuda'],
     'Colaborador': ['Dashboard', 'Visitas', 'Ajuda'],
     'Pesquisador': ['Dashboard', 'Visitas', 'Ajuda'],
+    'Fiscal':      ['Dashboard', 'Dia das Eleições', 'Ajuda'],
     'Suporte':     ['Dashboard', 'Visitas', 'Ajuda'],
     'Manutenção':  ['Dashboard', 'Visitas', 'Ajuda']
 };

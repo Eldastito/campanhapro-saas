@@ -26,6 +26,7 @@ const HelpPage = React.lazy(() => import('./pages/HelpPage'));
 const PermissionsPage = React.lazy(() => import('./pages/PermissionsPage'));
 const ElectionDayPage = React.lazy(() => import('./pages/ElectionDayPage'));
 const CampaignMapPage = React.lazy(() => import('./pages/CampaignMapPage'));
+const ApuracaoLiveDashboard = React.lazy(() => import('./components/election/ApuracaoLiveDashboard'));
 const ElectionReportsPage = React.lazy(() => import('./pages/ElectionReportsPage'));
 const CRMPage = React.lazy(() => import('./pages/CRMPage'));
 const IntelligencePage = React.lazy(() => import('./pages/IntelligencePage'));
@@ -69,7 +70,7 @@ const AdminApp: React.FC = () => {
             goals: ['Objetivos'], routines: ['Rotinas'], ai_agents: ['Agentes IA'],
             analytics: ['Analytics'], financial: ['Financeiro'], content_studio: ['Estúdio'],
             meetings: ['Reuniões'], tools: ['Calculadora', 'Ferramentas'], training: ['Treinamento'],
-            whatsapp_omnichannel: ['Caixa de Entrada'], election_day: ['Dia das Eleições'],
+            whatsapp_omnichannel: ['Caixa de Entrada'], election_day: ['Dia das Eleições', 'Apuração ao Vivo'],
             intelligence: ['Inteligência', 'Mapa da Campanha'], scenarios: ['Cenários'], budget_ceo: ['Plano'],
             paperclip: ['Agentes (Tarefas)'], compliance: ['Conformidade'],
         };
@@ -80,7 +81,7 @@ const AdminApp: React.FC = () => {
             'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
             'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
             'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-            'Analytics', 'CRM', 'Inteligência', 'Mapa da Campanha', 'Caixa de Entrada', 'Agentes (Tarefas)',
+            'Analytics', 'CRM', 'Inteligência', 'Mapa da Campanha', 'Apuração ao Vivo', 'Caixa de Entrada', 'Agentes (Tarefas)',
             'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio', 'Links Curtos',
         ];
 
@@ -119,6 +120,7 @@ const AdminApp: React.FC = () => {
         CRM: <UsersGroupIcon className="h-5 w-5" />,
         Inteligência: <Brain className="h-5 w-5" />,
         'Mapa da Campanha': <MapIcon className="h-5 w-5" />,
+        'Apuração ao Vivo': <BarChartIcon className="h-5 w-5" />,
         'Caixa de Entrada': <Inbox className="h-5 w-5" />,
         'Agentes (Tarefas)': <Cpu className="h-5 w-5" />,
         'Cenários': <FlaskConical className="h-5 w-5" />,
@@ -151,6 +153,7 @@ const AdminApp: React.FC = () => {
         'CRM': <CRMPage />,
         'Inteligência': <IntelligencePage />,
         'Mapa da Campanha': <CampaignMapPage />,
+        'Apuração ao Vivo': <ApuracaoLiveDashboard />,
         'Caixa de Entrada': <InboxPage />,
         'Agentes (Tarefas)': <AgentTasksPage />,
         'Cenários': <ScenariosPage />,
