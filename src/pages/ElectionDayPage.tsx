@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { QrCode, AlertTriangle, CheckCircle, BarChart3, Users, MapPin, Camera, RefreshCcw } from 'lucide-react';
+import { QrCode, AlertTriangle, CheckCircle, BarChart3, Users, MapPin, RefreshCcw } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
+import BUScanner from '../components/election/BUScanner';
+import { votosDoCandidato, cargoNomeToCodigo, BUParsed } from '../lib/buParser';
 
 interface BUData {
   id: string;
@@ -38,6 +40,8 @@ const ElectionDayPage: React.FC = () => {
   const [neighborhoodStats, setNeighborhoodStats] = useState<any>({});
   const [teamPings, setTeamPings] = useState<TeamPing[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [candNumber, setCandNumber] = useState<string>('');
+  const [cargoCodigo, setCargoCodigo] = useState<number | null>(null);
   const [showFullMap, setShowFullMap] = useState(false);
   const [mapMode, setMapMode] = useState<'strategic' | 'real'>('strategic');
   const [_loading, setLoading] = useState(true);
@@ -244,6 +248,41 @@ const ElectionDayPage: React.FC = () => {
 
   const totalVotosIA = buResults.reduce((acc, curr) => acc + curr.votosCandidato, 0);
   const totalSeçõesApuradas = buResults.length;
+
+  // Carrega número de urna + cargo do candidato (p/ casar com o BU).
+  useEffect(() => {
+    if (!_user?.campaignId) return;
+    supabase.from('settings').select('campaignDetails').eq('campaignId', _user.campaignId).maybeSingle()
+      .then(({ data }) => {
+        const cd: any = (data as any)?.campaignDetails || {};
+        setCandNumber(String(cd.numeroUrna || cd.numero || '').trim());
+        setCargoCodigo(cargoNomeToCodigo(cd.cargoDisputado || cd.cargo));
+      }, () => {});
+  }, [_user?.campaignId]);
+
+  // Salva o BU lido na apuração paralela.
+  const handleBUConfirm = async (bu: BUParsed) => {
+    if (!_user?.campaignId) throw new Error('Sem campanha vinculada.');
+    const res = votosDoCandidato(bu, candNumber, cargoCodigo);
+    const cargo = res.cargo;
+    const adversarios = cargo ? Object.fromEntries(Object.entries(cargo.candidatos).filter(([num]) => num !== candNumber)) : {};
+    const { error } = await supabase.from('boletins_urna').insert({
+      campaignId: _user.campaignId,
+      fiscalId: _user.id ? String(_user.id) : null,
+      rawContent: bu.raw,
+      votosCandidato: res.votos,
+      votosTotalSecao: cargo?.total ?? bu.header.comparecimento ?? 0,
+      votosAdversarios: adversarios,
+      hashAuthenticity: bu.hash || null,
+      uf: bu.header.uf || null,
+      municipio: bu.header.municipio || null,
+      zona: bu.header.zona || null,
+      secao: bu.header.secao || null,
+      cargo: cargo?.codigo ?? cargoCodigo ?? null,
+    });
+    if (error) throw error;
+    fetchElectionData();
+  };
 
   return (
     <div className="p-6 bg-[#0a0a0b] min-h-screen text-white">
@@ -552,38 +591,14 @@ const ElectionDayPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Simulado de Scanner (UI) */}
-      {scanning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
-          <div className="bg-[#161b22] w-full max-md rounded-3xl p-8 border border-white/20 shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500 animate-pulse"></div>
-            <button 
-              onClick={() => setScanning(false)}
-              className="absolute top-4 right-4 text-gray-500 hover:text-white"
-            >
-              <X className="w-6 h-6" />
-            </button>
-            <div className="text-center mb-8">
-              <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Camera className="w-10 h-10 text-emerald-400" />
-              </div>
-              <h2 className="text-2xl font-bold">Leitor de Boletim</h2>
-              <p className="text-gray-400 text-sm">Aponte para o QR Code no rodapé do BU.</p>
-            </div>
-            <div className="aspect-square rounded-2xl border-2 border-emerald-500/50 relative mb-8 flex items-center justify-center bg-black/40 overflow-hidden">
-              <div className="absolute top-4 left-4 w-12 h-12 border-t-4 border-l-4 border-emerald-500 rounded-tl-xl"></div>
-              <div className="absolute top-4 right-4 w-12 h-12 border-t-4 border-r-4 border-emerald-500 rounded-tr-xl"></div>
-              <div className="absolute bottom-4 left-4 w-12 h-12 border-b-4 border-l-4 border-emerald-500 rounded-bl-xl"></div>
-              <div className="absolute bottom-4 right-4 w-12 h-12 border-b-4 border-r-4 border-emerald-500 rounded-br-xl"></div>
-              <div className="w-full h-0.5 bg-emerald-500/50 absolute top-0 animate-[scan_2s_infinite]"></div>
-              <p className="text-[10px] text-gray-600 uppercase font-bold tracking-widest animate-pulse">Aguardando Foco...</p>
-            </div>
-            <p className="text-[10px] text-center text-gray-500 leading-relaxed italic">
-              Esta tecnologia usa visão computacional para ler e auditar a assinatura digital do TSE em tempo real.
-            </p>
-          </div>
-        </div>
-      )}
+      {/* Leitor real de QR Code do BU (padrão TSE 2026) */}
+      <BUScanner
+        open={scanning}
+        onClose={() => setScanning(false)}
+        candidateNumber={candNumber}
+        cargoCodigo={cargoCodigo}
+        onConfirm={handleBUConfirm}
+      />
     </div>
   );
 };
