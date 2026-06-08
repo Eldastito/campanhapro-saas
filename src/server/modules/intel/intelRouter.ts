@@ -15,6 +15,7 @@
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
+import { searchMetaAds } from './metaAdLibrary';
 
 function parseJsonLoose(text: string): any | null {
   if (!text) return null;
@@ -47,6 +48,14 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
     if (!nome) return res.status(400).json({ error: 'name_required' });
 
     const alvo = [nome, cargo ? `(${cargo})` : '', cidade ? `de ${cidade}` : '', uf ? `/${uf}` : ''].filter(Boolean).join(' ');
+
+    // Biblioteca de Anúncios da Meta — dados REAIS via API (não dá pra raspar pelo web_search).
+    const adlib = await searchMetaAds(nome, 15);
+    const adContext = adlib.available && adlib.ads.length
+      ? `\n\nDADOS REAIS DA BIBLIOTECA DE ANÚNCIOS DA META (use exatamente estes no campo "anunciosMeta", não invente):\n`
+        + JSON.stringify(adlib.ads.map((a) => ({ pagina: a.pageName, texto: a.bodies, periodo: [a.startDate, a.stopDate], gasto: a.spend, impressoes: a.impressions, plataformas: a.platforms })))
+      : `\n\n(A Biblioteca de Anúncios da Meta ${adlib.reason === 'sem_token' ? 'não está configurada (sem token)' : 'não retornou anúncios'} — preencha "anunciosMeta" como "não encontrado".)`;
+
     const prompt =
       `Faça um dossiê de inteligência competitiva sobre o(a) candidato(a)/adversário(a): ${alvo}.\n` +
       `Use o web_search para buscar em fontes públicas atuais. Procure também a Biblioteca de Anúncios ` +
@@ -66,7 +75,7 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       `  "oportunidadesParaNos": ["..."],\n` +
       `  "recomendacoes": ["ações práticas para a nossa campanha"],\n` +
       `  "fontes": ["urls consultadas"]\n` +
-      `}`;
+      `}` + adContext;
 
     let result;
     try {
@@ -83,6 +92,25 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
     }
 
     const dossier = parseJsonLoose(result.text);
+    // Sobrepõe com os dados REAIS da Biblioteca de Anúncios (fonte da verdade).
+    if (dossier && adlib.available && adlib.ads.length) {
+      dossier.anunciosMeta = {
+        resumo: `${adlib.total} anúncio(s) político/social encontrado(s) na Biblioteca de Anúncios da Meta.`,
+        total: adlib.total,
+        fonte: 'Meta Ad Library API',
+        exemplos: adlib.ads.slice(0, 10).map((a) => ({
+          pagina: a.pageName, texto: a.bodies, periodo: [a.startDate, a.stopDate].filter(Boolean).join(' → '),
+          gasto: a.spend, impressoes: a.impressions, link: a.snapshotUrl,
+        })),
+      };
+    } else if (dossier) {
+      dossier.anunciosMeta = {
+        resumo: adlib.reason === 'sem_token'
+          ? 'Biblioteca de Anúncios não configurada — defina META_ADLIBRARY_TOKEN no servidor para dados estruturados.'
+          : 'Nenhum anúncio político/social encontrado na Biblioteca de Anúncios da Meta.',
+        total: 0, exemplos: [],
+      };
+    }
     const { data: saved, error } = await supabase.from('competitor_intel').insert({
       campaignId, name: nome, cargo: cargo || null, cidade: cidade || null, uf: uf || null,
       dossier: dossier ?? null,

@@ -107,8 +107,23 @@ const CompetitiveIntelPanel: React.FC = () => {
                           <Section icon={Target} title="Pautas principais"><List items={d.pautasPrincipais} /></Section>
                           <Section icon={Megaphone} title="Narrativas"><List items={d.narrativas} /></Section>
                           <Section icon={Megaphone} title="Anúncios (Biblioteca da Meta)">
-                            <p className="text-sm text-slate-300">{d.anunciosMeta?.resumo || '—'}</p>
-                            <List items={d.anunciosMeta?.exemplos} />
+                            <p className="text-sm text-slate-300">{d.anunciosMeta?.resumo || '—'}{d.anunciosMeta?.fonte ? <span className="text-[10px] text-emerald-400 ml-1">• {d.anunciosMeta.fonte}</span> : null}</p>
+                            {(d.anunciosMeta?.exemplos || []).length > 0 && (
+                              <ul className="mt-1 space-y-1.5">
+                                {d.anunciosMeta.exemplos.map((a: any, i: number) => (
+                                  <li key={i} className="text-xs bg-slate-950/50 rounded p-2">
+                                    {typeof a === 'string' ? a : (<>
+                                      <b className="text-slate-200">{a.pagina || '—'}</b>
+                                      {a.gasto ? <span className="text-amber-400"> · {a.gasto}</span> : null}
+                                      {a.impressoes ? <span className="text-sky-400"> · {a.impressoes} impr.</span> : null}
+                                      {a.periodo ? <span className="text-slate-500"> · {a.periodo}</span> : null}
+                                      {a.texto ? <p className="text-slate-400 mt-0.5">"{a.texto}"</p> : null}
+                                      {a.link ? <a href={a.link} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">ver anúncio</a> : null}
+                                    </>)}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
                           </Section>
                         </div>
                         <div>
