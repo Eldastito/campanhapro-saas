@@ -23,6 +23,7 @@ import { fetchTeamResources } from '../services/teamResourcesService';
 import { TeamResource } from '../types/resources';
 import ShareLocationButton from '../components/team/ShareLocationButton';
 import TeamLiveMap from '../components/team/TeamLiveMap';
+import FiscalRequestsPanel from '../components/team/FiscalRequestsPanel';
 
 /** Monta link wa.me a partir de um telefone BR (best-effort). */
 const waLink = (phone?: string) => {
@@ -352,6 +353,9 @@ const LeaderDashboardPage: React.FC = () => {
                         </Card>
                     </div>
                 )}
+
+                {/* Autorização de fiscais de zona */}
+                <FiscalRequestsPanel />
 
                 {/* Feed de atividade da equipe (ao vivo) */}
                 {feed.length > 0 && (

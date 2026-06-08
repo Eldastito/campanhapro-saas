@@ -4,6 +4,7 @@ import { useVisits } from '../contexts/VisitsContext';
 import { useTeam } from '../contexts/TeamContext';
 import { useTeamsData } from '../hooks/useTeamsData';
 import TeamsPerformanceTable from '../components/teams/TeamsPerformanceTable';
+import FiscalRequestsPanel from '../components/team/FiscalRequestsPanel';
 import Card from '../components/ui/Card';
 
 const TeamsPage = () => {
@@ -14,20 +15,24 @@ const TeamsPage = () => {
 
   if (!permissions.canUseTeamPanels) {
     return (
-      <div className="flex flex-col items-center justify-center text-center h-64">
-        <UsersGroupIcon className="h-16 w-16 text-slate-500" />
-        <h2 className="mt-4 text-2xl font-bold text-slate-300">Painel de Equipes</h2>
-        <p className="mt-2 max-w-md text-slate-400">
-          Este recurso está disponível apenas no plano <strong>Campanha Total</strong>.
-          Ele permite que você filtre o dashboard por líder de equipe, acompanhando a performance
-          de cada grupo separadamente.
-        </p>
+      <div className="space-y-6">
+        <FiscalRequestsPanel />
+        <div className="flex flex-col items-center justify-center text-center h-64">
+          <UsersGroupIcon className="h-16 w-16 text-slate-500" />
+          <h2 className="mt-4 text-2xl font-bold text-slate-300">Painel de Equipes</h2>
+          <p className="mt-2 max-w-md text-slate-400">
+            Este recurso está disponível apenas no plano <strong>Campanha Total</strong>.
+            Ele permite que você filtre o dashboard por líder de equipe, acompanhando a performance
+            de cada grupo separadamente.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      <FiscalRequestsPanel />
       <h2 className="text-2xl font-bold text-slate-200">Painel de Desempenho por Equipe</h2>
       <p className="text-slate-400">
         Analise e compare o desempenho de suas equipes de campo. Clique nos cabeçalhos da tabela para ordenar os resultados e identificar os líderes mais eficientes.
