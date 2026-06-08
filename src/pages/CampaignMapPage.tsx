@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTeam } from '../contexts/TeamContext';
 import { useVisits } from '../contexts/VisitsContext';
 import { geocodeMany, LatLng } from '../lib/geocode';
+import { RJ_MUNICIPALITIES } from '../data/rj-locations';
 
 /**
  * Mapa estratégico da campanha (Coordenação/Candidato). Plota onde há EQUIPE/
@@ -29,13 +30,35 @@ const CampaignMapPage: React.FC = () => {
 
   const [coords, setCoords] = React.useState<Record<string, LatLng>>({});
   const [geocoding, setGeocoding] = React.useState(false);
-  const [layers, setLayers] = React.useState({ equipe: true, visitas: true, live: true });
+  const [layers, setLayers] = React.useState({ equipe: true, visitas: true, live: true, votos: false });
   const [live, setLive] = React.useState<LiveLoc[]>([]);
+
+  // Filtros (cascata município→bairro, igual ao formulário, + por líder)
+  const [fMunicipio, setFMunicipio] = React.useState('');
+  const [fBairro, setFBairro] = React.useState('');
+  const [fLeader, setFLeader] = React.useState('');
+
+  const municipios = React.useMemo(() => RJ_MUNICIPALITIES.map((m) => m.name).sort(), []);
+  const bairrosDoMunicipio = React.useMemo(() => {
+    if (!fMunicipio) return [];
+    const mun = RJ_MUNICIPALITIES.find((m) => m.name === fMunicipio);
+    return mun ? [...mun.neighborhoods].sort() : [];
+  }, [fMunicipio]);
+  const leaders = React.useMemo(
+    () => (teamMembers as any[]).filter((m) => m.role === 'Líder' && m.userId).map((m) => ({ id: m.userId, name: m.name })),
+    [teamMembers],
+  );
+  const matchFilters = React.useCallback((municipio: string, bairro: string, leaderId?: string | null) => {
+    if (fMunicipio && municipio !== fMunicipio) return false;
+    if (fBairro && bairro !== fBairro) return false;
+    if (fLeader && (leaderId || '') !== fLeader) return false;
+    return true;
+  }, [fMunicipio, fBairro, fLeader]);
 
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const mapDivRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<any>(null);
-  const lgRef = React.useRef<{ equipe?: any; visitas?: any; live?: any }>({});
+  const lgRef = React.useRef<{ equipe?: any; visitas?: any; votos?: any; live?: any }>({});
   const doneRef = React.useRef<Set<string>>(new Set());
 
   // ── Agrupamentos ───────────────────────────────────────────────────
@@ -44,24 +67,27 @@ const CampaignMapPage: React.FC = () => {
     (teamMembers as any[]).forEach((m) => {
       const municipio = norm(m.municipio); const bairro = norm(m.bairro);
       if (!municipio && !bairro) return;
+      if (!matchFilters(municipio, bairro, m.assignedLeaderId)) return;
       const key = qStr(bairro, municipio);
       if (!map.has(key)) map.set(key, { municipio, bairro, members: [] });
       map.get(key)!.members.push(m);
     });
     return Array.from(map.entries()).map(([key, v]) => ({ key, ...v }));
-  }, [teamMembers]);
+  }, [teamMembers, matchFilters]);
 
   const visitaGroups = React.useMemo(() => {
-    const map = new Map<string, { municipio: string; bairro: string; total: number; realizadas: number }>();
+    const map = new Map<string, { municipio: string; bairro: string; total: number; realizadas: number; votos: number }>();
     (visits as any[]).forEach((v) => {
       const municipio = norm(v.municipio); const bairro = norm(v.bairro);
       if (!municipio && !bairro) return;
+      if (!matchFilters(municipio, bairro, v.leaderId)) return;
       const key = qStr(bairro, municipio);
-      if (!map.has(key)) map.set(key, { municipio, bairro, total: 0, realizadas: 0 });
-      const g = map.get(key)!; g.total++; if (v.realizada === 'sim') g.realizadas++;
+      if (!map.has(key)) map.set(key, { municipio, bairro, total: 0, realizadas: 0, votos: 0 });
+      const g = map.get(key)!; g.total++;
+      if (v.realizada === 'sim') { g.realizadas++; g.votos += Number(v.votos) || 0; }
     });
     return Array.from(map.entries()).map(([key, v]) => ({ key, ...v }));
-  }, [visits]);
+  }, [visits, matchFilters]);
 
   const semLocalizacao = (teamMembers as any[]).filter((m) => !norm(m.municipio) && !norm(m.bairro)).length;
 
@@ -101,6 +127,7 @@ const CampaignMapPage: React.FC = () => {
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(map);
     lgRef.current.equipe = L.layerGroup().addTo(map);
     lgRef.current.visitas = L.layerGroup().addTo(map);
+    lgRef.current.votos = L.layerGroup().addTo(map);
     lgRef.current.live = L.layerGroup().addTo(map);
     mapRef.current = map;
   }, []);
@@ -133,6 +160,16 @@ const CampaignMapPage: React.FC = () => {
       const mk = L.circleMarker([c.lat, c.lng], { radius: Math.min(8 + g.realizadas * 1.5, 24), fillColor: '#10b981', color: '#fff', weight: 1.5, fillOpacity: 0.7 });
       mk.bindPopup(`<b>${esc(g.bairro || g.municipio)}</b><br/>${g.realizadas} visita(s) realizada(s)${g.total - g.realizadas > 0 ? ` · ${g.total - g.realizadas} agendada(s)` : ''}`);
       mk.addTo(lgRef.current.visitas); pts.push([c.lat, c.lng]);
+    });
+
+    // Votos estimados (calor por bairro)
+    lgRef.current.votos?.clearLayers();
+    if (layers.votos) visitaGroups.forEach((g) => {
+      const c = coords[g.key]; if (!c || !g.votos) return;
+      const color = g.votos >= 100 ? '#dc2626' : g.votos >= 40 ? '#f97316' : g.votos >= 15 ? '#eab308' : '#a3a3a3';
+      const mk = L.circleMarker([c.lat, c.lng], { radius: Math.min(10 + Math.sqrt(g.votos) * 2, 34), fillColor: color, color: '#fff', weight: 1, fillOpacity: 0.55 });
+      mk.bindPopup(`<b>${esc(g.bairro || g.municipio)}</b><br/>≈ ${g.votos} votos estimados (${g.realizadas} visitas)`);
+      mk.addTo(lgRef.current.votos); pts.push([c.lat, c.lng]);
     });
 
     // Ao vivo
@@ -178,6 +215,29 @@ const CampaignMapPage: React.FC = () => {
       </div>
 
       <div ref={wrapRef} className="bg-slate-900 rounded-xl p-3">
+        {/* Filtros (cascata município → bairro + por líder) */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <select value={fMunicipio} onChange={(e) => { setFMunicipio(e.target.value); setFBairro(''); }}
+                  className="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200">
+            <option value="">Todos os municípios</option>
+            {municipios.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <select value={fBairro} onChange={(e) => setFBairro(e.target.value)} disabled={!fMunicipio}
+                  className="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 disabled:opacity-40">
+            <option value="">{fMunicipio ? 'Todos os bairros' : 'Selecione o município'}</option>
+            {bairrosDoMunicipio.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <select value={fLeader} onChange={(e) => setFLeader(e.target.value)}
+                  className="bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200">
+            <option value="">Todas as lideranças</option>
+            {leaders.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+          {(fMunicipio || fBairro || fLeader) && (
+            <button onClick={() => { setFMunicipio(''); setFBairro(''); setFLeader(''); }}
+                    className="text-xs text-slate-400 hover:text-white underline">Limpar filtros</button>
+          )}
+        </div>
+
         {/* Controles de camada */}
         <div className="flex flex-wrap items-center gap-4 mb-3">
           <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
@@ -187,6 +247,10 @@ const CampaignMapPage: React.FC = () => {
           <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
             <input type="checkbox" checked={layers.visitas} onChange={() => toggle('visitas')} className="accent-emerald-500" />
             <span className="flex items-center gap-1"><MapPin className="w-4 h-4 text-emerald-400" /> Visitas</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
+            <input type="checkbox" checked={layers.votos} onChange={() => toggle('votos')} className="accent-orange-500" />
+            <span className="flex items-center gap-1"><MapPin className="w-4 h-4 text-orange-400" /> Votos estimados</span>
           </label>
           <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
             <input type="checkbox" checked={layers.live} onChange={() => toggle('live')} className="accent-cyan-500" />
