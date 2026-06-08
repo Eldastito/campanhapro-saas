@@ -25,6 +25,7 @@ const SettingsPage = React.lazy(() => import('./pages/SettingsPage'));
 const HelpPage = React.lazy(() => import('./pages/HelpPage'));
 const PermissionsPage = React.lazy(() => import('./pages/PermissionsPage'));
 const ElectionDayPage = React.lazy(() => import('./pages/ElectionDayPage'));
+const CampaignMapPage = React.lazy(() => import('./pages/CampaignMapPage'));
 const ElectionReportsPage = React.lazy(() => import('./pages/ElectionReportsPage'));
 const CRMPage = React.lazy(() => import('./pages/CRMPage'));
 const IntelligencePage = React.lazy(() => import('./pages/IntelligencePage'));
@@ -69,7 +70,7 @@ const AdminApp: React.FC = () => {
             analytics: ['Analytics'], financial: ['Financeiro'], content_studio: ['Estúdio'],
             meetings: ['Reuniões'], tools: ['Calculadora', 'Ferramentas'], training: ['Treinamento'],
             whatsapp_omnichannel: ['Caixa de Entrada'], election_day: ['Dia das Eleições'],
-            intelligence: ['Inteligência'], scenarios: ['Cenários'], budget_ceo: ['Plano'],
+            intelligence: ['Inteligência', 'Mapa da Campanha'], scenarios: ['Cenários'], budget_ceo: ['Plano'],
             paperclip: ['Agentes (Tarefas)'], compliance: ['Conformidade'],
         };
         // Abas de gestão sempre liberadas (qualquer plano) — evita lock-out do admin.
@@ -79,7 +80,7 @@ const AdminApp: React.FC = () => {
             'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
             'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
             'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-            'Analytics', 'CRM', 'Inteligência', 'Caixa de Entrada', 'Agentes (Tarefas)',
+            'Analytics', 'CRM', 'Inteligência', 'Mapa da Campanha', 'Caixa de Entrada', 'Agentes (Tarefas)',
             'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio', 'Links Curtos',
         ];
 
@@ -117,6 +118,7 @@ const AdminApp: React.FC = () => {
         Analytics: <ChartBarIcon className="h-5 w-5" />,
         CRM: <UsersGroupIcon className="h-5 w-5" />,
         Inteligência: <Brain className="h-5 w-5" />,
+        'Mapa da Campanha': <MapIcon className="h-5 w-5" />,
         'Caixa de Entrada': <Inbox className="h-5 w-5" />,
         'Agentes (Tarefas)': <Cpu className="h-5 w-5" />,
         'Cenários': <FlaskConical className="h-5 w-5" />,
@@ -148,6 +150,7 @@ const AdminApp: React.FC = () => {
         'Analytics': <ElectionReportsPage />,
         'CRM': <CRMPage />,
         'Inteligência': <IntelligencePage />,
+        'Mapa da Campanha': <CampaignMapPage />,
         'Caixa de Entrada': <InboxPage />,
         'Agentes (Tarefas)': <AgentTasksPage />,
         'Cenários': <ScenariosPage />,
