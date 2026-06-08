@@ -7,9 +7,14 @@ import { votosDoCandidato, cargoNomeToCodigo, BUParsed } from '../lib/buParser';
 
 interface BUData {
   id: string;
-  stationId: string;
+  stationId?: string | null;
+  uf?: string | null;
+  municipio?: string | null;
+  zona?: string | null;
+  secao?: string | null;
   votosCandidato: number;
   votosTotalSecao: number;
+  votosAdversarios?: Record<string, number> | null;
   createdAt: string;
 }
 
@@ -394,8 +399,8 @@ const ElectionDayPage: React.FC = () => {
                   ) : (
                     buResults.map((bu) => (
                       <tr key={bu.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <td className="py-3 px-2 font-mono">{bu.stationId.slice(0, 4)}</td>
-                        <td className="py-3 px-2 text-gray-400 text-xs">Escola Municipal José Bonifácio</td>
+                        <td className="py-3 px-2 font-mono">{bu.zona ? `Z${bu.zona}` : (bu.stationId ? bu.stationId.slice(0, 4) : '—')}{bu.secao ? `/S${bu.secao}` : ''}</td>
+                        <td className="py-3 px-2 text-gray-400 text-xs">{bu.municipio ? `Município ${bu.municipio}` : (bu.uf || '—')}</td>
                         <td className="py-3 px-2 font-bold text-emerald-400">{bu.votosCandidato}</td>
                         <td className="py-3 px-2">
                           <span className="px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase">
