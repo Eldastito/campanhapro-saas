@@ -24,6 +24,7 @@ import { getPlanConfig } from '../../../utils/planUtils';
 import { Plan } from '../../../types/user';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
+import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 import { runLifecycleSweep } from '../billing/subscriptionLifecycle';
 import { calcSimplesNacional } from './taxCalculator';
 
@@ -908,9 +909,15 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         `onde reforçar território.` +
         previousBlock;
 
+      // RAG: memória da campanha (dossiês de concorrência + relatórios anteriores).
+      const memoria = await retrieveContext(supabaseAdmin, campaignId, 'estratégia adversários conversão funil prioridades da campanha', 5);
+      const promptComMemoria = memoria
+        ? prompt + `\n\nMEMÓRIA DA CAMPANHA (inteligência competitiva e análises anteriores — incorpore):\n${memoria}`
+        : prompt;
+
       let result;
       try {
-        result = await callAgent(supabaseAdmin, 'campaign_consultant', prompt, {
+        result = await callAgent(supabaseAdmin, 'campaign_consultant', promptComMemoria, {
           campaignId,
           userId: (req as any).user?.id ?? null,
           systemInstruction: CONSULTANT_SYSTEM,
@@ -943,6 +950,15 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         })
         .select('id, createdAt')
         .single();
+
+      // RAG: indexa a análise do consultor na memória da campanha (best-effort).
+      void ingestArtifact(supabaseAdmin, {
+        campaignId,
+        source: 'consultant:report',
+        title: `Análise do Consultor IA (${new Date().toISOString().slice(0, 10)})`,
+        text: analysis ? JSON.stringify(analysis) : (result.text || ''),
+        metadata: { reportId: (saved as any)?.id },
+      });
 
       await audit(supabaseAdmin, {
         ...actorFromRequest(req),

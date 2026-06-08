@@ -16,6 +16,7 @@ import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { searchMetaAds } from './metaAdLibrary';
+import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 
 function parseJsonLoose(text: string): any | null {
   if (!text) return null;
@@ -56,6 +57,12 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
         + JSON.stringify(adlib.ads.map((a) => ({ pagina: a.pageName, texto: a.bodies, periodo: [a.startDate, a.stopDate], gasto: a.spend, impressoes: a.impressions, plataformas: a.platforms })))
       : `\n\n(A Biblioteca de Anúncios da Meta ${adlib.reason === 'sem_token' ? 'não está configurada (sem token)' : 'não retornou anúncios'} — preencha "anunciosMeta" como "não encontrado".)`;
 
+    // RAG: consulta a MEMÓRIA da campanha (dossiês/relatórios anteriores) antes de gerar.
+    const memoria = await retrieveContext(supabase, campaignId, [nome, cargo, cidade].filter(Boolean).join(' '), 4);
+    const memBlock = memoria
+      ? `\n\nMEMÓRIA DA CAMPANHA (análises anteriores — considere e atualize, não repita cegamente):\n${memoria}`
+      : '';
+
     const prompt =
       `Faça um dossiê de inteligência competitiva sobre o(a) candidato(a)/adversário(a): ${alvo}.\n` +
       `Use o web_search para buscar em fontes públicas atuais. Procure também a Biblioteca de Anúncios ` +
@@ -75,7 +82,7 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       `  "oportunidadesParaNos": ["..."],\n` +
       `  "recomendacoes": ["ações práticas para a nossa campanha"],\n` +
       `  "fontes": ["urls consultadas"]\n` +
-      `}` + adContext;
+      `}` + adContext + memBlock;
 
     let result;
     try {
@@ -118,6 +125,25 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       createdBy: userId,
     }).select('*').single();
     if (error) return res.status(500).json({ error: 'save_failed', detail: error.message });
+
+    // RAG: indexa o dossiê na memória da campanha (best-effort, não bloqueia).
+    const texto = dossier
+      ? [
+          `Dossiê de inteligência competitiva — ${nome}${cargo ? ` (${cargo})` : ''}${cidade ? ` — ${cidade}/${uf || ''}` : ''}.`,
+          dossier.resumo,
+          dossier.pautasPrincipais?.length ? `Pautas: ${dossier.pautasPrincipais.join('; ')}` : '',
+          dossier.narrativas?.length ? `Narrativas: ${dossier.narrativas.join('; ')}` : '',
+          dossier.pontosFortes?.length ? `Forças: ${dossier.pontosFortes.join('; ')}` : '',
+          dossier.pontosFracos?.length ? `Fraquezas: ${dossier.pontosFracos.join('; ')}` : '',
+          dossier.ameacasParaNos?.length ? `Ameaças p/ nós: ${dossier.ameacasParaNos.join('; ')}` : '',
+          dossier.oportunidadesParaNos?.length ? `Oportunidades p/ nós: ${dossier.oportunidadesParaNos.join('; ')}` : '',
+          dossier.recomendacoes?.length ? `Recomendações: ${dossier.recomendacoes.join('; ')}` : '',
+        ].filter(Boolean).join('\n')
+      : (result.text || '');
+    void ingestArtifact(supabase, {
+      campaignId, source: 'intel:adversary', title: `Adversário: ${nome}`,
+      text: texto, metadata: { adversario: nome, cargo: cargo || null, intelId: (saved as any)?.id },
+    });
 
     return res.json({ intel: saved, provider: result.provider, model: result.model });
   });
