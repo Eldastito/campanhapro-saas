@@ -45,6 +45,7 @@ import { createRoutinesRouter } from './src/server/modules/routines/routinesRout
 import { createBudgetRouter } from './src/server/modules/budget/budgetRouter';
 import { createMeetingsRouter } from './src/server/modules/meetings/meetingsRouter';
 import { createIntelRouter } from './src/server/modules/intel/intelRouter';
+import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createContentRouter } from './src/server/modules/content/contentRouter';
 import { requireAiBudget, requireFeature } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -265,6 +266,7 @@ async function startServer() {
     app.use('/api/v1/budget', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'budget_ceo'), createBudgetRouter(supabaseAdmin, requireAiBudget(supabaseAdmin)));
     app.use('/api/v1/meetings', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'meetings'), createMeetingsRouter(supabaseAdmin));
     app.use('/api/v1/intel', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'intelligence'), requireAiBudget(supabaseAdmin), createIntelRouter(supabaseAdmin));
+    app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/content', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'content_studio'), requireAiBudget(supabaseAdmin), createContentRouter(supabaseAdmin));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
     const obsRouter = createObservabilityRouter(supabaseAdmin);

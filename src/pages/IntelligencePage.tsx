@@ -6,8 +6,9 @@ import IntelligenceScenarios from '../components/intelligence/IntelligenceScenar
 import IntelligenceReports from '../components/intelligence/IntelligenceReports';
 import ExaForgePanel from '../components/intelligence/ExaForgePanel';
 import CompetitiveIntelPanel from '../components/intelligence/CompetitiveIntelPanel';
+import PlaybookPanel from '../components/intelligence/PlaybookPanel';
 
-const SUBTABS = ['Visão Geral', 'Concorrência', 'Fatores', 'Cenários', 'Relatórios', 'Base de Conhecimento'];
+const SUBTABS = ['Visão Geral', 'Concorrência', 'Argumentário', 'Fatores', 'Cenários', 'Relatórios', 'Base de Conhecimento'];
 
 const IntelligencePage: React.FC = () => {
   const [syncKey, setSyncKey] = React.useState(0);
@@ -19,6 +20,7 @@ const IntelligencePage: React.FC = () => {
       <Tabs tabs={SUBTABS} mode="state">
         <IntelligenceOverview onSyncComplete={handleSyncComplete} />
         <CompetitiveIntelPanel />
+        <PlaybookPanel />
         <IntelligenceFactors key={syncKey} />
         <IntelligenceScenarios key={syncKey} />
         <IntelligenceReports key={syncKey} />
