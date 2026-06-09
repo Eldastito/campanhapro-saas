@@ -18,6 +18,7 @@ import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { searchMetaAds } from './metaAdLibrary';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 import { fireOrchestration } from '../../../lib/orchestrationTriggers';
+import { executeReadTool } from '../../../lib/agentReadTools';
 
 /** Remove recursivamente tags de citação <cite...> dos valores string do objeto. */
 function stripCites(v: any): any {
@@ -256,6 +257,98 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
     }
 
     return res.json({ intel: saved, provider: result.provider, model: result.model });
+  });
+
+  // PLANO DE BATALHA — "do dossiê à ação". O Estrategista lê os dossiês dos
+  // adversários + funil + gaps territoriais e devolve um plano semanal acionável,
+  // que é GRAVADO em Objetivos (campaign_goals) e Tarefas da equipe (team_tasks).
+  router.post('/battle-plan', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    const userId = (req as any).user?.id ?? null;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // 1. Reúne contexto real (reusa as ferramentas de leitura).
+    const [intel, funil, terr] = await Promise.all([
+      executeReadTool(supabase, campaignId, 'get_competitive_intel', {}),
+      executeReadTool(supabase, campaignId, 'get_conversion_funnel', {}),
+      executeReadTool(supabase, campaignId, 'analyze_territorial_gap', {}),
+    ]);
+
+    const SYS_PLAN = `Você é o ESTRATEGISTA-CHEFE de uma campanha eleitoral (eleição de 2026).
+Transforme inteligência e dados em um PLANO DE BATALHA SEMANAL, concreto e executável.
+Baseie-se nos DADOS REAIS fornecidos (dossiês de adversários, funil, gaps territoriais).
+Nunca invente dados. Foque onde o adversário é fraco e onde temos estrutura ociosa.
+Nunca proponha ataque pessoal — só contraposição de propostas/desempenho.
+Responda APENAS um objeto JSON válido (sem markdown, sem preâmbulo).`;
+
+    const prompt =
+      `DADOS REAIS DA CAMPANHA:\n` +
+      `# Dossiês de adversários:\n${JSON.stringify(intel).slice(0, 4000)}\n\n` +
+      `# Funil de conversão:\n${JSON.stringify(funil).slice(0, 1500)}\n\n` +
+      `# Gaps territoriais (bairros sub-atendidos):\n${JSON.stringify(terr).slice(0, 2000)}\n\n` +
+      `Gere o PLANO DE BATALHA da semana SOMENTE neste JSON:\n` +
+      `{\n` +
+      `  "resumo": "1-2 frases do foco estratégico da semana",\n` +
+      `  "objetivos": [{"title":"objetivo tático","description":"por que / como","priority":"critical|high|medium|low","dueDate":"AAAA-MM-DD"}],\n` +
+      `  "tarefas": [{"title":"tarefa de campo concreta","description":"o que fazer","bairro":"bairro/região alvo","dueDate":"AAAA-MM-DD"}],\n` +
+      `  "conteudo": [{"tema":"...","formato":"post|vídeo|card","angulo":"mensagem"}]\n` +
+      `}\n` +
+      `Regras: 3 a 5 objetivos, 4 a 8 tarefas (cada uma ligada a um bairro real dos gaps quando possível), 2 a 4 ideias de conteúdo. Frases completas.`;
+
+    let result;
+    try {
+      result = await callAgent(supabase, 'strategist', prompt, {
+        campaignId, userId, systemInstruction: SYS_PLAN, complexity: 'premium', maxTokens: 4000,
+      });
+    } catch (err: any) {
+      if (err instanceof BudgetExceededError) return res.status(402).json({ error: 'ai_budget_exceeded', detail: err.message });
+      return res.status(502).json({ error: 'ai_call_failed', detail: err?.message });
+    }
+
+    const plan = parseJsonLoose(result.text);
+    if (!plan) return res.status(422).json({ error: 'parse_failed', detail: 'A IA não retornou um plano estruturado. Tente de novo.' });
+
+    // 2. Persiste OBJETIVOS em campaign_goals (nível tático).
+    const objetivos = Array.isArray(plan.objetivos) ? plan.objetivos : [];
+    const goalRows = objetivos.slice(0, 8).map((o: any) => ({
+      campaignId, title: String(o.title || 'Objetivo').slice(0, 300),
+      description: o.description ? String(o.description).slice(0, 1000) : null,
+      level: 'tactical', status: 'planned',
+      priority: ['critical', 'high', 'medium', 'low'].includes(o.priority) ? o.priority : 'medium',
+      ownerAgentId: 'strategist',
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate || '') ? o.dueDate : null,
+      metadata: { source: 'battle_plan', generatedAt: new Date().toISOString() },
+    }));
+    let goalsCreated = 0;
+    if (goalRows.length) {
+      const { data, error } = await supabase.from('campaign_goals').insert(goalRows).select('id');
+      if (!error) goalsCreated = (data || []).length;
+    }
+
+    // 3. Persiste TAREFAS em team_tasks (sem atribuição — o líder atribui na UI).
+    const tarefas = Array.isArray(plan.tarefas) ? plan.tarefas : [];
+    const taskRows = tarefas.slice(0, 12).map((t: any) => ({
+      campaignId, leaderId: null, assignedToUserId: null, assignedToName: 'A definir',
+      title: String(t.title || 'Tarefa').slice(0, 300),
+      description: t.description ? String(t.description).slice(0, 1000) : null,
+      bairro: t.bairro ? String(t.bairro).slice(0, 120) : null,
+      dueDate: /^\d{4}-\d{2}-\d{2}$/.test(t.dueDate || '') ? t.dueDate : null,
+      status: 'pendente', createdBy: userId,
+    }));
+    let tasksCreated = 0;
+    if (taskRows.length) {
+      const { data, error } = await supabase.from('team_tasks').insert(taskRows).select('id');
+      if (!error) tasksCreated = (data || []).length;
+    }
+
+    // 4. Indexa o plano na memória (best-effort).
+    void ingestArtifact(supabase, {
+      campaignId, source: 'strategy:battle_plan', title: 'Plano de batalha da semana',
+      text: [plan.resumo, ...objetivos.map((o: any) => `Objetivo: ${o.title}`), ...tarefas.map((t: any) => `Tarefa (${t.bairro || '—'}): ${t.title}`)].filter(Boolean).join('\n'),
+      metadata: { goalsCreated, tasksCreated },
+    });
+
+    return res.json({ plan, goalsCreated, tasksCreated, provider: result.provider });
   });
 
   // Memória da campanha (RAG) — o que os agentes já indexaram.

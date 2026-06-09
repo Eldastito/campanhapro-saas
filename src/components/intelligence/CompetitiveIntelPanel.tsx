@@ -35,6 +35,8 @@ const CompetitiveIntelPanel: React.FC = () => {
   const [memory, setMemory] = React.useState<{ total: number; bySource: Record<string, number>; recent: any[] } | null>(null);
   const [printing, setPrinting] = React.useState<any | null>(null);
   const [cnpj, setCnpj] = React.useState<string | null>(null);
+  const [planLoading, setPlanLoading] = React.useState(false);
+  const [planResult, setPlanResult] = React.useState<any | null>(null);
   const { user } = useAuth();
 
   React.useEffect(() => {
@@ -99,6 +101,21 @@ const CompetitiveIntelPanel: React.FC = () => {
     load();
   };
 
+  // Plano de batalha: Estrategista lê dossiês + funil + gaps e grava Objetivos/Tarefas.
+  const gerarPlano = async () => {
+    setPlanLoading(true); setError(null); setPlanResult(null);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 160000);
+    try {
+      const r = await authedFetch('/api/v1/intel/battle-plan', { method: 'POST', body: JSON.stringify({}), signal: ctrl.signal });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error === 'ai_budget_exceeded' ? 'Orçamento de IA esgotado.' : (j.detail || j.error || 'Falha ao gerar plano.'));
+      setPlanResult(j);
+    } catch (e: any) {
+      setError(e?.name === 'AbortError' ? 'O plano demorou demais e foi interrompido. Tente de novo.' : (e?.message || 'Falha ao gerar plano.'));
+    } finally { clearTimeout(timer); setPlanLoading(false); }
+  };
+
   return (
     <div className="space-y-5">
       <div>
@@ -117,6 +134,29 @@ const CompetitiveIntelPanel: React.FC = () => {
       </div>
       {error && <p className="text-sm bg-red-500/10 text-red-400 rounded-lg p-3">{error}</p>}
       {loading && <p className="text-xs text-slate-500">A IA está consultando fontes públicas (notícias, redes, TSE, Biblioteca de Anúncios). Pode levar até ~1 minuto.</p>}
+
+      {/* Do dossiê à AÇÃO: gera o plano de batalha e grava em Objetivos + Tarefas */}
+      <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-indigo-200 flex items-center gap-1.5"><Target className="w-4 h-4" /> Plano de batalha da semana</p>
+          <p className="text-xs text-slate-400">O Estrategista cruza os dossiês + funil + gaps territoriais e grava objetivos e tarefas prontos para a equipe.</p>
+        </div>
+        <button onClick={gerarPlano} disabled={planLoading} className="shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded px-4 py-2 text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+          {planLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando…</> : <><Target className="w-4 h-4" /> Gerar plano</>}
+        </button>
+      </div>
+      {planResult && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 space-y-2">
+          <p className="text-sm text-emerald-200 font-bold">✅ Plano gerado — {planResult.goalsCreated} objetivo(s) e {planResult.tasksCreated} tarefa(s) criados.</p>
+          {planResult.plan?.resumo && <p className="text-sm text-slate-300">{planResult.plan.resumo}</p>}
+          {Array.isArray(planResult.plan?.tarefas) && planResult.plan.tarefas.length > 0 && (
+            <ul className="text-xs text-slate-400 space-y-0.5 mt-1">
+              {planResult.plan.tarefas.slice(0, 6).map((t: any, i: number) => <li key={i}>• {t.bairro ? <b className="text-slate-300">{t.bairro}:</b> : null} {t.title}</li>)}
+            </ul>
+          )}
+          <p className="text-[11px] text-slate-500">Veja e atribua na aba <b>Objetivos</b> e em <b>Tarefas &amp; Roteiros da Equipe</b>.</p>
+        </div>
+      )}
 
       {list.length === 0 ? (
         <p className="text-slate-500 text-sm">Nenhum adversário analisado ainda.</p>
