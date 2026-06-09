@@ -182,6 +182,24 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
     return res.json({ total: rows.length, bySource, recent });
   });
 
+  // Reprocessa um dossiê que ficou como texto cru (re-parseia o narrative já
+  // salvo com o parser corrigido — SEM nova pesquisa/custo de IA).
+  router.post('/adversaries/:id/reprocess', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: rec } = await supabase.from('competitor_intel')
+      .select('*').eq('id', req.params.id).eq('campaignId', campaignId).maybeSingle();
+    if (!rec) return res.status(404).json({ error: 'not_found' });
+    const text = (rec as any).narrative || ((rec as any).dossier ? JSON.stringify((rec as any).dossier) : '');
+    const dossier = parseJsonLoose(text);
+    if (!dossier) return res.status(422).json({ error: 'parse_failed', detail: 'Não foi possível estruturar — rode "Analisar de novo".' });
+    const { data: saved, error } = await supabase.from('competitor_intel')
+      .update({ dossier, narrative: null, updatedAt: new Date().toISOString() })
+      .eq('id', req.params.id).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ intel: saved });
+  });
+
   router.get('/adversaries', async (req: Request, res: Response) => {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });

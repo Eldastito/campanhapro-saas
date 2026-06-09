@@ -49,6 +49,19 @@ const CompetitiveIntelPanel: React.FC = () => {
     'intel:adversary': 'Inteligência competitiva', 'consultant:report': 'Consultor IA', 'meeting:summary': 'Reuniões',
   };
 
+  // Reprocessa dossiês que ficaram como texto cru (parser corrigido, sem custo de IA).
+  const triedRef = React.useRef<Set<string>>(new Set());
+  const reprocess = React.useCallback(async (id: string) => {
+    try {
+      const r = await authedFetch(`/api/v1/intel/adversaries/${id}/reprocess`, { method: 'POST' });
+      if (r.ok) await load();
+    } catch { /* */ }
+  }, [load]);
+  React.useEffect(() => {
+    const raw = list.filter((it) => !it.dossier && it.narrative && !triedRef.current.has(it.id));
+    if (raw.length) { raw.forEach((it) => triedRef.current.add(it.id)); raw.forEach((it) => reprocess(it.id)); }
+  }, [list, reprocess]);
+
   const analisar = async () => {
     if (!form.name.trim()) { setError('Informe o nome do adversário.'); return; }
     setError(null); setLoading(true);
@@ -107,7 +120,13 @@ const CompetitiveIntelPanel: React.FC = () => {
                 {isOpen && (
                   <div className="px-4 pb-4 border-t border-white/5 pt-3">
                     {!it.dossier && it.narrative ? (
-                      <pre className="text-xs text-slate-300 whitespace-pre-wrap">{it.narrative}</pre>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[11px] text-amber-400">Este dossiê ficou em texto cru. Clique para estruturar (sem nova pesquisa).</p>
+                          <button onClick={() => reprocess(it.id)} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-1 font-bold">Reprocessar</button>
+                        </div>
+                        <pre className="text-xs text-slate-400 whitespace-pre-wrap max-h-48 overflow-y-auto">{it.narrative}</pre>
+                      </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
                         <div>
