@@ -9,6 +9,7 @@ import {
   setWebhook,
   isEvolutionConfigured,
   findInstanceIdByName,
+  reconnectInstance,
 } from '../integrations/evolutionApiClient';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
@@ -232,6 +233,12 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       if (!inst.apiKey) return res.json({ status: inst.status, phoneNumber: inst.phoneNumber });
 
       const remoteStatus = await getStatus(inst.instanceName, inst.apiKey);
+
+      // Auto-recuperação: se a instância ESTAVA conectada e o GO agora reporta
+      // desconectado, tenta reabrir o socket sem re-escanear (best-effort).
+      if (inst.status === 'connected' && remoteStatus === 'disconnected' && inst.apiKey) {
+        void reconnectInstance(inst.apiKey);
+      }
 
       if (remoteStatus !== inst.status) {
         const updates: Record<string, unknown> = { status: remoteStatus, updatedAt: new Date().toISOString() };

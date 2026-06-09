@@ -77,9 +77,11 @@ export const WhatsAppInstancesPanel: React.FC = () => {
 
   React.useEffect(() => { load(); }, [load]);
 
-  // Poll status for instances that are not yet connected
+  // Verifica o status REAL de TODAS as instâncias (não só as em QR) — assim a
+  // plataforma reflete o estado do Evolution GO e detecta quando uma conexão cai
+  // (antes, ao marcar "Conectado" parava de checar e ficava com status fake).
   React.useEffect(() => {
-    const polling = instances.filter(i => i.status === 'qrcode' || i.status === 'pending');
+    const polling = instances.filter(i => i.status !== 'deleted');
     if (polling.length === 0) return;
     const interval = setInterval(async () => {
       for (const inst of polling) {
@@ -96,7 +98,7 @@ export const WhatsAppInstancesPanel: React.FC = () => {
           }
         } catch { /* transient */ }
       }
-    }, 2500);
+    }, 4000);
     return () => clearInterval(interval);
   }, [instances, qrModal]);
 

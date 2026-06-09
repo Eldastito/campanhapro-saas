@@ -160,7 +160,6 @@ export async function createInstance(instanceName: string): Promise<EvolutionCre
     {
       webhookUrl: webhookUrl ?? '',
       subscribe: SUBSCRIBED_EVENTS,
-      immediate: true,
     },
     apiKey,
   ).catch((err) => {
@@ -222,7 +221,7 @@ export async function getQRCode(
   await call<any>(
     'POST',
     '/instance/connect',
-    { webhookUrl: webhookUrl ?? '', subscribe: SUBSCRIBED_EVENTS, immediate: true },
+    { webhookUrl: webhookUrl ?? '', subscribe: SUBSCRIBED_EVENTS },
     apiKey,
   );
 
@@ -311,10 +310,17 @@ export async function setWebhook(instanceName: string, apiKey: string): Promise<
     {
       webhookUrl: buildWebhookUrl(instanceName),
       subscribe: SUBSCRIBED_EVENTS,
-      immediate: false,
     },
     apiKey,
   );
+}
+
+/**
+ * Tenta reabrir o socket de uma instância já pareada que caiu (sem re-escanear
+ * QR). Best-effort — usado para auto-recuperar quedas transitórias de sessão.
+ */
+export async function reconnectInstance(apiKey: string): Promise<void> {
+  await call('POST', '/instance/reconnect', undefined, apiKey).catch(() => {});
 }
 
 /**
