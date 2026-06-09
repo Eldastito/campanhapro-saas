@@ -167,17 +167,17 @@ export async function createInstance(instanceName: string): Promise<EvolutionCre
     console.warn('[Evolution] connect/webhook failed (non-fatal):', err.message);
   });
 
-  // Step 3: ask for an initial QR. May not be ready yet on a freshly-created
-  // instance — caller can poll via getQRCode(). Tenta ambos os paths do GO.
+  // Step 3: NÃO bloqueia esperando o QR. O Evolution GO não devolve o QR no
+  // create/connect — ele entrega via webhook (categoria QRCODE) logo em seguida.
+  // Tentar GET aqui só deixava a criação lenta (até travar em "Criando...").
+  // Uma tentativa única e RÁPIDA (best-effort, sem travar) — se vier, ótimo;
+  // senão o frontend faz poll do lastQRCode preenchido pelo webhook.
   let qrCode: string | null = null;
-  for (const path of ['/instance/qr', `/instance/${encodeURIComponent(instanceName)}/qrcode`]) {
-    try {
-      const qr = await call<any>('GET', path, undefined, apiKey);
-      qrCode = extractQrImage(qr);
-      if (qrCode) break;
-    } catch {
-      // ignore — caller will poll / webhook delivers
-    }
+  try {
+    const qr = await call<any>('GET', '/instance/qr', undefined, apiKey);
+    qrCode = extractQrImage(qr);
+  } catch {
+    // segue sem QR — chega pelo webhook
   }
 
   return {

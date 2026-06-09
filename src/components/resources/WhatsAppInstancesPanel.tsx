@@ -121,23 +121,32 @@ export const WhatsAppInstancesPanel: React.FC = () => {
     if (newName.trim().length < 2) return;
     setCreating(true);
     setError(null);
+    // Timeout: nunca deixa o botão preso em "Criando..." pra sempre.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
     try {
       const res = await authedFetch('/api/v1/whatsapp/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ displayName: newName.trim() }),
+        signal: ctrl.signal,
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Erro ao criar número');
       setNewName('');
       setAdding(false);
       await load();
-      if (json.qrCode) {
-        setQrModal({ instanceId: json.instance.id, qrCode: json.qrCode });
+      // Abre o QR SEMPRE — se não veio inline, o poll busca o QR que o webhook
+      // entrega logo após o connect (lastQRCode).
+      if (json.instance?.id) {
+        setQrModal({ instanceId: json.instance.id, qrCode: json.qrCode ?? null });
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.name === 'AbortError'
+        ? 'A criação demorou demais. O número pode ter sido criado — feche e atualize a lista; se aparecer, clique no QR.'
+        : err.message);
     } finally {
+      clearTimeout(timer);
       setCreating(false);
     }
   };
