@@ -106,6 +106,16 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
           <Block n={++n} title="Patrimônio & Empresas"><p className="text-slate-700">{d.patrimonio.resumo}</p><UL items={d.patrimonio.empresas} /></Block>
         )}
 
+        {d.tseDivulgacand && (d.tseDivulgacand.resumo || d.tseDivulgacand.numero) && (
+          <Block n={++n} title="TSE / Candidatura">
+            <p className="text-slate-700">{d.tseDivulgacand.resumo}</p>
+            <p className="text-sm text-slate-600 mt-1">{d.tseDivulgacand.numero ? `Nº ${d.tseDivulgacand.numero} ` : ''}{d.tseDivulgacand.partido ? `· ${d.tseDivulgacand.partido} ` : ''}{d.tseDivulgacand.situacao ? `· ${d.tseDivulgacand.situacao}` : ''}</p>
+            {d.tseDivulgacand.bensDeclarados ? <p className="text-sm text-slate-600"><b>Bens:</b> {d.tseDivulgacand.bensDeclarados}</p> : null}
+            {d.tseDivulgacand.doadores?.length ? <p className="text-sm text-slate-600"><b>Doadores:</b> {d.tseDivulgacand.doadores.join(', ')}</p> : null}
+            {d.tseDivulgacand.maioresGastos?.length ? <p className="text-sm text-slate-600"><b>Maiores gastos:</b> {d.tseDivulgacand.maioresGastos.join(', ')}</p> : null}
+          </Block>
+        )}
+
         {d.processos?.length > 0 && <Block n={++n} title="Processos / Sanções"><UL items={d.processos} /></Block>}
 
         {d.anunciosMeta && (

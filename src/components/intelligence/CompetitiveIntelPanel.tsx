@@ -196,6 +196,18 @@ const CompetitiveIntelPanel: React.FC = () => {
                               {d.patrimonio.empresas?.length ? <List items={d.patrimonio.empresas} /> : null}
                             </Section>
                           )}
+                          {d.tseDivulgacand && (d.tseDivulgacand.resumo || d.tseDivulgacand.numero) && (
+                            <Section icon={ShieldAlert} title="TSE / Candidatura">
+                              <p className="text-sm text-slate-300">{d.tseDivulgacand.resumo}</p>
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                {d.tseDivulgacand.numero ? `Nº ${d.tseDivulgacand.numero} ` : ''}{d.tseDivulgacand.partido ? `· ${d.tseDivulgacand.partido} ` : ''}{d.tseDivulgacand.situacao ? `· ${d.tseDivulgacand.situacao}` : ''}
+                              </p>
+                              {d.tseDivulgacand.bensDeclarados ? <p className="text-xs text-slate-400">Bens: {d.tseDivulgacand.bensDeclarados}</p> : null}
+                              {d.tseDivulgacand.doadores?.length ? <p className="text-xs text-slate-400">Doadores: {d.tseDivulgacand.doadores.join(', ')}</p> : null}
+                              {d.tseDivulgacand.maioresGastos?.length ? <p className="text-xs text-slate-400">Maiores gastos: {d.tseDivulgacand.maioresGastos.join(', ')}</p> : null}
+                              {d.tseDivulgacand.linkOficial && <a href={d.tseDivulgacand.linkOficial} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-400 underline">Conferir no DivulgaCandContas (TSE) →</a>}
+                            </Section>
+                          )}
                           {d.processos?.length > 0 && <Section icon={ShieldAlert} title="Processos / sanções"><List items={d.processos} /></Section>}
                           {d.tendencia && <Section icon={TrendingUp} title="Tendência (busca/pesquisas)"><p className="text-sm text-slate-300">{d.tendencia}</p></Section>}
                           <Section icon={Newspaper} title="Notícias recentes">

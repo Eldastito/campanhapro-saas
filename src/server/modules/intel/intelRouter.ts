@@ -121,7 +121,7 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       `  "narrativas": ["mensagens/bordões que está usando"],\n` +
       `  "noticiasRecentes": [{"titulo":"...","fonte":"...","data":"AAAA-MM-DD","url":"...","resumo":"..."}],\n` +
       `  "anunciosMeta": {"resumo":"o que aparece na Biblioteca de Anúncios","exemplos":["..."]},\n` +
-      `  "tseDivulgacand": {"resumo":"o que consta no TSE (partido, nº, situação)"},\n` +
+      `  "tseDivulgacand": {"resumo":"o que consta no TSE/DivulgaCand","numero":"","partido":"","situacao":"deferido/indeferido/etc","bensDeclarados":"valor total e principais bens, se houver","doadores":["maiores doadores, se houver"],"maioresGastos":["maiores gastos/fornecedores, se houver"]},\n` +
       `  "pontosFortes": ["..."],\n` +
       `  "pontosFracos": ["..."],\n` +
       `  "ameacasParaNos": ["..."],\n` +
@@ -180,6 +180,13 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
         verificarEm: `https://www.facebook.com/ads/library/?active_status=all&ad_type=political_and_issue_ads&country=BR&q=${encodeURIComponent(nome)}`,
       };
     }
+    if (dossier) {
+      dossier.tseDivulgacand = {
+        ...(dossier.tseDivulgacand || {}),
+        linkOficial: 'https://divulgacandcontas.tse.jus.br/divulgacandcontas/',
+      };
+    }
+
     const { data: saved, error } = await supabase.from('competitor_intel').insert({
       campaignId, name: nome, cargo: cargo || null, cidade: cidade || null, uf: uf || null,
       dossier: dossier ?? null,
@@ -204,6 +211,7 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
           dossier.processos?.length ? `Processos/sanções: ${dossier.processos.join('; ')}` : '',
           dossier.patrimonio?.resumo ? `Patrimônio: ${dossier.patrimonio.resumo}. Empresas: ${(dossier.patrimonio.empresas || []).join(', ')}` : '',
           dossier.tendencia ? `Tendência: ${dossier.tendencia}` : '',
+          dossier.tseDivulgacand?.resumo ? `TSE: ${dossier.tseDivulgacand.resumo}. Nº ${dossier.tseDivulgacand.numero || '?'}, ${dossier.tseDivulgacand.partido || '?'}. Bens: ${dossier.tseDivulgacand.bensDeclarados || '—'}` : '',
         ].filter(Boolean).join('\n')
       : (result.text || '');
     void ingestArtifact(supabase, {
