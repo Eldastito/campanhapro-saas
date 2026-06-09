@@ -152,11 +152,22 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
         })),
       };
     } else if (dossier) {
+      const reason = (adlib.reason || '').toLowerCase();
+      let resumo: string;
+      if (reason === 'sem_token') {
+        resumo = 'Biblioteca de Anúncios NÃO configurada — defina META_ADLIBRARY_TOKEN no servidor (App ID|App Secret) e faça redeploy.';
+      } else if (reason.includes('permission') || reason.includes('identity') || reason.includes('authoriz') || reason.includes('(#10)') || reason.includes('(#200)')) {
+        resumo = 'O app da Meta ainda NÃO tem acesso aos anúncios políticos — conclua a "Confirmação de identidade / verificação de negócio" no Meta for Developers.';
+      } else if (reason && reason !== 'sem_termo') {
+        resumo = `A Biblioteca de Anúncios retornou: ${adlib.reason}. Verifique o token/permissões.`;
+      } else {
+        resumo = 'Nenhum anúncio político/social encontrado para este nome (pode ser que o adversário não faça anúncios pagos, ou use outro nome de página).';
+      }
       dossier.anunciosMeta = {
-        resumo: adlib.reason === 'sem_token'
-          ? 'Biblioteca de Anúncios não configurada — defina META_ADLIBRARY_TOKEN no servidor para dados estruturados.'
-          : 'Nenhum anúncio político/social encontrado na Biblioteca de Anúncios da Meta.',
-        total: 0, exemplos: [],
+        resumo,
+        total: 0,
+        exemplos: [],
+        verificarEm: `https://www.facebook.com/ads/library/?active_status=all&ad_type=political_and_issue_ads&country=BR&q=${encodeURIComponent(nome)}`,
       };
     }
     const { data: saved, error } = await supabase.from('competitor_intel').insert({

@@ -142,6 +142,9 @@ const CompetitiveIntelPanel: React.FC = () => {
                           <Section icon={Megaphone} title="Narrativas"><List items={d.narrativas} /></Section>
                           <Section icon={Megaphone} title="Anúncios (Biblioteca da Meta)">
                             <p className="text-sm text-slate-300">{d.anunciosMeta?.resumo || '—'}{d.anunciosMeta?.fonte ? <span className="text-[10px] text-emerald-400 ml-1">• {d.anunciosMeta.fonte}</span> : null}</p>
+                            {d.anunciosMeta?.verificarEm && (
+                              <a href={d.anunciosMeta.verificarEm} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-400 underline">Conferir na Biblioteca de Anúncios da Meta →</a>
+                            )}
                             {(d.anunciosMeta?.exemplos || []).length > 0 && (
                               <ul className="mt-1 space-y-1.5">
                                 {d.anunciosMeta.exemplos.map((a: any, i: number) => (
