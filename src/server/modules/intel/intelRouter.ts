@@ -26,17 +26,38 @@ function stripCites(v: any): any {
   return v;
 }
 
+/** Repara JSON truncado: fecha string aberta e balanceia {}/[] que ficaram abertos. */
+function repairJson(s: string): string {
+  let inStr = false, esc = false;
+  const stack: string[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { esc = false; continue; }
+    if (c === '\\') { if (inStr) esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === '{' || c === '[') stack.push(c);
+    else if (c === '}' || c === ']') stack.pop();
+  }
+  let out = s;
+  if (inStr) out += '"';                 // fecha string cortada no meio
+  out = out.replace(/[,\s]+$/, '');       // remove vírgula/espaço pendente
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === '{' ? '}' : ']';
+  return out;
+}
+
 function parseJsonLoose(text: string): any | null {
   if (!text) return null;
-  // 1) Remove as citações do web_search (quebram o JSON com aspas não-escapadas).
-  let t = text.replace(/<\/?cite[^>]*>/gi, '');
-  // 2) Remove cercas de markdown em qualquer posição (pode haver preâmbulo antes).
-  t = t.replace(/```json/gi, '').replace(/```/g, '');
-  // 3) Recorta do primeiro { ao último } (descarta texto antes/depois).
-  const a = t.indexOf('{'); const b = t.lastIndexOf('}');
-  if (a >= 0 && b > a) t = t.slice(a, b + 1);
-  t = t.trim();
-  const tries = [t, t.replace(/,\s*([}\]])/g, '$1')]; // 2ª tentativa: remove vírgula sobrando
+  // 1) Remove citações do web_search; 2) cercas markdown; 3) recorta do 1º {.
+  let t = text.replace(/<\/?cite[^>]*>/gi, '').replace(/```json/gi, '').replace(/```/g, '');
+  const a = t.indexOf('{');
+  if (a < 0) return null;
+  t = t.slice(a).trim();
+  const lastClose = t.lastIndexOf('}');
+  const tries = [
+    lastClose > 0 ? t.slice(0, lastClose + 1) : t,   // caso JSON completo
+    repairJson(t),                                   // caso truncado (corte de tokens)
+  ].map((c) => c.replace(/,\s*([}\]])/g, '$1'));
   for (const cand of tries) {
     try { return stripCites(JSON.parse(cand)); } catch { /* próxima */ }
   }
@@ -111,6 +132,7 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
         systemInstruction: SYSTEM,
         complexity: 'premium',
         enableWebSearch: true,
+        maxTokens: 8000, // dossiê + citações é longo — evita truncar o JSON
       } as any);
     } catch (err: any) {
       if (err instanceof BudgetExceededError) return res.status(402).json({ error: 'ai_budget_exceeded', detail: err.message });
