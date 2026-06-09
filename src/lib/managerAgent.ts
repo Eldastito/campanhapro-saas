@@ -16,7 +16,7 @@ import { callAgent, AGENT_CONFIGS, BudgetExceededError } from './aiCallAgent';
 import { AGENT_INSTRUCTIONS, CAMPAIGN_MISSION, COMPETITIVE_INTELLIGENCE_GUIDELINE, CRISIS_DEFENSE_GUIDELINE } from './agentInstructions';
 import { READ_TOOL_DEFS, executeReadTool, isReadTool } from './agentReadTools';
 import { toolsForAgent } from './agentRegistry';
-import { retrieveContext } from '../server/modules/rag/knowledgeIngest';
+import { retrieveContext, ingestArtifact } from '../server/modules/rag/knowledgeIngest';
 
 const MAX_ITERATIONS = 8;
 const MAX_RUN_BUDGET_CENTS = 200; // ~US$ 2 por execução do Manager (= ~R$ 11)
@@ -385,6 +385,22 @@ export async function runManager({
         error: errorMsg || null,
         finishedAt: new Date().toISOString(),
     }).eq('id', managerRunId);
+
+    // RAG: guarda o resultado da orquestração na MEMÓRIA da campanha — assim cada
+    // execução qualifica as PRÓXIMAS consultas (o orquestrador e os agentes
+    // recuperam isto via retrieveContext). Best-effort, nunca quebra.
+    if (finalSummary && finalSummary.length > 120) {
+        const passos = plan
+            .map((p: any) => `- ${p.agent}${p.toolsUsed?.length ? ` [${p.toolsUsed.join(', ')}]` : ''}: ${p.response_excerpt || p.reason || ''}`)
+            .join('\n');
+        void ingestArtifact(supabaseAdmin, {
+            campaignId,
+            source: 'orchestrator:run',
+            title: `Orquestração: ${intent.slice(0, 80)}`,
+            text: `INTENÇÃO: ${intent}\n\nDECISÃO FINAL:\n${finalSummary}\n\nPASSOS/AGENTES:\n${passos}`,
+            metadata: { managerRunId, iterations, status },
+        });
+    }
 
     return {
         managerRunId,
