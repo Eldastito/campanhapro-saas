@@ -1,6 +1,9 @@
 import * as React from 'react';
-import { Swords, Search, Loader2, Trash2, Newspaper, Megaphone, ShieldAlert, Target, TrendingUp, Globe, ChevronDown } from 'lucide-react';
+import { Swords, Search, Loader2, Trash2, Newspaper, Megaphone, ShieldAlert, Target, TrendingUp, Globe, ChevronDown, Printer } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
+import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../contexts/AuthContext';
+import CompetitiveIntelReport from './CompetitiveIntelReport';
 
 /**
  * Inteligência Competitiva — coleta dados de adversários por FONTES PÚBLICAS
@@ -30,6 +33,15 @@ const CompetitiveIntelPanel: React.FC = () => {
   const [error, setError] = React.useState<string | null>(null);
   const [open, setOpen] = React.useState<string | null>(null);
   const [memory, setMemory] = React.useState<{ total: number; bySource: Record<string, number>; recent: any[] } | null>(null);
+  const [printing, setPrinting] = React.useState<any | null>(null);
+  const [cnpj, setCnpj] = React.useState<string | null>(null);
+  const { user } = useAuth();
+
+  React.useEffect(() => {
+    if (!user?.campaignId) return;
+    supabase.from('settings').select('campaignDetails').eq('campaignId', user.campaignId).maybeSingle()
+      .then(({ data }) => setCnpj((data as any)?.campaignDetails?.cnpj ?? null), () => {});
+  }, [user?.campaignId]);
 
   const load = React.useCallback(async () => {
     try {
@@ -193,7 +205,10 @@ const CompetitiveIntelPanel: React.FC = () => {
                         </div>
                       </div>
                     )}
-                    <div className="flex justify-end mt-3">
+                    <div className="flex justify-end gap-4 mt-3">
+                      {it.dossier && (
+                        <button onClick={() => setPrinting(it)} className="text-indigo-400 hover:text-indigo-300 text-xs flex items-center gap-1"><Printer className="w-3.5 h-3.5" /> Imprimir / PDF</button>
+                      )}
                       <button onClick={() => remover(it.id)} className="text-rose-400 hover:text-rose-300 text-xs flex items-center gap-1"><Trash2 className="w-3.5 h-3.5" /> Remover</button>
                     </div>
                   </div>
@@ -216,6 +231,8 @@ const CompetitiveIntelPanel: React.FC = () => {
           <p className="text-[10px] text-slate-600">A IA consulta esta memória antes de gerar dossiês e análises. Cresce a cada uso dos agentes.</p>
         </div>
       )}
+
+      {printing && <CompetitiveIntelReport intel={printing} cnpj={cnpj} onClose={() => setPrinting(null)} />}
     </div>
   );
 };
