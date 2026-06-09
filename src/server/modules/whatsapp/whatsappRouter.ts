@@ -23,6 +23,39 @@ function slugify(s: string): string {
 export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
 
+  // GET /bot — estado do atendimento automático ao eleitor desta campanha
+  router.get('/bot', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const { data } = await supabaseAdmin.from('campaigns').select('"voterBotEnabled"').eq('id', cid).maybeSingle();
+      return res.json({ enabled: !!(data as any)?.voterBotEnabled });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /bot — liga/desliga o atendimento automático ao eleitor ({ enabled })
+  router.post('/bot', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const enabled = !!req.body?.enabled;
+      const { error } = await supabaseAdmin.from('campaigns')
+        .update({ voterBotEnabled: enabled }).eq('id', cid);
+      if (error) throw error;
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: enabled ? 'voter_bot.enabled' : 'voter_bot.disabled',
+        severity: 'warn',
+        metadata: { campaignId: cid },
+      });
+      return res.json({ enabled });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /instances — list this campaign's WhatsApp numbers
   router.get('/instances', async (req: Request, res: Response) => {
     try {

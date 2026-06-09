@@ -21,6 +21,7 @@ import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { audit } from '../observability/auditLogger';
+import { handleInboundForBot } from '../../../lib/voterBot';
 
 interface RawRequest extends Request {
   rawBody?: Buffer;
@@ -61,7 +62,7 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
       // Resolve instance → campaign
       const { data: inst } = await supabaseAdmin
         .from('whatsapp_instances')
-        .select('id, campaignId, status')
+        .select('id, campaignId, status, apiKey, instanceName')
         .eq('instanceName', instanceName)
         .maybeSingle();
 
@@ -138,9 +139,15 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
       ) {
         // Evolution v2 sends one message per event in `data`, but the shape varies.
         const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
+        // Bot ao vivo: só dispara se a campanha tiver habilitado (trava de segurança).
+        const { data: camp } = await supabaseAdmin.from('campaigns')
+          .select('"voterBotEnabled", name, "electionRole"').eq('id', campaignId).maybeSingle();
+        const botEnabled = !!(camp as any)?.voterBotEnabled && !!(inst as any).apiKey;
         for (const m of msgs) {
           const direction: 'inbound' | 'outbound' = (m?.key?.fromMe || m?.fromMe) ? 'outbound' : 'inbound';
-          const externalId = String(m?.key?.remoteJid ?? m?.remoteJid ?? '').replace(/@.*$/, '');
+          const remoteJid = String(m?.key?.remoteJid ?? m?.remoteJid ?? '');
+          const isGroup = remoteJid.includes('@g.us');
+          const externalId = remoteJid.replace(/@.*$/, '');
           if (!externalId) continue;
           const text =
             m?.message?.conversation ??
@@ -172,6 +179,24 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             direction,
             pushName,
           });
+
+          // Bot ao vivo: responde mensagens INBOUND de eleitores (nunca grupos,
+          // nunca as próprias mensagens). Fire-and-forget — não trava o webhook.
+          if (botEnabled && direction === 'inbound' && !isGroup) {
+            const { data: ct } = await supabaseAdmin.from('contacts')
+              .select('id').eq('campaignId', campaignId).eq('phone', externalId).maybeSingle();
+            void handleInboundForBot(supabaseAdmin, {
+              campaignId,
+              instanceId: inst.id,
+              instanceName: (inst as any).instanceName || instanceName,
+              apiKey: (inst as any).apiKey,
+              phone: externalId,
+              contactId: (ct as any)?.id ?? null,
+              text,
+              candidato: (camp as any)?.name ?? null,
+              cargo: (camp as any)?.electionRole ?? null,
+            });
+          }
         }
       }
 

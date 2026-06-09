@@ -40,6 +40,25 @@ export const WhatsAppInstancesPanel: React.FC = () => {
   const [qrModal, setQrModal] = React.useState<{ instanceId: string; qrCode: string | null } | null>(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [botEnabled, setBotEnabled] = React.useState<boolean | null>(null);
+  const [botSaving, setBotSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    authedFetch('/api/v1/whatsapp/bot').then(r => r.json()).then(j => setBotEnabled(!!j.enabled)).catch(() => {});
+  }, []);
+
+  const toggleBot = async () => {
+    const next = !botEnabled;
+    if (next && !confirm('Ligar o atendimento automático ao eleitor?\n\nO assistente vai RESPONDER sozinho mensagens recebidas no WhatsApp, identificando-se como automatizado e usando apenas o Argumentário cadastrado. Garanta que o Argumentário (aba Inteligência) está preenchido.')) return;
+    setBotSaving(true);
+    try {
+      const r = await authedFetch('/api/v1/whatsapp/bot', { method: 'POST', body: JSON.stringify({ enabled: next }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Falha ao alterar');
+      setBotEnabled(!!j.enabled);
+    } catch (e: any) { setError(e.message); }
+    finally { setBotSaving(false); }
+  };
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -183,6 +202,28 @@ export const WhatsAppInstancesPanel: React.FC = () => {
         Cada número aparece automaticamente na Caixa de Entrada Omnichannel após pareamento.
         Mensagens recebidas criam contatos automaticamente.
       </p>
+
+      {/* Atendimento automático ao eleitor (bot) */}
+      <div className={`rounded-lg border px-3 py-2.5 mb-3 ${botEnabled ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-slate-700 bg-slate-950'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-200">🤖 Atendimento automático ao eleitor</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {botEnabled
+                ? 'LIGADO: o assistente responde sozinho as mensagens recebidas, identificando-se como automatizado e usando só o Argumentário.'
+                : 'Desligado. Quando ligar, o bot responde mensagens recebidas com base no Argumentário (aba Inteligência), com opt-out e escalonamento humano.'}
+            </p>
+          </div>
+          <button
+            onClick={toggleBot}
+            disabled={botSaving || botEnabled === null}
+            className={`shrink-0 relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 ${botEnabled ? 'bg-emerald-500' : 'bg-slate-600'}`}
+            title={botEnabled ? 'Desligar bot' : 'Ligar bot'}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${botEnabled ? 'translate-x-6' : ''}`} />
+          </button>
+        </div>
+      </div>
 
       {error && (
         <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 mb-3">
