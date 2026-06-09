@@ -171,6 +171,21 @@ const CompetitiveIntelPanel: React.FC = () => {
                           <Section icon={TrendingUp} title="Recomendações"><List items={d.recomendacoes} /></Section>
                         </div>
                         <div className="md:col-span-2">
+                          {d.historicoEleitoral && (d.historicoEleitoral.resumo || d.historicoEleitoral.ondeForte?.length) && (
+                            <Section icon={TrendingUp} title="Histórico eleitoral">
+                              <p className="text-sm text-slate-300">{d.historicoEleitoral.resumo}</p>
+                              {d.historicoEleitoral.ondeForte?.length ? <p className="text-xs text-emerald-400 mt-0.5">Forte: {d.historicoEleitoral.ondeForte.join(', ')}</p> : null}
+                              {d.historicoEleitoral.ondeFraco?.length ? <p className="text-xs text-rose-400">Fraco: {d.historicoEleitoral.ondeFraco.join(', ')}</p> : null}
+                            </Section>
+                          )}
+                          {d.patrimonio && (d.patrimonio.resumo || d.patrimonio.empresas?.length) && (
+                            <Section icon={Globe} title="Patrimônio & empresas">
+                              <p className="text-sm text-slate-300">{d.patrimonio.resumo}</p>
+                              {d.patrimonio.empresas?.length ? <List items={d.patrimonio.empresas} /> : null}
+                            </Section>
+                          )}
+                          {d.processos?.length > 0 && <Section icon={ShieldAlert} title="Processos / sanções"><List items={d.processos} /></Section>}
+                          {d.tendencia && <Section icon={TrendingUp} title="Tendência (busca/pesquisas)"><p className="text-sm text-slate-300">{d.tendencia}</p></Section>}
                           <Section icon={Newspaper} title="Notícias recentes">
                             {(d.noticiasRecentes || []).length ? <ul className="text-sm text-slate-300 space-y-1">{d.noticiasRecentes.map((n: any, i: number) => <li key={i}>📰 <b>{n.titulo}</b> <span className="text-slate-500">({n.fonte}{n.data ? `, ${n.data}` : ''})</span> {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">link</a>}</li>)}</ul> : <p className="text-xs text-slate-600">—</p>}
                           </Section>

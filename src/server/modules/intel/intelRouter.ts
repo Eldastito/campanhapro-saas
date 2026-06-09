@@ -105,12 +105,18 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
 
     const prompt =
       `Faça um dossiê de inteligência competitiva sobre o(a) candidato(a)/adversário(a): ${alvo}.\n` +
-      `Use o web_search para buscar em fontes públicas atuais. Procure também a Biblioteca de Anúncios ` +
-      `da Meta (facebook.com/ads/library) por anúncios pagos dele(a), e dados do TSE/DivulgaCand.\n\n` +
+      `Use o web_search para CAVAR FUNDO em fontes públicas atuais. Cubra:\n` +
+      `- Redes sociais: Instagram, TikTok, X, YouTube, Facebook, e ESPECIALMENTE Kwai, Telegram (canais públicos), LinkedIn e Threads.\n` +
+      `- Biblioteca de Anúncios da Meta (facebook.com/ads/library) — anúncios pagos.\n` +
+      `- TSE/DivulgaCand: candidatura, número, partido, bens declarados.\n` +
+      `- Histórico eleitoral: como foi em eleições anteriores, onde é FORTE e onde é FRACO (bairros/zonas/regiões).\n` +
+      `- Processos judiciais, investigações, sanções públicas (TJ/STJ/TCU/TCE/MP).\n` +
+      `- Patrimônio e empresas/sócios ligados a ele(a) ou familiares.\n` +
+      `- Tendência de busca (Google Trends) e pesquisas de intenção de voto citadas na imprensa.\n\n` +
       `Responda SOMENTE com este JSON:\n` +
       `{\n` +
       `  "resumo": "2-4 frases do momento da candidatura",\n` +
-      `  "redesSociais": [{"rede":"Instagram","handle":"@...","observacao":"tom/engajamento/frequência"}],\n` +
+      `  "redesSociais": [{"rede":"Instagram|TikTok|Kwai|Telegram|LinkedIn|X|YouTube|Threads","handle":"@...","observacao":"tom/alcance/frequência"}],\n` +
       `  "pautasPrincipais": ["..."],\n` +
       `  "narrativas": ["mensagens/bordões que está usando"],\n` +
       `  "noticiasRecentes": [{"titulo":"...","fonte":"...","data":"AAAA-MM-DD","url":"...","resumo":"..."}],\n` +
@@ -121,6 +127,10 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       `  "ameacasParaNos": ["..."],\n` +
       `  "oportunidadesParaNos": ["..."],\n` +
       `  "recomendacoes": ["ações práticas para a nossa campanha"],\n` +
+      `  "historicoEleitoral": {"resumo":"desempenho em eleições anteriores","ondeForte":["regiões/bairros/zonas"],"ondeFraco":["..."]},\n` +
+      `  "processos": ["processos judiciais/investigações/sanções públicas relevantes (com fonte)"],\n` +
+      `  "patrimonio": {"resumo":"bens declarados/evolução","empresas":["empresas/sócios ligados"]},\n` +
+      `  "tendencia": "tendência de busca (Google Trends) + pesquisas de intenção citadas",\n` +
       `  "fontes": ["urls consultadas"]\n` +
       `}` + adContext + memBlock;
 
@@ -190,6 +200,10 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
           dossier.ameacasParaNos?.length ? `Ameaças p/ nós: ${dossier.ameacasParaNos.join('; ')}` : '',
           dossier.oportunidadesParaNos?.length ? `Oportunidades p/ nós: ${dossier.oportunidadesParaNos.join('; ')}` : '',
           dossier.recomendacoes?.length ? `Recomendações: ${dossier.recomendacoes.join('; ')}` : '',
+          dossier.historicoEleitoral?.resumo ? `Histórico eleitoral: ${dossier.historicoEleitoral.resumo}. Forte: ${(dossier.historicoEleitoral.ondeForte || []).join(', ')}. Fraco: ${(dossier.historicoEleitoral.ondeFraco || []).join(', ')}` : '',
+          dossier.processos?.length ? `Processos/sanções: ${dossier.processos.join('; ')}` : '',
+          dossier.patrimonio?.resumo ? `Patrimônio: ${dossier.patrimonio.resumo}. Empresas: ${(dossier.patrimonio.empresas || []).join(', ')}` : '',
+          dossier.tendencia ? `Tendência: ${dossier.tendencia}` : '',
         ].filter(Boolean).join('\n')
       : (result.text || '');
     void ingestArtifact(supabase, {
