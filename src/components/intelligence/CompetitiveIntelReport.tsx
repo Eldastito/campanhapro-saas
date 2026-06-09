@@ -19,13 +19,16 @@ const Block: React.FC<{ n: number; title: string; children: React.ReactNode }> =
     {children}
   </section>
 );
-const UL: React.FC<{ items?: any[]; color?: string }> = ({ items, color = 'text-slate-700' }) => (
-  (items && items.length) ? <ul className="space-y-1.5">{items.map((x, i) => <li key={i} className={`text-sm flex gap-1.5 ${color}`}><span>•</span>{typeof x === 'string' ? x : JSON.stringify(x)}</li>)}</ul>
-    : <p className="text-sm text-slate-400">—</p>
-);
+const UL: React.FC<{ items?: any; color?: string }> = ({ items, color = 'text-slate-700' }) => {
+  const list = Array.isArray(items) ? items : (items == null || items === '' ? [] : [items]);
+  return list.length ? <ul className="space-y-1.5">{list.map((x, i) => <li key={i} className={`text-sm flex gap-1.5 ${color}`}><span>•</span>{typeof x === 'string' ? x : JSON.stringify(x)}</li>)}</ul>
+    : <p className="text-sm text-slate-400">—</p>;
+};
 
 const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
   const d = intel?.dossier || {};
+  // A IA às vezes devolve campos de lista como string única — normaliza p/ evitar .join quebrar
+  const arr = (v: any): any[] => Array.isArray(v) ? v : (v == null || v === '' ? [] : [v]);
   let n = 0;
   return (
     <div id="intel-report" className="fixed inset-0 bg-white text-slate-900 z-[9999] overflow-y-auto p-8 print:p-0 print:static">
@@ -71,9 +74,9 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
       <div className="space-y-10">
         {d.resumo && <Block n={++n} title="Resumo Executivo"><p className="text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-200">{d.resumo}</p></Block>}
 
-        {(d.redesSociais?.length) > 0 && (
+        {arr(d.redesSociais).length > 0 && (
           <Block n={++n} title="Presença Digital">
-            <ul className="space-y-1.5">{d.redesSociais.map((r: any, i: number) => <li key={i} className="text-sm text-slate-700"><Globe className="h-3.5 w-3.5 inline text-slate-500" /> <b>{r.rede}</b> {r.handle} <span className="text-slate-500">— {r.observacao}</span></li>)}</ul>
+            <ul className="space-y-1.5">{arr(d.redesSociais).map((r: any, i: number) => typeof r === 'string' ? <li key={i} className="text-sm text-slate-700">{r}</li> : <li key={i} className="text-sm text-slate-700"><Globe className="h-3.5 w-3.5 inline text-slate-500" /> <b>{r.rede}</b> {r.handle} <span className="text-slate-500">— {r.observacao}</span></li>)}</ul>
           </Block>
         )}
 
@@ -98,8 +101,8 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
         {d.historicoEleitoral && (d.historicoEleitoral.resumo || d.historicoEleitoral.ondeForte?.length) && (
           <Block n={++n} title="Histórico Eleitoral">
             <p className="text-slate-700">{d.historicoEleitoral.resumo}</p>
-            {d.historicoEleitoral.ondeForte?.length ? <p className="text-sm text-emerald-700 mt-1"><b>Forte:</b> {d.historicoEleitoral.ondeForte.join(', ')}</p> : null}
-            {d.historicoEleitoral.ondeFraco?.length ? <p className="text-sm text-rose-700"><b>Fraco:</b> {d.historicoEleitoral.ondeFraco.join(', ')}</p> : null}
+            {arr(d.historicoEleitoral.ondeForte).length ? <p className="text-sm text-emerald-700 mt-1"><b>Forte:</b> {arr(d.historicoEleitoral.ondeForte).join(', ')}</p> : null}
+            {arr(d.historicoEleitoral.ondeFraco).length ? <p className="text-sm text-rose-700"><b>Fraco:</b> {arr(d.historicoEleitoral.ondeFraco).join(', ')}</p> : null}
           </Block>
         )}
 
@@ -112,8 +115,8 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
             <p className="text-slate-700">{d.tseDivulgacand.resumo}</p>
             <p className="text-sm text-slate-600 mt-1">{d.tseDivulgacand.numero ? `Nº ${d.tseDivulgacand.numero} ` : ''}{d.tseDivulgacand.partido ? `· ${d.tseDivulgacand.partido} ` : ''}{d.tseDivulgacand.situacao ? `· ${d.tseDivulgacand.situacao}` : ''}</p>
             {d.tseDivulgacand.bensDeclarados ? <p className="text-sm text-slate-600"><b>Bens:</b> {d.tseDivulgacand.bensDeclarados}</p> : null}
-            {d.tseDivulgacand.doadores?.length ? <p className="text-sm text-slate-600"><b>Doadores:</b> {d.tseDivulgacand.doadores.join(', ')}</p> : null}
-            {d.tseDivulgacand.maioresGastos?.length ? <p className="text-sm text-slate-600"><b>Maiores gastos:</b> {d.tseDivulgacand.maioresGastos.join(', ')}</p> : null}
+            {arr(d.tseDivulgacand.doadores).length ? <p className="text-sm text-slate-600"><b>Doadores:</b> {arr(d.tseDivulgacand.doadores).join(', ')}</p> : null}
+            {arr(d.tseDivulgacand.maioresGastos).length ? <p className="text-sm text-slate-600"><b>Maiores gastos:</b> {arr(d.tseDivulgacand.maioresGastos).join(', ')}</p> : null}
           </Block>
         )}
 
@@ -122,8 +125,8 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
         {d.anunciosMeta && (
           <Block n={++n} title="Anúncios (Biblioteca da Meta)">
             <p className="text-slate-700"><Megaphone className="h-4 w-4 inline text-slate-500" /> {d.anunciosMeta.resumo}</p>
-            {(d.anunciosMeta.exemplos || []).length > 0 && (
-              <ul className="mt-2 space-y-1.5">{d.anunciosMeta.exemplos.map((a: any, i: number) => (
+            {arr(d.anunciosMeta.exemplos).length > 0 && (
+              <ul className="mt-2 space-y-1.5">{arr(d.anunciosMeta.exemplos).map((a: any, i: number) => (
                 <li key={i} className="text-sm text-slate-700">{typeof a === 'string' ? a : <><b>{a.pagina}</b>{a.gasto ? ` · ${a.gasto}` : ''}{a.impressoes ? ` · ${a.impressoes} impr.` : ''} — {a.texto}</>}</li>
               ))}</ul>
             )}
@@ -132,20 +135,20 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
 
         {d.tendencia && <Block n={++n} title="Tendência (busca & pesquisas)"><p className="text-slate-700">{d.tendencia}</p></Block>}
 
-        {(d.noticiasRecentes?.length) > 0 && (
+        {arr(d.noticiasRecentes).length > 0 && (
           <Block n={++n} title="Notícias Recentes">
-            <ul className="space-y-1.5">{d.noticiasRecentes.map((nws: any, i: number) => <li key={i} className="text-sm text-slate-700"><Newspaper className="h-3.5 w-3.5 inline text-slate-500" /> <b>{nws.titulo}</b> <span className="text-slate-500">({nws.fonte}{nws.data ? `, ${nws.data}` : ''})</span>{nws.contexto ? <span className="text-[10px] ml-1 px-1 rounded bg-slate-200 text-slate-700">{nws.contexto}</span> : null}</li>)}</ul>
+            <ul className="space-y-1.5">{arr(d.noticiasRecentes).map((nws: any, i: number) => typeof nws === 'string' ? <li key={i} className="text-sm text-slate-700"><Newspaper className="h-3.5 w-3.5 inline text-slate-500" /> {nws}</li> : <li key={i} className="text-sm text-slate-700"><Newspaper className="h-3.5 w-3.5 inline text-slate-500" /> <b>{nws.titulo}</b> <span className="text-slate-500">({nws.fonte}{nws.data ? `, ${nws.data}` : ''})</span>{nws.contexto ? <span className="text-[10px] ml-1 px-1 rounded bg-slate-200 text-slate-700">{nws.contexto}</span> : null}</li>)}</ul>
           </Block>
         )}
 
-        {(d.recomendacoes?.length) > 0 && (
+        {arr(d.recomendacoes).length > 0 && (
           <Block n={++n} title="Recomendações para Nós">
-            <div className="space-y-2">{d.recomendacoes.map((r: string, i: number) => <div key={i} className="report-block bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex items-start gap-2"><Target className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" /><span className="text-sm text-slate-700">{r}</span></div>)}</div>
+            <div className="space-y-2">{arr(d.recomendacoes).map((r: any, i: number) => <div key={i} className="report-block bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex items-start gap-2"><Target className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" /><span className="text-sm text-slate-700">{typeof r === 'string' ? r : JSON.stringify(r)}</span></div>)}</div>
           </Block>
         )}
 
-        {(d.fontes?.length) > 0 && (
-          <section className="report-section"><p className="text-[10px] text-slate-400">Fontes consultadas: {d.fontes.slice(0, 15).join(' · ')}</p></section>
+        {arr(d.fontes).length > 0 && (
+          <section className="report-section"><p className="text-[10px] text-slate-400">Fontes consultadas: {arr(d.fontes).slice(0, 15).join(' · ')}</p></section>
         )}
 
         <p className="text-center text-xs text-slate-400 pt-6 border-t border-slate-200">Inteligência competitiva por fontes públicas · CampanhaPro · {new Date().getFullYear()}</p>

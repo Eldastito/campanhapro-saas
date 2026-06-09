@@ -124,6 +124,8 @@ const CompetitiveIntelPanel: React.FC = () => {
         <div className="space-y-3">
           {list.map((it) => {
             const d = it.dossier || {};
+            // A IA às vezes devolve campos de lista como string única — normaliza p/ evitar .join quebrar
+            const arr = (v: any): any[] => Array.isArray(v) ? v : (v == null || v === '' ? [] : [v]);
             const isOpen = open === it.id;
             return (
               <div key={it.id} className="bg-slate-900/50 border border-white/5 rounded-xl overflow-hidden">
@@ -155,7 +157,7 @@ const CompetitiveIntelPanel: React.FC = () => {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
                         <div>
                           <Section icon={Globe} title="Redes sociais">
-                            {(d.redesSociais || []).length ? <ul className="text-sm text-slate-300 space-y-0.5">{d.redesSociais.map((r: any, i: number) => <li key={i}><b>{r.rede}</b> {r.handle} <span className="text-slate-500">— {r.observacao}</span></li>)}</ul> : <p className="text-xs text-slate-600">—</p>}
+                            {arr(d.redesSociais).length ? <ul className="text-sm text-slate-300 space-y-0.5">{arr(d.redesSociais).map((r: any, i: number) => typeof r === 'string' ? <li key={i}>{r}</li> : <li key={i}><b>{r.rede}</b> {r.handle} <span className="text-slate-500">— {r.observacao}</span></li>)}</ul> : <p className="text-xs text-slate-600">—</p>}
                           </Section>
                           <Section icon={Target} title="Pautas principais"><List items={d.pautasPrincipais} /></Section>
                           <Section icon={Megaphone} title="Narrativas"><List items={d.narrativas} /></Section>
@@ -164,9 +166,9 @@ const CompetitiveIntelPanel: React.FC = () => {
                             {d.anunciosMeta?.verificarEm && (
                               <a href={d.anunciosMeta.verificarEm} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-400 underline">Conferir na Biblioteca de Anúncios da Meta →</a>
                             )}
-                            {(d.anunciosMeta?.exemplos || []).length > 0 && (
+                            {arr(d.anunciosMeta?.exemplos).length > 0 && (
                               <ul className="mt-1 space-y-1.5">
-                                {d.anunciosMeta.exemplos.map((a: any, i: number) => (
+                                {arr(d.anunciosMeta.exemplos).map((a: any, i: number) => (
                                   <li key={i} className="text-xs bg-slate-950/50 rounded p-2">
                                     {typeof a === 'string' ? a : (<>
                                       <b className="text-slate-200">{a.pagina || '—'}</b>
@@ -193,8 +195,8 @@ const CompetitiveIntelPanel: React.FC = () => {
                           {d.historicoEleitoral && (d.historicoEleitoral.resumo || d.historicoEleitoral.ondeForte?.length) && (
                             <Section icon={TrendingUp} title="Histórico eleitoral">
                               <p className="text-sm text-slate-300">{d.historicoEleitoral.resumo}</p>
-                              {d.historicoEleitoral.ondeForte?.length ? <p className="text-xs text-emerald-400 mt-0.5">Forte: {d.historicoEleitoral.ondeForte.join(', ')}</p> : null}
-                              {d.historicoEleitoral.ondeFraco?.length ? <p className="text-xs text-rose-400">Fraco: {d.historicoEleitoral.ondeFraco.join(', ')}</p> : null}
+                              {arr(d.historicoEleitoral.ondeForte).length ? <p className="text-xs text-emerald-400 mt-0.5">Forte: {arr(d.historicoEleitoral.ondeForte).join(', ')}</p> : null}
+                              {arr(d.historicoEleitoral.ondeFraco).length ? <p className="text-xs text-rose-400">Fraco: {arr(d.historicoEleitoral.ondeFraco).join(', ')}</p> : null}
                             </Section>
                           )}
                           {d.patrimonio && (d.patrimonio.resumo || d.patrimonio.empresas?.length) && (
@@ -210,17 +212,17 @@ const CompetitiveIntelPanel: React.FC = () => {
                                 {d.tseDivulgacand.numero ? `Nº ${d.tseDivulgacand.numero} ` : ''}{d.tseDivulgacand.partido ? `· ${d.tseDivulgacand.partido} ` : ''}{d.tseDivulgacand.situacao ? `· ${d.tseDivulgacand.situacao}` : ''}
                               </p>
                               {d.tseDivulgacand.bensDeclarados ? <p className="text-xs text-slate-400">Bens: {d.tseDivulgacand.bensDeclarados}</p> : null}
-                              {d.tseDivulgacand.doadores?.length ? <p className="text-xs text-slate-400">Doadores: {d.tseDivulgacand.doadores.join(', ')}</p> : null}
-                              {d.tseDivulgacand.maioresGastos?.length ? <p className="text-xs text-slate-400">Maiores gastos: {d.tseDivulgacand.maioresGastos.join(', ')}</p> : null}
+                              {arr(d.tseDivulgacand.doadores).length ? <p className="text-xs text-slate-400">Doadores: {arr(d.tseDivulgacand.doadores).join(', ')}</p> : null}
+                              {arr(d.tseDivulgacand.maioresGastos).length ? <p className="text-xs text-slate-400">Maiores gastos: {arr(d.tseDivulgacand.maioresGastos).join(', ')}</p> : null}
                               {d.tseDivulgacand.linkOficial && <a href={d.tseDivulgacand.linkOficial} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-400 underline">Conferir no DivulgaCandContas (TSE) →</a>}
                             </Section>
                           )}
                           {d.processos?.length > 0 && <Section icon={ShieldAlert} title="Processos / sanções"><List items={d.processos} /></Section>}
                           {d.tendencia && <Section icon={TrendingUp} title="Tendência (busca/pesquisas)"><p className="text-sm text-slate-300">{d.tendencia}</p></Section>}
                           <Section icon={Newspaper} title="Notícias recentes">
-                            {(d.noticiasRecentes || []).length ? <ul className="text-sm text-slate-300 space-y-1">{d.noticiasRecentes.map((n: any, i: number) => <li key={i}>📰 <b>{n.titulo}</b> <span className="text-slate-500">({n.fonte}{n.data ? `, ${n.data}` : ''})</span>{n.contexto && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded ml-1 ${String(n.contexto).includes('2026') ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-700 text-slate-400'}`}>{n.contexto}</span>} {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">link</a>}</li>)}</ul> : <p className="text-xs text-slate-600">—</p>}
+                            {arr(d.noticiasRecentes).length ? <ul className="text-sm text-slate-300 space-y-1">{arr(d.noticiasRecentes).map((n: any, i: number) => typeof n === 'string' ? <li key={i}>📰 {n}</li> : <li key={i}>📰 <b>{n.titulo}</b> <span className="text-slate-500">({n.fonte}{n.data ? `, ${n.data}` : ''})</span>{n.contexto && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded ml-1 ${String(n.contexto).includes('2026') ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-700 text-slate-400'}`}>{n.contexto}</span>} {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">link</a>}</li>)}</ul> : <p className="text-xs text-slate-600">—</p>}
                           </Section>
-                          {(d.fontes || []).length > 0 && <p className="text-[10px] text-slate-600 mt-2">Fontes: {d.fontes.slice(0, 8).join(' · ')}</p>}
+                          {arr(d.fontes).length > 0 && <p className="text-[10px] text-slate-600 mt-2">Fontes: {arr(d.fontes).slice(0, 8).join(' · ')}</p>}
                         </div>
                       </div>
                       </>
