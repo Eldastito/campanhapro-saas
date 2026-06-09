@@ -241,11 +241,13 @@ const EventRow: React.FC<{ event: ManagerEvent }> = ({ event }) => {
         if (event.payload.error) {
             return <Row icon={<AlertTriangle className="w-4 h-4 text-red-400" />} title={`${AGENT_LABELS[agent] || agent} falhou`} detail={event.payload.error} time={t} />;
         }
+        const tools = Array.isArray(event.payload.toolsUsed) ? event.payload.toolsUsed : [];
+        const toolsTxt = tools.length ? `📊 consultou: ${tools.join(', ')} · ` : '';
         return (
             <Row
                 icon={<CheckCircle2 className="w-4 h-4 text-emerald-400" />}
                 title={`${AGENT_LABELS[agent] || agent} respondeu`}
-                detail={`${event.payload.latencyMs}ms · $${(event.payload.costCents / 100).toFixed(4)} · "${(event.payload.response || '').slice(0, 100)}…"`}
+                detail={`${toolsTxt}${event.payload.latencyMs}ms · $${(event.payload.costCents / 100).toFixed(4)} · "${(event.payload.response || '').slice(0, 100)}…"`}
                 time={t}
             />
         );
