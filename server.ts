@@ -13,6 +13,7 @@ import { createServer as createViteServer } from 'vite';
 import { createServer as createHttpServer } from 'http';
 import { createAuthMiddleware } from './src/middleware/authMiddleware';
 import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
+import { getLeaderConversionStats } from './src/services/engagementService';
 import { createIntelligenceRouter } from './src/server/modules/intelligence/intelligenceRouter';
 import { createPaperclipRouter } from './src/server/modules/paperclip/paperclipRouter';
 import { createChannelsRouter } from './src/server/modules/channels/channelsRouter';
@@ -148,6 +149,30 @@ const AGENT_TOOLS = [
       name: "analyze_territorial_gap",
       description: "Analisa os bairros com maior diferença entre visitas realizadas e potencial de votos (Gaps Territoriais).",
       parameters: { type: "object", properties: {} }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_competitive_intel",
+      description: "Retorna os dossiês de Inteligência Competitiva dos adversários já pesquisados (resumo, pontos fracos, ameaças para nós, recomendações). Use SEMPRE que precisar basear estratégia, conteúdo ou resposta a eleitor em dados reais do oponente — em vez de achismo.",
+      parameters: { type: "object", properties: { nome: { type: "string", description: "opcional: filtra por nome do adversário" } } }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_team_activity",
+      description: "Retorna o desempenho das lideranças/equipe: total de contatos, conversões e taxa por líder. Use para identificar quem está produzindo e quem está parado.",
+      parameters: { type: "object", properties: {} }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_campaign_memory",
+      description: "Busca na memória de longo prazo da campanha (dossiês, reuniões, análises anteriores indexadas) por um assunto específico. Use para recuperar contexto antes de decidir.",
+      parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }
     }
   }
 ];
@@ -423,6 +448,35 @@ async function startServer() {
                   });
               }
               toolOutput = { success: true, message: `Registro ${args.entity_type}/${args.entity_id} flagged como ${args.risk_level}.` };
+          } else if (tool.function.name === 'get_competitive_intel') {
+              if (supabaseAdmin) {
+                  const { data } = await supabaseAdmin.from('competitor_intel')
+                      .select('name, cargo, dossier').eq('campaignId', campaignId)
+                      .order('createdAt', { ascending: false }).limit(10);
+                  const filtro = String(args.nome || '').toLowerCase();
+                  const items = (data || [])
+                      .filter((r: any) => !filtro || String(r.name || '').toLowerCase().includes(filtro))
+                      .map((r: any) => ({
+                          nome: r.name, cargo: r.cargo,
+                          resumo: r.dossier?.resumo,
+                          pontosFracos: r.dossier?.pontosFracos,
+                          ameacasParaNos: r.dossier?.ameacasParaNos,
+                          recomendacoes: r.dossier?.recomendacoes,
+                      }));
+                  toolOutput = { adversarios: items, total: items.length };
+              } else {
+                  toolOutput = { adversarios: [], total: 0 };
+              }
+          } else if (tool.function.name === 'get_team_activity') {
+              try {
+                  const stats = await getLeaderConversionStats(campaignId);
+                  toolOutput = { equipe: stats };
+              } catch (e: any) {
+                  toolOutput = { equipe: [], error: e?.message };
+              }
+          } else if (tool.function.name === 'search_campaign_memory') {
+              const mem = supabaseAdmin ? await retrieveContext(supabaseAdmin, campaignId, String(args.query || ''), 6) : '';
+              toolOutput = { memoria: mem || 'Nada relevante encontrado na memória.' };
           } else if (tool.function.name === 'create_backup') {
               // Stub: backup real é disparado no service do front. Aqui só registra a intenção.
               toolOutput = { success: true, message: 'Pedido de backup registrado. Execute via UI de Backup.', reason: args.reason };
