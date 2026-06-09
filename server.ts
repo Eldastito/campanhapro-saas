@@ -50,6 +50,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
 import { startProactiveMonitor } from './src/lib/proactiveMonitor';
+import { retrieveContext, ingestArtifact } from './src/server/modules/rag/knowledgeIngest';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -341,8 +342,21 @@ async function startServer() {
           });
       }
 
+      // RAG: recupera a memória da campanha (dossiês, reuniões, análises anteriores)
+      // e injeta como CONTEXTO. Faz os agentes deixarem de responder "no vácuo".
+      // retrieveContext é best-effort (timeout interno 8s, nunca lança).
+      let effectivePrompt = prompt;
+      if (supabaseAdmin && campaignId && prompt) {
+          const memoria = await retrieveContext(supabaseAdmin, campaignId, prompt, 5);
+          if (memoria) {
+              effectivePrompt =
+                  `CONTEXTO DA CAMPANHA (memória de dossiês/análises/reuniões anteriores — ` +
+                  `use o que for relevante para esta resposta; NÃO invente nada além disto):\n${memoria}\n\n---\n\n${prompt}`;
+          }
+      }
+
       // Chamada principal via helper (provider chain + retry + budget + log)
-      const aiResponse = await callAgent(supabaseAdmin, agentId || 'chat', prompt, {
+      const aiResponse = await callAgent(supabaseAdmin, agentId || 'chat', effectivePrompt, {
           campaignId,
           userId,
           systemInstruction,
@@ -451,6 +465,18 @@ async function startServer() {
               humanApproved: false,
               createdBy: userId
           });
+
+          // RAG: indexa respostas substantivas na memória da campanha (best-effort).
+          // Assim o conhecimento de um agente fica disponível para os outros depois.
+          if (textResult && textResult.length > 400) {
+              void ingestArtifact(supabaseAdmin, {
+                  campaignId,
+                  source: `agent:${agentId}`,
+                  title: `${agentId} — ${String(prompt).slice(0, 60)}`,
+                  text: textResult,
+                  metadata: { agentId, runId: aiResponse.runId },
+              });
+          }
       }
 
       res.json({ text: textResult, tool_calls: aiResponse.toolCalls, run_id: aiResponse.runId, provider: aiResponse.provider });
