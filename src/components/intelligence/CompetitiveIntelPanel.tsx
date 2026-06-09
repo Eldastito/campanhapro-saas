@@ -201,8 +201,8 @@ const CompetitiveIntelPanel: React.FC = () => {
                           )}
                           {d.patrimonio && (d.patrimonio.resumo || d.patrimonio.empresas?.length) && (
                             <Section icon={Globe} title="Patrimônio & empresas">
-                              <p className="text-sm text-slate-300">{d.patrimonio.resumo}</p>
-                              {d.patrimonio.empresas?.length ? <List items={d.patrimonio.empresas} /> : null}
+                              <p className="text-sm text-slate-300">{d.patrimonio.resumo}{d.patrimonio.fonte ? <span className="text-[10px] text-slate-500 ml-1">({d.patrimonio.fonte})</span> : null}</p>
+                              {arr(d.patrimonio.empresas).length ? <List items={d.patrimonio.empresas} /> : null}
                             </Section>
                           )}
                           {d.tseDivulgacand && (d.tseDivulgacand.resumo || d.tseDivulgacand.numero) && (
@@ -217,7 +217,11 @@ const CompetitiveIntelPanel: React.FC = () => {
                               {d.tseDivulgacand.linkOficial && <a href={d.tseDivulgacand.linkOficial} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-400 underline">Conferir no DivulgaCandContas (TSE) →</a>}
                             </Section>
                           )}
-                          {d.processos?.length > 0 && <Section icon={ShieldAlert} title="Processos / sanções"><List items={d.processos} /></Section>}
+                          {arr(d.processos).length > 0 && <Section icon={ShieldAlert} title="Processos / sanções">
+                            <ul className="text-sm text-slate-300 space-y-1">{arr(d.processos).map((p: any, i: number) => (
+                              <li key={i}>• {typeof p === 'string' ? p : <>{p.titulo}{(p.fonte || p.data) && <span className="text-[10px] text-slate-500 ml-1">({[p.fonte, p.data].filter(Boolean).join(', ')})</span>}</>}</li>
+                            ))}</ul>
+                          </Section>}
                           {d.tendencia && <Section icon={TrendingUp} title="Tendência (busca/pesquisas)"><p className="text-sm text-slate-300">{d.tendencia}</p></Section>}
                           <Section icon={Newspaper} title="Notícias recentes">
                             {arr(d.noticiasRecentes).length ? <ul className="text-sm text-slate-300 space-y-1">{arr(d.noticiasRecentes).map((n: any, i: number) => typeof n === 'string' ? <li key={i}>📰 {n}</li> : <li key={i}>📰 <b>{n.titulo}</b> <span className="text-slate-500">({n.fonte}{n.data ? `, ${n.data}` : ''})</span>{n.contexto && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded ml-1 ${String(n.contexto).includes('2026') ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-700 text-slate-400'}`}>{n.contexto}</span>} {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">link</a>}</li>)}</ul> : <p className="text-xs text-slate-600">—</p>}

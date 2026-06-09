@@ -51,6 +51,8 @@ export interface CallAgentOpts {
      * automaticamente (evita falhas em cascata quando só 1 key existe).
      */
     complexity?: 'cheap' | 'balanced' | 'premium';
+    /** Override do teto de tokens de SAÍDA (senão usa o do AGENT_CONFIGS, ou 4000). */
+    maxTokens?: number;
     /**
      * Quando true E o provider for Anthropic, anexa o tool nativo `web_search_20250305`
      * (max 5 buscas por chamada, ~$0.05 USD). Útil pro Manager fazer monitoramento
@@ -399,6 +401,8 @@ export const AGENT_CONFIGS: Record<string, AgentConfig> = {
     advisor:    { agentId: 'advisor',    temperature: 0.6 },
     // Consultor de campanha (Supreme): raciocínio analítico + saída JSON longa
     campaign_consultant: { agentId: 'campaign_consultant', temperature: 0.4, maxTokens: 4000, model: { anthropic: 'claude-sonnet-4-5', openai: 'gpt-4o-mini' } },
+    // Inteligência competitiva: dossiê factual longo (web_search) — teto alto p/ NÃO truncar.
+    competitive_intel: { agentId: 'competitive_intel', temperature: 0.4, maxTokens: 7000 },
     pipeline:   { agentId: 'pipeline',   temperature: 0.7, maxTokens: 6000 },
 };
 
@@ -412,7 +416,9 @@ export async function callAgent(
     prompt: string,
     opts: CallAgentOpts
 ): Promise<CallAgentResult> {
-    const config = AGENT_CONFIGS[agentId] || { agentId };
+    const baseConfig = AGENT_CONFIGS[agentId] || { agentId };
+    // opts.maxTokens (quando informado) sobrescreve o teto do AGENT_CONFIGS.
+    const config: AgentConfig = opts.maxTokens ? { ...baseConfig, maxTokens: opts.maxTokens } : baseConfig;
 
     // 1. Budget check (não-bloqueante se Supabase admin não disponível)
     if (supabaseAdmin) {

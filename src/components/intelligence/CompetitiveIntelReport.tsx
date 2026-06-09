@@ -107,7 +107,7 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
         )}
 
         {d.patrimonio && (d.patrimonio.resumo || d.patrimonio.empresas?.length) && (
-          <Block n={++n} title="Patrimônio & Empresas"><p className="text-slate-700">{d.patrimonio.resumo}</p><UL items={d.patrimonio.empresas} /></Block>
+          <Block n={++n} title="Patrimônio & Empresas"><p className="text-slate-700">{d.patrimonio.resumo}{d.patrimonio.fonte ? <span className="text-xs text-slate-500 ml-1">({d.patrimonio.fonte})</span> : null}</p><UL items={d.patrimonio.empresas} /></Block>
         )}
 
         {d.tseDivulgacand && (d.tseDivulgacand.resumo || d.tseDivulgacand.numero) && (
@@ -120,7 +120,11 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
           </Block>
         )}
 
-        {d.processos?.length > 0 && <Block n={++n} title="Processos / Sanções"><UL items={d.processos} /></Block>}
+        {arr(d.processos).length > 0 && <Block n={++n} title="Processos / Sanções">
+          <ul className="space-y-1.5">{arr(d.processos).map((p: any, i: number) => (
+            <li key={i} className="text-sm text-slate-700 flex gap-1.5"><span>•</span><span>{typeof p === 'string' ? p : <>{p.titulo}{(p.fonte || p.data) && <span className="text-xs text-slate-500"> ({[p.fonte, p.data].filter(Boolean).join(', ')})</span>}</>}</span></li>
+          ))}</ul>
+        </Block>}
 
         {d.anunciosMeta && (
           <Block n={++n} title="Anúncios (Biblioteca da Meta)">

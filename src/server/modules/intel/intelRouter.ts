@@ -78,6 +78,13 @@ ciclos nem atribua a 2026 algo que foi de 2024. Se a data for incerta, escreva
 "data não confirmada".
 Regras: nunca invente dados — se não encontrar, diga "não encontrado". Nunca
 sugira ataque pessoal: foque em propostas, pautas, narrativas e desempenho.
+REGRA DE FONTE (obrigatória): toda afirmação FACTUAL (processos, sanções,
+patrimônio, números de votação, datas, valores) DEVE vir com a fonte (veículo
+ou órgão + URL quando houver) e a data. Se você NÃO tem uma fonte confirmada
+para um fato, não o afirme como certo — marque "sem fonte confirmada". É melhor
+COMPLETAR poucas informações (frase inteira, sem cortar no meio) do que listar
+muitas pela metade. Seja COMPLETO mas CONCISO: 3 a 6 itens por lista, sempre
+fechando a frase.
 FORMATO OBRIGATÓRIO: responda APENAS com um objeto JSON válido — começando com
 { e terminando com }. NÃO escreva preâmbulo, NÃO use blocos markdown (\`\`\`),
 e NÃO inclua tags de citação como <cite ...> dentro dos valores. As URLs das
@@ -136,8 +143,8 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       `  "oportunidadesParaNos": ["..."],\n` +
       `  "recomendacoes": ["ações práticas para a nossa campanha"],\n` +
       `  "historicoEleitoral": {"resumo":"desempenho em eleições anteriores","ondeForte":["regiões/bairros/zonas"],"ondeFraco":["..."]},\n` +
-      `  "processos": ["processos judiciais/investigações/sanções públicas relevantes (com fonte)"],\n` +
-      `  "patrimonio": {"resumo":"bens declarados/evolução","empresas":["empresas/sócios ligados"]},\n` +
+      `  "processos": [{"titulo":"processo/investigação/sanção (frase COMPLETA, sem cortar)","fonte":"veículo ou órgão + URL","data":"AAAA-MM ou AAAA"}],\n` +
+      `  "patrimonio": {"resumo":"bens declarados/evolução","empresas":["empresas/sócios ligados"],"fonte":"fonte do patrimônio, se houver"},\n` +
       `  "tendencia": "tendência de busca (Google Trends) + pesquisas de intenção citadas",\n` +
       `  "fontes": ["urls consultadas"]\n` +
       `}` + adContext + memBlock;
@@ -150,8 +157,8 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
         systemInstruction: SYSTEM,
         complexity: 'premium',
         enableWebSearch: true,
-        maxTokens: 5000, // suficiente p/ o JSON sem citações; o repair cobre qualquer cauda
-      } as any);
+        maxTokens: 7000, // teto alto p/ o dossiê NÃO truncar (antes 5000 era ignorado → caía em 4000)
+      });
     } catch (err: any) {
       if (err instanceof BudgetExceededError) return res.status(402).json({ error: 'ai_budget_exceeded', detail: err.message });
       return res.status(502).json({ error: 'ai_call_failed', detail: err?.message });
@@ -216,7 +223,7 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
           dossier.oportunidadesParaNos?.length ? `Oportunidades p/ nós: ${dossier.oportunidadesParaNos.join('; ')}` : '',
           dossier.recomendacoes?.length ? `Recomendações: ${dossier.recomendacoes.join('; ')}` : '',
           dossier.historicoEleitoral?.resumo ? `Histórico eleitoral: ${dossier.historicoEleitoral.resumo}. Forte: ${(dossier.historicoEleitoral.ondeForte || []).join(', ')}. Fraco: ${(dossier.historicoEleitoral.ondeFraco || []).join(', ')}` : '',
-          dossier.processos?.length ? `Processos/sanções: ${dossier.processos.join('; ')}` : '',
+          dossier.processos?.length ? `Processos/sanções: ${dossier.processos.map((p: any) => typeof p === 'string' ? p : `${p.titulo || ''}${p.fonte ? ` (${p.fonte}${p.data ? `, ${p.data}` : ''})` : ''}`).join('; ')}` : '',
           dossier.patrimonio?.resumo ? `Patrimônio: ${dossier.patrimonio.resumo}. Empresas: ${(dossier.patrimonio.empresas || []).join(', ')}` : '',
           dossier.tendencia ? `Tendência: ${dossier.tendencia}` : '',
           dossier.tseDivulgacand?.resumo ? `TSE: ${dossier.tseDivulgacand.resumo}. Nº ${dossier.tseDivulgacand.numero || '?'}, ${dossier.tseDivulgacand.partido || '?'}. Bens: ${dossier.tseDivulgacand.bensDeclarados || '—'}` : '',
