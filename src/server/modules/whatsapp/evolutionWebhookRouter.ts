@@ -29,6 +29,16 @@ interface RawRequest extends Request {
 
 const EVOLUTION_WEBHOOK_SECRET = process.env.EVOLUTION_WEBHOOK_SECRET;
 
+/**
+ * Converte um JID do WhatsApp em telefone (só dígitos), removendo o domínio
+ * (@s.whatsapp.net / @g.us) E o sufixo de dispositivo (":4", ":12"). Sem isto,
+ * o ":4" do JID do dono virava um dígito a mais colado no número
+ * (ex.: 5521999947477:4 -> 55219999474774).
+ */
+function jidToPhone(jid: unknown): string {
+  return String(jid || '').split('@')[0].split(':')[0].replace(/\D+/g, '');
+}
+
 export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
 
@@ -142,8 +152,9 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           updates.status = 'connected';
           updates.lastConnectedAt = new Date().toISOString();
           updates.lastQRCode = null;
-          const wuid = d.wuid ?? d.number ?? d.Jid ?? d.jid;
-          if (wuid) updates.phoneNumber = String(wuid).replace(/\D+/g, '');
+          const wuid = d.wuid ?? d.number ?? d.Jid ?? d.jid ?? d.Number ?? d.Wuid;
+          const phone = jidToPhone(wuid);
+          if (phone) updates.phoneNumber = phone;
         } else if (looksClosed) {
           updates.status = 'disconnected';
         } else if (state === 'connecting' || d.Qrcode || d.qrcode) {
@@ -177,7 +188,7 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             key.remoteJid ?? key.RemoteJid ?? m?.remoteJid ?? m?.RemoteJid ?? m?.from ?? m?.From ?? '',
           );
           const isGroup = remoteJid.includes('@g.us');
-          const externalId = remoteJid.replace(/@.*$/, '').replace(/\D+/g, '');
+          const externalId = jidToPhone(remoteJid);
           if (!externalId) continue;
           const text =
             msgObj.conversation ?? msgObj.Conversation ??
