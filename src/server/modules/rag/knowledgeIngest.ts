@@ -61,7 +61,12 @@ export async function retrieveContext(
 ): Promise<string> {
   try {
     if (!campaignId || !query?.trim()) return '';
-    const results = await search(supabase, campaignId, query, limit);
+    // Timeout defensivo: a busca (embeddings OpenAI + pgvector) NUNCA pode travar
+    // o fluxo principal. Se demorar > 8s, segue sem memória.
+    const results = await Promise.race([
+      search(supabase, campaignId, query, limit),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('rag_timeout')), 8000)),
+    ]);
     if (!results.length) return '';
     return results
       .map((r, i) => `[${i + 1}] (${r.source}, relevância ${(r.similarity * 100).toFixed(0)}%)\n${r.content.slice(0, 600)}`)

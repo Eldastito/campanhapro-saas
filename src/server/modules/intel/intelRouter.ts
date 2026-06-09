@@ -132,7 +132,7 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
         systemInstruction: SYSTEM,
         complexity: 'premium',
         enableWebSearch: true,
-        maxTokens: 8000, // dossiê + citações é longo — evita truncar o JSON
+        maxTokens: 5000, // suficiente p/ o JSON sem citações; o repair cobre qualquer cauda
       } as any);
     } catch (err: any) {
       if (err instanceof BudgetExceededError) return res.status(402).json({ error: 'ai_budget_exceeded', detail: err.message });

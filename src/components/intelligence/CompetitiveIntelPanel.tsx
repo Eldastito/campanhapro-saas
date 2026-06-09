@@ -65,15 +65,20 @@ const CompetitiveIntelPanel: React.FC = () => {
   const analisar = async () => {
     if (!form.name.trim()) { setError('Informe o nome do adversário.'); return; }
     setError(null); setLoading(true);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 160000); // 160s — não trava pra sempre
     try {
-      const r = await authedFetch('/api/v1/intel/adversary', { method: 'POST', body: JSON.stringify(form) });
+      const r = await authedFetch('/api/v1/intel/adversary', { method: 'POST', body: JSON.stringify(form), signal: ctrl.signal });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error === 'ai_budget_exceeded' ? 'Orçamento de IA esgotado.' : (j.detail || j.error || 'Falha na análise'));
       setForm({ name: '', cargo: '', cidade: '', uf: '' });
       setOpen(j.intel?.id || null);
       await load();
-    } catch (e: any) { setError(e?.message || 'Falha na análise.'); }
-    finally { setLoading(false); }
+    } catch (e: any) {
+      setError(e?.name === 'AbortError'
+        ? 'A pesquisa demorou demais e foi interrompida. Tente de novo — costuma funcionar na 2ª tentativa.'
+        : (e?.message || 'Falha na análise.'));
+    } finally { clearTimeout(timer); setLoading(false); }
   };
 
   const remover = async (id: string) => {
