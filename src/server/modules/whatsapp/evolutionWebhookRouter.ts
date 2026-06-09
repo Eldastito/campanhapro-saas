@@ -117,20 +117,36 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
         }
       } else if (
         event === 'CONNECTION' ||
-        event === 'CONNECTIONUPDATE'      // connection.update / CONNECTION_UPDATE
+        event === 'CONNECTIONUPDATE' ||    // connection.update / CONNECTION_UPDATE (Node)
+        event === 'CONNECTED' ||           // Evolution GO eventos individuais da categoria CONNECTION
+        event === 'DISCONNECTED' ||
+        event === 'LOGGEDOUT' ||
+        event === 'PAIRSUCCESS' ||         // QR escaneado/pareado com sucesso (GO)
+        event.includes('CONNECT')
       ) {
-        const state: string = data?.state ?? data?.status ?? '';
+        const d: any = data || {};
+        const state = String(d.state ?? d.State ?? d.status ?? '').toLowerCase();
+        // Evolution GO: { Connected: bool, LoggedIn: bool } (PascalCase).
+        const connected = d.Connected ?? d.connected;
+        const loggedIn = d.LoggedIn ?? d.loggedIn;
         const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
-        if (state === 'open') {
+        const looksConnected =
+          loggedIn === true || state === 'open' || state === 'connected' ||
+          event === 'CONNECTED' || event === 'PAIRSUCCESS' ||
+          (connected === true && loggedIn !== false);
+        const looksClosed =
+          state === 'close' || state === 'closed' ||
+          event === 'DISCONNECTED' || event === 'LOGGEDOUT' ||
+          event.includes('LOGOUT') || event.includes('DISCONNECT');
+        if (looksConnected) {
           updates.status = 'connected';
           updates.lastConnectedAt = new Date().toISOString();
           updates.lastQRCode = null;
-          if (data?.wuid || data?.number) {
-            updates.phoneNumber = String(data.wuid ?? data.number).replace(/\D+/g, '');
-          }
-        } else if (state === 'close') {
+          const wuid = d.wuid ?? d.number ?? d.Jid ?? d.jid;
+          if (wuid) updates.phoneNumber = String(wuid).replace(/\D+/g, '');
+        } else if (looksClosed) {
           updates.status = 'disconnected';
-        } else if (state === 'connecting') {
+        } else if (state === 'connecting' || d.Qrcode || d.qrcode) {
           updates.status = 'qrcode';
         }
         await supabaseAdmin.from('whatsapp_instances').update(updates).eq('id', inst.id);

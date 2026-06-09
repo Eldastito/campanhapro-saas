@@ -488,17 +488,20 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
 
       if (!inst) return res.status(404).json({ error: 'instance_not_found' });
 
-      if (inst.apiKey) {
-        // Pass instanceId (UUID) too — Evolution GO requires it on the path
-        // for /instance/delete/:instanceId, while Node v2 ignored it.
-        await deleteInstance(inst.instanceName, inst.apiKey, inst.instanceId);
-      }
-
-      // Soft-delete so historic messages still resolve their instance via FK
+      // Soft-delete PRIMEIRO: o número some da lista na hora, mesmo se o servidor
+      // Evolution estiver lento/fora (antes, a chamada de delete podia travar a
+      // requisição e o número nunca era removido).
       await supabaseAdmin
         .from('whatsapp_instances')
         .update({ status: 'deleted', apiKey: null, lastQRCode: null, updatedAt: new Date().toISOString() })
         .eq('id', inst.id);
+
+      // Limpeza no servidor Evolution em BACKGROUND (best-effort, não bloqueia a
+      // resposta nem o sumiço do número da lista).
+      if (inst.apiKey) {
+        void deleteInstance(inst.instanceName, inst.apiKey, inst.instanceId)
+          .catch((e) => console.warn('[WhatsApp] delete server cleanup falhou:', e?.message));
+      }
 
       await audit(supabaseAdmin, {
         ...actorFromRequest(req),

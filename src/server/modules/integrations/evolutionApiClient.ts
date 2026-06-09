@@ -63,14 +63,24 @@ async function call<T = unknown>(
   if (!EVOLUTION_API_URL) {
     throw new Error('evolution_not_configured');
   }
-  const res = await fetch(`${EVOLUTION_API_URL}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: apiKey,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  // Timeout defensivo: sem isto, um servidor Evolution lento/indisponível trava
+  // a requisição inteira (ex.: o delete nunca completava e o número não sumia).
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15_000);
+  let res: Response;
+  try {
+    res = await fetch(`${EVOLUTION_API_URL}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: apiKey,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     throw new Error(`evolution_${method}_${path}_${res.status}:${errText.slice(0, 200)}`);
@@ -243,9 +253,17 @@ export async function getStatus(
 ): Promise<EvolutionStatus> {
   try {
     const result = await call<any>('GET', '/instance/status', undefined, apiKey);
-    const data = result?.data ?? result ?? {};
-    if (data?.connected === true || data?.state === 'open') return 'connected';
-    if (data?.state === 'connecting' || data?.qrcode) return 'qrcode';
+    const d = result?.data ?? result ?? {};
+    // Evolution GO devolve PascalCase: { Connected: bool, LoggedIn: bool, Name }.
+    // Toleramos também minúsculas/state de outras versões.
+    const connected = d.Connected ?? d.connected;
+    const loggedIn = d.LoggedIn ?? d.loggedIn;
+    const state = String(d.state ?? d.State ?? d.status ?? '').toLowerCase();
+    if (loggedIn === true) return 'connected';               // pareado/autenticado
+    if (state === 'open' || state === 'connected') return 'connected';
+    if (connected === true && loggedIn === false) return 'qrcode'; // socket aberto, aguardando pareamento
+    if (connected === true) return 'connected';
+    if (state === 'connecting' || d.qrcode || d.Qrcode) return 'qrcode';
     return 'disconnected';
   } catch {
     return 'disconnected';
@@ -316,12 +334,14 @@ export async function deleteInstance(
     // Logout first to drop the WhatsApp socket — Go takes no path param here.
     await call('DELETE', '/instance/logout', undefined, apiKey).catch(() => {});
     if (instanceId) {
+      // /instance/delete/:id é rota Admin — usa a GLOBAL key (cai pro token da
+      // instância se a global não estiver configurada).
       await call(
         'DELETE',
         `/instance/delete/${encodeURIComponent(instanceId)}`,
         undefined,
-        apiKey,
-      );
+        EVOLUTION_GLOBAL_API_KEY || apiKey,
+      ).catch((e) => console.warn('[Evolution] delete/:id falhou (seguindo):', e?.message));
     } else {
       console.warn(
         '[Evolution] deleteInstance: no instanceId UUID supplied — issued logout only; instance row remains in Evolution',
