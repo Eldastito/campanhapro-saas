@@ -52,6 +52,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
 import { startProactiveMonitor } from './src/lib/proactiveMonitor';
+import { startDailyBriefing } from './src/lib/dailyBriefing';
 import { retrieveContext, ingestArtifact } from './src/server/modules/rag/knowledgeIngest';
 import { toolsForAgent } from './src/lib/agentRegistry';
 
@@ -1141,6 +1142,7 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`Servidor rodando em todas as interfaces na porta ${port}`);
     startProactiveMonitor(supabaseAdmin);
+    startDailyBriefing(supabaseAdmin);
     if (supabaseAdmin) startLifecycleSweeper(supabaseAdmin);
     // Re-register webhooks for all connected WhatsApp instances so the
     // correct EVOLUTION_WEBHOOK_URL is always active (self-healing).

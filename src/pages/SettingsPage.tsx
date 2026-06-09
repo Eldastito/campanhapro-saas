@@ -38,6 +38,8 @@ const SettingsPage = () => {
 
             <ProactiveMonitorSection />
 
+            <DailyBriefingSection />
+
             <AIHealthSection />
 
             <MaintenanceSection />
@@ -158,6 +160,62 @@ const ProactiveMonitorSection = () => {
                     Última execução: {new Date(lastRunAt).toLocaleString()}
                 </p>
             )}
+        </Card>
+    );
+};
+
+const DailyBriefingSection = () => {
+    const { user } = useAuth();
+    const [enabled, setEnabled] = useState(false);
+    const [lastRunAt, setLastRunAt] = useState<string | null>(null);
+    const [loaded, setLoaded] = useState(false);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!user?.campaignId) return;
+        let alive = true;
+        (async () => {
+            const { data } = await supabase.from('campaigns')
+                .select('dailyBriefingEnabled, dailyBriefingLastRunAt')
+                .eq('id', user.campaignId).maybeSingle();
+            if (!alive || !data) return;
+            setEnabled(!!data.dailyBriefingEnabled);
+            setLastRunAt(data.dailyBriefingLastRunAt || null);
+            setLoaded(true);
+        })();
+        return () => { alive = false; };
+    }, [user?.campaignId]);
+
+    const save = async (newEnabled: boolean) => {
+        if (!user?.campaignId) return;
+        setSaving(true);
+        const { error } = await supabase.from('campaigns').update({ dailyBriefingEnabled: newEnabled }).eq('id', user.campaignId);
+        setSaving(false);
+        if (error) alert('Erro ao salvar: ' + error.message);
+    };
+
+    return (
+        <Card className="border-t-4 border-t-indigo-500">
+            <div className="flex items-center gap-3 mb-2">
+                <AlertTriangle className="w-6 h-6 text-indigo-400" />
+                <h3 className="text-lg font-bold text-slate-300">Briefing Diário (Análise interna)</h3>
+            </div>
+            <p className="text-xs text-slate-400 mb-4">
+                Diferente do monitoramento (que olha a internet), o Briefing Diário roda o Orquestrador 1x/dia
+                de manhã para ANALISAR os dados da plataforma (visitas, contatos, funil, atividade da equipe) e
+                DELEGAR tarefas aos agentes. Os achados viram alertas no War Room. Custo aproximado: R$ 0,30–R$ 1,50/dia.
+            </p>
+            <label className="flex items-center justify-between gap-4 p-3 bg-slate-800/50 rounded-xl">
+                <div>
+                    <p className="text-sm font-bold text-slate-200">Ativar briefing diário automático</p>
+                    <p className="text-[11px] text-slate-500">
+                        {enabled ? 'Ativo · roda toda manhã (horário de Brasília)' : 'Desativado'}
+                    </p>
+                </div>
+                <input type="checkbox" checked={enabled} disabled={!loaded || saving}
+                    onChange={e => { setEnabled(e.target.checked); save(e.target.checked); }} className="w-6 h-6" />
+            </label>
+            {lastRunAt && <p className="text-[11px] text-slate-500 mt-2">Última execução: {new Date(lastRunAt).toLocaleString()}</p>}
         </Card>
     );
 };
