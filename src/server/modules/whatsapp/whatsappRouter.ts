@@ -138,13 +138,22 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
 
       const { data: inst } = await supabaseAdmin
         .from('whatsapp_instances')
-        .select('id, instanceName, apiKey, status')
+        .select('id, instanceName, apiKey, status, lastQRCode')
         .eq('id', req.params.id)
         .eq('campaignId', cid)
         .maybeSingle();
 
       if (!inst) return res.status(404).json({ error: 'instance_not_found' });
       if (!inst.apiKey) return res.status(409).json({ error: 'instance_not_provisioned' });
+
+      // Modo POLL (?poll=1): NÃO reconecta — só devolve o QR que o webhook já
+      // entregou (lastQRCode). Usado pelo frontend a cada 3s sem re-armar a sessão.
+      if (req.query.poll === '1') {
+        const { data: fresh } = await supabaseAdmin
+          .from('whatsapp_instances').select('lastQRCode, status').eq('id', inst.id).maybeSingle();
+        const q = (fresh as any)?.lastQRCode ?? null;
+        return res.json({ qrCode: q, status: (fresh as any)?.status === 'connected' ? 'connected' : (q ? 'qrcode' : 'pending') });
+      }
 
       let result: { qrCode: string | null; status: any };
       try {
@@ -176,12 +185,23 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
         throw qrErr;
       }
 
+      // Fallback: se o connect não devolveu o QR inline, o webhook (evento QRCODE)
+      // pode tê-lo entregue no lastQRCode — relê fresco antes de responder.
+      let qr = result.qrCode;
+      if (!qr) {
+        const { data: fresh } = await supabaseAdmin
+          .from('whatsapp_instances').select('lastQRCode').eq('id', inst.id).maybeSingle();
+        qr = (fresh as any)?.lastQRCode ?? null;
+      }
+
       await supabaseAdmin
         .from('whatsapp_instances')
-        .update({ lastQRCode: result.qrCode ?? null, status: 'qrcode', updatedAt: new Date().toISOString() })
+        .update({ lastQRCode: qr ?? inst.lastQRCode ?? null, status: 'qrcode', updatedAt: new Date().toISOString() })
         .eq('id', inst.id);
 
-      return res.json({ qrCode: result.qrCode, status: 'qrcode' });
+      // qrCode pode vir null aqui (QR ainda chegando via webhook) — o frontend
+      // faz poll (?poll=1) e pega assim que o webhook preencher.
+      return res.json({ qrCode: qr, status: 'qrcode' });
     } catch (err: any) {
       console.error('[WhatsApp] qrcode:', err);
       const msg = err?.message || 'erro';

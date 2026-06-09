@@ -97,9 +97,11 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
         // seen across versions. Most commonly: data.qrcode (with the
         // "data:image/png;base64," prefix) or data.base64 (raw base64).
         const qr =
+          (typeof data?.Qrcode === 'string' && data.Qrcode) ||   // Evolution GO (PascalCase)
           (typeof data?.qrcode === 'string' && data.qrcode) ||
           (typeof data?.base64 === 'string' && data.base64) ||
           (typeof data?.qr === 'string' && data.qr) ||
+          (typeof data?.Code === 'string' && data.Code) ||
           (typeof data?.code === 'string' && data.code) ||
           (typeof req.body?.qrcode === 'string' && req.body.qrcode) ||
           null;

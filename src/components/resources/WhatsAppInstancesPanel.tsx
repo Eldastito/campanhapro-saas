@@ -109,7 +109,7 @@ export const WhatsAppInstancesPanel: React.FC = () => {
       tries += 1;
       if (tries > 8) { clearInterval(iv); return; }
       try {
-        const res = await authedFetch(`/api/v1/whatsapp/instances/${qrModal.instanceId}/qrcode`);
+        const res = await authedFetch(`/api/v1/whatsapp/instances/${qrModal.instanceId}/qrcode?poll=1`);
         const j = await res.json();
         if (res.ok && j.qrCode) { setQrModal(m => (m ? { ...m, qrCode: j.qrCode } : m)); clearInterval(iv); }
       } catch { /* segue tentando */ }

@@ -158,18 +158,16 @@ export async function createInstance(instanceName: string): Promise<EvolutionCre
   });
 
   // Step 3: ask for an initial QR. May not be ready yet on a freshly-created
-  // instance — caller can poll via getQRCode().
+  // instance — caller can poll via getQRCode(). Tenta ambos os paths do GO.
   let qrCode: string | null = null;
-  try {
-    const qr = await call<any>('GET', '/instance/qr', undefined, apiKey);
-    qrCode =
-      qr?.base64 ??
-      qr?.data?.base64 ??
-      qr?.qrcode ??
-      qr?.data?.qrcode ??
-      null;
-  } catch {
-    // ignore — caller will poll
+  for (const path of ['/instance/qr', `/instance/${encodeURIComponent(instanceName)}/qrcode`]) {
+    try {
+      const qr = await call<any>('GET', path, undefined, apiKey);
+      qrCode = extractQrImage(qr);
+      if (qrCode) break;
+    } catch {
+      // ignore — caller will poll / webhook delivers
+    }
   }
 
   return {
@@ -186,17 +184,51 @@ export async function createInstance(instanceName: string): Promise<EvolutionCre
  * Evolution GO identifies the instance via the apikey header, so the
  * instanceName param is unused but kept for signature stability.
  */
+/**
+ * Extrai a IMAGEM do QR (base64 PNG) de respostas do Evolution GO/Node.
+ * O GO devolve em data.Qrcode (P maiúsculo!); outras versões usam base64/qrcode.
+ * (data.Code é a string crua de pareamento — não renderiza como <img>, ignorada.)
+ */
+function extractQrImage(obj: any): string | null {
+  if (!obj) return null;
+  const d = obj.data ?? obj;
+  return (
+    d?.Qrcode ?? d?.qrcode ?? d?.QRCode ?? d?.base64 ?? d?.qr ??
+    obj?.Qrcode ?? obj?.qrcode ?? obj?.base64 ?? obj?.qr ?? null
+  );
+}
+
 export async function getQRCode(
-  _instanceName: string,
+  instanceName: string,
   apiKey: string,
 ): Promise<{ qrCode: string | null; status: EvolutionStatus }> {
-  const qr = await call<any>('GET', '/instance/qr', undefined, apiKey);
-  const qrCode =
-    qr?.base64 ??
-    qr?.data?.base64 ??
-    qr?.qrcode ??
-    qr?.data?.qrcode ??
-    null;
+  // Evolution GO gera o QR ao (re)ARMAR a sessão de pareamento via
+  // POST /instance/connect — e o entrega via GET dedicado E/OU empurra via
+  // webhook (categoria QRCODE). Um GET de QR SEM connect antes retorna 401
+  // ("not authorized" = sem sessão ativa), que era a causa do QR nunca aparecer.
+  const webhookUrl = buildWebhookUrl(instanceName);
+  // connect-first: pode lançar 401/404 se o token estiver órfão — deixamos
+  // propagar para o router reprovisionar.
+  await call<any>(
+    'POST',
+    '/instance/connect',
+    { webhookUrl: webhookUrl ?? '', subscribe: SUBSCRIBED_EVENTS, immediate: true },
+    apiKey,
+  );
+
+  // O path do QR varia entre versões do GO: /instance/qr (por header) e
+  // /instance/{name}/qrcode (por path). Tentamos ambos; se nenhum trouxer
+  // inline, o webhook terá entregue o QR (o caller lê de lastQRCode).
+  let qrCode: string | null = null;
+  for (const path of ['/instance/qr', `/instance/${encodeURIComponent(instanceName)}/qrcode`]) {
+    try {
+      const qr = await call<any>('GET', path, undefined, apiKey);
+      qrCode = extractQrImage(qr);
+      if (qrCode) break;
+    } catch {
+      // tenta o próximo / QR chegará via webhook
+    }
+  }
   return { qrCode, status: qrCode ? 'qrcode' : 'pending' };
 }
 
