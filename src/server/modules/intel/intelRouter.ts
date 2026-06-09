@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { searchMetaAds } from './metaAdLibrary';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
+import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 
 /** Remove recursivamente tags de citação <cite...> dos valores string do objeto. */
 function stripCites(v: any): any {
@@ -233,6 +234,26 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       campaignId, source: 'intel:adversary', title: `Adversário: ${nome}`,
       text: texto, metadata: { adversario: nome, cargo: cargo || null, intelId: (saved as any)?.id },
     });
+
+    // GATILHO POR EVENTO: novo dossiê estruturado → o orquestrador o transforma
+    // em estratégia automaticamente. Só para campanhas com IA proativa habilitada
+    // (controle de custo — evita disparo-surpresa de orquestração).
+    if (dossier && saved) {
+      try {
+        const { data: camp } = await supabase.from('campaigns')
+          .select('"proactiveMonitoringEnabled"').eq('id', campaignId).maybeSingle();
+        if ((camp as any)?.proactiveMonitoringEnabled) {
+          fireOrchestration(supabase, {
+            campaignId,
+            source: 'intel_dossier_saved',
+            intent: `Um novo dossiê de Inteligência Competitiva sobre "${nome}"${cargo ? ` (${cargo})` : ''} acabou de ser gerado. ` +
+              `Use a ferramenta get_competitive_intel para lê-lo, analise os pontos fracos e ameaças do adversário e produza ` +
+              `recomendações estratégicas ACIONÁVEIS para a NOSSA campanha (bairros/temas/conteúdo). ` +
+              `Publique os 1-3 alertas mais importantes no war room. Seja eficiente: no máximo 3 rodadas.`,
+          });
+        }
+      } catch { /* gatilho é best-effort, nunca quebra a resposta */ }
+    }
 
     return res.json({ intel: saved, provider: result.provider, model: result.model });
   });
