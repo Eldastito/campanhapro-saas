@@ -14,6 +14,9 @@
  */
 import { callAgent, AGENT_CONFIGS, BudgetExceededError } from './aiCallAgent';
 import { AGENT_INSTRUCTIONS, CAMPAIGN_MISSION, COMPETITIVE_INTELLIGENCE_GUIDELINE, CRISIS_DEFENSE_GUIDELINE } from './agentInstructions';
+import { READ_TOOL_DEFS, executeReadTool, isReadTool } from './agentReadTools';
+import { toolsForAgent } from './agentRegistry';
+import { retrieveContext } from '../server/modules/rag/knowledgeIngest';
 
 const MAX_ITERATIONS = 8;
 const MAX_RUN_BUDGET_CENTS = 200; // ~US$ 2 por execução do Manager (= ~R$ 11)
@@ -144,6 +147,60 @@ const buildSubAgentInstruction = (agentId: string): string => {
     return base + hint;
 };
 
+interface SubAgentResult { text: string; costCents: number; tokensIn: number; tokensOut: number; latencyMs: number; toolsUsed: string[]; }
+
+/**
+ * Roda UM sub-agente com as capacidades da Fase 1: injeta memória RAG no prompt,
+ * oferece as ferramentas de LEITURA pertinentes (registry), executa as que o
+ * agente chamar e faz um follow-up pra consolidar — para o sub-agente do
+ * orquestrador deixar de responder "no vácuo".
+ */
+async function runSubAgent(
+    supabaseAdmin: any, subAgentId: string, prompt: string,
+    ctx: { campaignId: string; userId?: string | null; managerRunId: string }
+): Promise<SubAgentResult> {
+    const { campaignId, userId, managerRunId } = ctx;
+
+    // RAG: memória relevante (best-effort, timeout interno).
+    let effectivePrompt = prompt;
+    const memoria = await retrieveContext(supabaseAdmin, campaignId, prompt, 4);
+    if (memoria) {
+        effectivePrompt = `CONTEXTO DA CAMPANHA (memória — use o relevante, não invente além disto):\n${memoria}\n\n---\n\n${prompt}`;
+    }
+
+    const tools = toolsForAgent(READ_TOOL_DEFS, subAgentId);
+    const sub = await callAgent(supabaseAdmin, subAgentId, effectivePrompt, {
+        campaignId, userId, managerRunId,
+        systemInstruction: buildSubAgentInstruction(subAgentId),
+        tools: tools.length ? tools : undefined,
+    });
+
+    let text = sub.text;
+    let costCents = sub.costCentsUsd, tokensIn = sub.tokensIn, tokensOut = sub.tokensOut, latencyMs = sub.latencyMs;
+    const toolsUsed: string[] = [];
+
+    const readCalls = (sub.toolCalls || []).filter((c: any) => isReadTool(c.function?.name));
+    if (readCalls.length) {
+        const results: { name: string; output: any }[] = [];
+        for (const c of readCalls) {
+            const name = c.function.name;
+            let cargs: any = {}; try { cargs = JSON.parse(c.function.arguments || '{}'); } catch { /* ignore */ }
+            toolsUsed.push(name);
+            results.push({ name, output: await executeReadTool(supabaseAdmin, campaignId, name, cargs) });
+        }
+        // Follow-up: alimenta os dados reais de volta pra resposta final do sub-agente.
+        const followup = await callAgent(
+            supabaseAdmin, subAgentId,
+            `${effectivePrompt}\n\n[DADOS REAIS CONSULTADOS]\n${results.map(r => `- ${r.name}: ${JSON.stringify(r.output).slice(0, 1500)}`).join('\n')}\n\nUse estes dados reais (não invente) e gere a resposta final.`,
+            { campaignId, userId, managerRunId, systemInstruction: buildSubAgentInstruction(subAgentId) }
+        );
+        if (followup.text) text = followup.text;
+        costCents += followup.costCentsUsd; tokensIn += followup.tokensIn; tokensOut += followup.tokensOut; latencyMs += followup.latencyMs;
+    }
+
+    return { text, costCents, tokensIn, tokensOut, latencyMs, toolsUsed };
+}
+
 export interface ManagerEvent {
     type: 'started' | 'manager_thinking' | 'tool_call' | 'tool_result' | 'iteration' | 'finalized' | 'error' | 'budget_exceeded';
     data: any;
@@ -263,19 +320,12 @@ export async function runManager({
                 }
                 emit(onEvent, 'tool_call', { agent: subAgentId, prompt: args.prompt, reason: args.reason });
                 try {
-                    const sub = await callAgent(
-                        supabaseAdmin, subAgentId, args.prompt,
-                        {
-                            campaignId, userId,
-                            managerRunId,
-                            systemInstruction: buildSubAgentInstruction(subAgentId),
-                        }
-                    );
-                    totalCost += sub.costCentsUsd;
+                    const sub = await runSubAgent(supabaseAdmin, subAgentId, args.prompt, { campaignId, userId, managerRunId });
+                    totalCost += sub.costCents;
                     totalIn += sub.tokensIn;
                     totalOut += sub.tokensOut;
-                    emit(onEvent, 'tool_result', { agent: subAgentId, response: sub.text, costCents: sub.costCentsUsd, latencyMs: sub.latencyMs });
-                    plan.push({ iteration: iterations, agent: subAgentId, prompt: args.prompt, reason: args.reason, response_excerpt: sub.text.slice(0, 300) });
+                    emit(onEvent, 'tool_result', { agent: subAgentId, response: sub.text, costCents: sub.costCents, latencyMs: sub.latencyMs, toolsUsed: sub.toolsUsed });
+                    plan.push({ iteration: iterations, agent: subAgentId, prompt: args.prompt, reason: args.reason, toolsUsed: sub.toolsUsed, response_excerpt: sub.text.slice(0, 300) });
                     return { call: c, response: sub.text };
                 } catch (e: any) {
                     emit(onEvent, 'tool_result', { agent: subAgentId, error: e?.message });
