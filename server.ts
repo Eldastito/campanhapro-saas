@@ -52,6 +52,7 @@ import { callAgent, BudgetExceededError } from './src/lib/aiCallAgent';
 import { runManager } from './src/lib/managerAgent';
 import { startProactiveMonitor } from './src/lib/proactiveMonitor';
 import { retrieveContext, ingestArtifact } from './src/server/modules/rag/knowledgeIngest';
+import { toolsForAgent } from './src/lib/agentRegistry';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -385,7 +386,8 @@ async function startServer() {
           campaignId,
           userId,
           systemInstruction,
-          tools: AGENT_TOOLS,
+          // Cada agente só enxerga as ferramentas pertinentes à sua função (registry).
+          tools: toolsForAgent(AGENT_TOOLS, agentId),
       });
       let textResult = aiResponse.text;
 
