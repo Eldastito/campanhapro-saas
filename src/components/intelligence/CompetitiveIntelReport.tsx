@@ -62,6 +62,7 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
         </div>
         <div className="text-right">
           <h2 className="text-lg font-bold text-rose-700">Dossiê do Adversário</h2>
+          {d.eleicaoAtual?.cargo && <p className="text-[11px] font-bold text-indigo-700">Eleição 2026: {d.eleicaoAtual.cargo}{d.eleicaoAtual.situacao ? ` · ${d.eleicaoAtual.situacao}` : ''}</p>}
           <p className="text-xs text-slate-500">Gerado em {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR')}</p>
           <p className="text-[10px] text-slate-400">Baseado em fontes públicas</p>
         </div>
@@ -133,7 +134,7 @@ const CompetitiveIntelReport: React.FC<Props> = ({ intel, cnpj, onClose }) => {
 
         {(d.noticiasRecentes?.length) > 0 && (
           <Block n={++n} title="Notícias Recentes">
-            <ul className="space-y-1.5">{d.noticiasRecentes.map((nws: any, i: number) => <li key={i} className="text-sm text-slate-700"><Newspaper className="h-3.5 w-3.5 inline text-slate-500" /> <b>{nws.titulo}</b> <span className="text-slate-500">({nws.fonte}{nws.data ? `, ${nws.data}` : ''})</span></li>)}</ul>
+            <ul className="space-y-1.5">{d.noticiasRecentes.map((nws: any, i: number) => <li key={i} className="text-sm text-slate-700"><Newspaper className="h-3.5 w-3.5 inline text-slate-500" /> <b>{nws.titulo}</b> <span className="text-slate-500">({nws.fonte}{nws.data ? `, ${nws.data}` : ''})</span>{nws.contexto ? <span className="text-[10px] ml-1 px-1 rounded bg-slate-200 text-slate-700">{nws.contexto}</span> : null}</li>)}</ul>
           </Block>
         )}
 

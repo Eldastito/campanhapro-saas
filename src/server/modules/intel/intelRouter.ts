@@ -69,6 +69,13 @@ Pesquise EXCLUSIVAMENTE fontes públicas e cite-as: redes sociais públicas
 (Instagram, TikTok, X, YouTube, Facebook), portais de notícias regionais e
 nacionais, TSE/DivulgaCand, e a Biblioteca de Anúncios da Meta (Ad Library,
 que mantém anúncios político/sociais por ~7 anos).
+CONTEXTO TEMPORAL (crítico): estamos na ELEIÇÃO DE 2026 (governador, senador,
+deputados, presidente). 2024 foi eleição MUNICIPAL (prefeito/vereador). Para
+CADA fato (notícia, post, fala), informe a DATA e a qual ciclo/eleição se refere.
+PRIORIZE o ciclo de 2026 e o cargo que o alvo disputa AGORA. Rotule
+explicitamente o que for de ciclos passados (ex.: "[2024]"). NUNCA misture
+ciclos nem atribua a 2026 algo que foi de 2024. Se a data for incerta, escreva
+"data não confirmada".
 Regras: nunca invente dados — se não encontrar, diga "não encontrado". Nunca
 sugira ataque pessoal: foque em propostas, pautas, narrativas e desempenho.
 FORMATO OBRIGATÓRIO: responda APENAS com um objeto JSON válido — começando com
@@ -115,11 +122,12 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
       `- Tendência de busca (Google Trends) e pesquisas de intenção de voto citadas na imprensa.\n\n` +
       `Responda SOMENTE com este JSON:\n` +
       `{\n` +
-      `  "resumo": "2-4 frases do momento da candidatura",\n` +
-      `  "redesSociais": [{"rede":"Instagram|TikTok|Kwai|Telegram|LinkedIn|X|YouTube|Threads","handle":"@...","observacao":"tom/alcance/frequência"}],\n` +
+      `  "resumo": "2-4 frases do momento da candidatura NO CICLO DE 2026",\n` +
+      `  "eleicaoAtual": {"ano":2026,"cargo":"cargo que disputa em 2026","situacao":"pré-candidato/confirmado/incerto"},\n` +
+      `  "redesSociais": [{"rede":"Instagram|TikTok|Kwai|Telegram|LinkedIn|X|YouTube|Threads","handle":"@...","observacao":"tom/alcance; se citar um post específico, inclua a DATA e o ciclo [2026]/[2024]"}],\n` +
       `  "pautasPrincipais": ["..."],\n` +
       `  "narrativas": ["mensagens/bordões que está usando"],\n` +
-      `  "noticiasRecentes": [{"titulo":"...","fonte":"...","data":"AAAA-MM-DD","url":"...","resumo":"..."}],\n` +
+      `  "noticiasRecentes": [{"titulo":"...","fonte":"...","data":"AAAA-MM-DD","contexto":"2026 | 2024 | não-eleitoral","url":"...","resumo":"..."}],\n` +
       `  "anunciosMeta": {"resumo":"o que aparece na Biblioteca de Anúncios","exemplos":["..."]},\n` +
       `  "tseDivulgacand": {"resumo":"o que consta no TSE/DivulgaCand","numero":"","partido":"","situacao":"deferido/indeferido/etc","bensDeclarados":"valor total e principais bens, se houver","doadores":["maiores doadores, se houver"],"maioresGastos":["maiores gastos/fornecedores, se houver"]},\n` +
       `  "pontosFortes": ["..."],\n` +

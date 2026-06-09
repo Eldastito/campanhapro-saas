@@ -145,6 +145,13 @@ const CompetitiveIntelPanel: React.FC = () => {
                         <pre className="text-xs text-slate-400 whitespace-pre-wrap max-h-48 overflow-y-auto">{it.narrative}</pre>
                       </div>
                     ) : (
+                      <>
+                      {d.eleicaoAtual && (d.eleicaoAtual.cargo || d.eleicaoAtual.situacao) && (
+                        <div className="mb-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-3 py-2 text-sm">
+                          <span className="text-indigo-300 font-bold">🗳️ Eleição 2026:</span> <span className="text-slate-200">{d.eleicaoAtual.cargo || '—'}</span>
+                          {d.eleicaoAtual.situacao ? <span className="text-slate-400"> · {d.eleicaoAtual.situacao}</span> : null}
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
                         <div>
                           <Section icon={Globe} title="Redes sociais">
@@ -211,11 +218,12 @@ const CompetitiveIntelPanel: React.FC = () => {
                           {d.processos?.length > 0 && <Section icon={ShieldAlert} title="Processos / sanções"><List items={d.processos} /></Section>}
                           {d.tendencia && <Section icon={TrendingUp} title="Tendência (busca/pesquisas)"><p className="text-sm text-slate-300">{d.tendencia}</p></Section>}
                           <Section icon={Newspaper} title="Notícias recentes">
-                            {(d.noticiasRecentes || []).length ? <ul className="text-sm text-slate-300 space-y-1">{d.noticiasRecentes.map((n: any, i: number) => <li key={i}>📰 <b>{n.titulo}</b> <span className="text-slate-500">({n.fonte}{n.data ? `, ${n.data}` : ''})</span> {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">link</a>}</li>)}</ul> : <p className="text-xs text-slate-600">—</p>}
+                            {(d.noticiasRecentes || []).length ? <ul className="text-sm text-slate-300 space-y-1">{d.noticiasRecentes.map((n: any, i: number) => <li key={i}>📰 <b>{n.titulo}</b> <span className="text-slate-500">({n.fonte}{n.data ? `, ${n.data}` : ''})</span>{n.contexto && <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded ml-1 ${String(n.contexto).includes('2026') ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-700 text-slate-400'}`}>{n.contexto}</span>} {n.url && <a href={n.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">link</a>}</li>)}</ul> : <p className="text-xs text-slate-600">—</p>}
                           </Section>
                           {(d.fontes || []).length > 0 && <p className="text-[10px] text-slate-600 mt-2">Fontes: {d.fontes.slice(0, 8).join(' · ')}</p>}
                         </div>
                       </div>
+                      </>
                     )}
                     <div className="flex justify-end gap-4 mt-3">
                       {it.dossier && (
