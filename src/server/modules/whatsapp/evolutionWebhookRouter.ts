@@ -155,33 +155,47 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
         event === 'SENDMESSAGE' ||         // SEND_MESSAGE
         event === 'MESSAGESUPSERT'         // messages.upsert / MESSAGES_UPSERT
       ) {
-        // Evolution v2 sends one message per event in `data`, but the shape varies.
-        const msgs = Array.isArray(data) ? data : Array.isArray(data?.messages) ? data.messages : [data];
+        // O shape varia entre versões: Node v2 (camelCase) e Evolution GO
+        // (PascalCase: Key/Message/RemoteJid/FromMe/PushName). Toleramos ambos —
+        // antes, o parser camelCase descartava as mensagens do GO (externalId
+        // vazio) e o bot nunca era acionado.
+        const msgs = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.messages) ? data.messages
+          : Array.isArray(data?.Messages) ? data.Messages
+          : [data];
         // Bot ao vivo: só dispara se a campanha tiver habilitado (trava de segurança).
         const { data: camp } = await supabaseAdmin.from('campaigns')
           .select('"voterBotEnabled", name, "electionRole"').eq('id', campaignId).maybeSingle();
         const botEnabled = !!(camp as any)?.voterBotEnabled && !!(inst as any).apiKey;
         for (const m of msgs) {
-          const direction: 'inbound' | 'outbound' = (m?.key?.fromMe || m?.fromMe) ? 'outbound' : 'inbound';
-          const remoteJid = String(m?.key?.remoteJid ?? m?.remoteJid ?? '');
+          const key = m?.key ?? m?.Key ?? {};
+          const msgObj = m?.message ?? m?.Message ?? {};
+          const fromMe = key.fromMe ?? key.FromMe ?? m?.fromMe ?? m?.FromMe ?? false;
+          const direction: 'inbound' | 'outbound' = fromMe ? 'outbound' : 'inbound';
+          const remoteJid = String(
+            key.remoteJid ?? key.RemoteJid ?? m?.remoteJid ?? m?.RemoteJid ?? m?.from ?? m?.From ?? '',
+          );
           const isGroup = remoteJid.includes('@g.us');
-          const externalId = remoteJid.replace(/@.*$/, '');
+          const externalId = remoteJid.replace(/@.*$/, '').replace(/\D+/g, '');
           if (!externalId) continue;
           const text =
-            m?.message?.conversation ??
-            m?.message?.extendedTextMessage?.text ??
-            m?.body ??
-            m?.text ??
+            msgObj.conversation ?? msgObj.Conversation ??
+            msgObj.extendedTextMessage?.text ?? msgObj.ExtendedTextMessage?.Text ??
+            m?.body ?? m?.Body ?? m?.text ?? m?.Text ??
+            m?.conversation ?? m?.Conversation ??
             '[mídia ou mensagem não-texto]';
-          const providerMessageId = String(m?.key?.id ?? m?.id ?? crypto.randomBytes(8).toString('hex'));
-          const tsRaw = Number(m?.messageTimestamp ?? m?.timestamp ?? 0);
+          const providerMessageId = String(
+            key.id ?? key.Id ?? key.ID ?? m?.id ?? m?.Id ?? crypto.randomBytes(8).toString('hex'),
+          );
+          const tsRaw = Number(m?.messageTimestamp ?? m?.MessageTimestamp ?? m?.timestamp ?? m?.Timestamp ?? 0);
           const receivedAt = tsRaw > 0
             ? new Date(tsRaw < 1e12 ? tsRaw * 1000 : tsRaw).toISOString()
             : new Date().toISOString();
           // pushName is the contact's WhatsApp profile name. Only meaningful
           // for inbound messages — on outbound it'd be our own profile name.
           const rawPushName = direction === 'inbound'
-            ? String(m?.pushName ?? m?.notifyName ?? '').trim()
+            ? String(m?.pushName ?? m?.PushName ?? m?.notifyName ?? m?.NotifyName ?? '').trim()
             : '';
           const pushName = rawPushName.length > 0 && rawPushName.length <= 80
             ? rawPushName

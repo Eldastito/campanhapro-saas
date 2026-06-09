@@ -8,6 +8,7 @@ import {
   sendText,
   setWebhook,
   isEvolutionConfigured,
+  findInstanceIdByName,
 } from '../integrations/evolutionApiClient';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
@@ -101,6 +102,7 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
         .insert({
           campaignId: cid,
           instanceName,
+          instanceId: evo.instanceId ?? null,   // UUID do GO — necessário p/ deletar depois
           displayName: displayName.trim(),
           status: 'qrcode',
           apiKey: evo.apiKey,
@@ -497,10 +499,15 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
         .eq('id', inst.id);
 
       // Limpeza no servidor Evolution em BACKGROUND (best-effort, não bloqueia a
-      // resposta nem o sumiço do número da lista).
+      // resposta nem o sumiço do número da lista). Se não temos o UUID salvo,
+      // descobrimos pelo nome (rota Admin) — senão o GO não remove a instância.
       if (inst.apiKey) {
-        void deleteInstance(inst.instanceName, inst.apiKey, inst.instanceId)
-          .catch((e) => console.warn('[WhatsApp] delete server cleanup falhou:', e?.message));
+        void (async () => {
+          let iid: string | null = inst.instanceId ?? null;
+          if (!iid) iid = await findInstanceIdByName(inst.instanceName).catch(() => null);
+          await deleteInstance(inst.instanceName, inst.apiKey, iid || undefined)
+            .catch((e) => console.warn('[WhatsApp] delete server cleanup falhou:', e?.message));
+        })();
       }
 
       await audit(supabaseAdmin, {

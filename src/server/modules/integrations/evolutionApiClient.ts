@@ -318,6 +318,26 @@ export async function setWebhook(instanceName: string, apiKey: string): Promise<
 }
 
 /**
+ * Descobre o UUID (instanceId) de uma instância pelo nome, via GET /instance/all
+ * (rota Admin, usa a GLOBAL key). Usado no delete quando não temos o id salvo —
+ * a rota /instance/delete/:id do GO exige o UUID. Tolerante a camelCase/PascalCase.
+ */
+export async function findInstanceIdByName(instanceName: string): Promise<string | null> {
+  if (!EVOLUTION_GLOBAL_API_KEY) return null;
+  try {
+    const all = await call<any>('GET', '/instance/all', undefined, EVOLUTION_GLOBAL_API_KEY);
+    const list: any[] = Array.isArray(all) ? all : (all?.data ?? all?.instances ?? all?.Data ?? []);
+    const match = (Array.isArray(list) ? list : []).find(
+      (i: any) => (i?.name ?? i?.Name ?? i?.instanceName ?? i?.InstanceName) === instanceName,
+    );
+    if (!match) return null;
+    return String(match.id ?? match.Id ?? match.ID ?? match.instanceId ?? '') || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Permanently delete an instance from the Evolution server.
  *
  * Evolution GO needs the UUID instance id (not the human name) for the
