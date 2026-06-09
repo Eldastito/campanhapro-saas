@@ -29,6 +29,7 @@ const CompetitiveIntelPanel: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [open, setOpen] = React.useState<string | null>(null);
+  const [memory, setMemory] = React.useState<{ total: number; bySource: Record<string, number>; recent: any[] } | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -36,8 +37,17 @@ const CompetitiveIntelPanel: React.FC = () => {
       const j = await r.json();
       if (r.ok) setList(j.adversaries || []);
     } catch { /* */ }
+    try {
+      const m = await authedFetch('/api/v1/intel/memory');
+      const mj = await m.json();
+      if (m.ok) setMemory(mj);
+    } catch { /* */ }
   }, []);
   React.useEffect(() => { load(); }, [load]);
+
+  const SOURCE_LABEL: Record<string, string> = {
+    'intel:adversary': 'Inteligência competitiva', 'consultant:report': 'Consultor IA', 'meeting:summary': 'Reuniões',
+  };
 
   const analisar = async () => {
     if (!form.name.trim()) { setError('Informe o nome do adversário.'); return; }
@@ -149,6 +159,19 @@ const CompetitiveIntelPanel: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Memória da Campanha (RAG) — o que os agentes já aprenderam */}
+      {memory && memory.total > 0 && (
+        <div className="bg-slate-900/40 border border-white/5 rounded-xl p-4 mt-2">
+          <p className="text-[11px] font-black uppercase tracking-widest text-emerald-400 mb-2">🧠 Memória da Campanha · {memory.total} item(ns) indexado(s)</p>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {Object.entries(memory.bySource).map(([s, n]) => (
+              <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">{SOURCE_LABEL[s] || s}: {n}</span>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-600">A IA consulta esta memória antes de gerar dossiês e análises. Cresce a cada uso dos agentes.</p>
         </div>
       )}
     </div>

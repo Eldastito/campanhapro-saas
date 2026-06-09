@@ -18,12 +18,28 @@ import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { searchMetaAds } from './metaAdLibrary';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 
+/** Remove recursivamente tags de citação <cite...> dos valores string do objeto. */
+function stripCites(v: any): any {
+  if (typeof v === 'string') return v.replace(/<\/?cite[^>]*>/gi, '').replace(/\s{2,}/g, ' ').trim();
+  if (Array.isArray(v)) return v.map(stripCites);
+  if (v && typeof v === 'object') { const o: any = {}; for (const k of Object.keys(v)) o[k] = stripCites(v[k]); return o; }
+  return v;
+}
+
 function parseJsonLoose(text: string): any | null {
   if (!text) return null;
-  let t = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  try { return JSON.parse(t); } catch { /* tenta recortar */ }
+  // 1) Remove as citações do web_search (quebram o JSON com aspas não-escapadas).
+  let t = text.replace(/<\/?cite[^>]*>/gi, '');
+  // 2) Remove cercas de markdown em qualquer posição (pode haver preâmbulo antes).
+  t = t.replace(/```json/gi, '').replace(/```/g, '');
+  // 3) Recorta do primeiro { ao último } (descarta texto antes/depois).
   const a = t.indexOf('{'); const b = t.lastIndexOf('}');
-  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch { /* */ } }
+  if (a >= 0 && b > a) t = t.slice(a, b + 1);
+  t = t.trim();
+  const tries = [t, t.replace(/,\s*([}\]])/g, '$1')]; // 2ª tentativa: remove vírgula sobrando
+  for (const cand of tries) {
+    try { return stripCites(JSON.parse(cand)); } catch { /* próxima */ }
+  }
   return null;
 }
 
@@ -34,7 +50,10 @@ nacionais, TSE/DivulgaCand, e a Biblioteca de Anúncios da Meta (Ad Library,
 que mantém anúncios político/sociais por ~7 anos).
 Regras: nunca invente dados — se não encontrar, diga "não encontrado". Nunca
 sugira ataque pessoal: foque em propostas, pautas, narrativas e desempenho.
-Responda SOMENTE com um objeto JSON válido, sem texto fora dele.`;
+FORMATO OBRIGATÓRIO: responda APENAS com um objeto JSON válido — começando com
+{ e terminando com }. NÃO escreva preâmbulo, NÃO use blocos markdown (\`\`\`),
+e NÃO inclua tags de citação como <cite ...> dentro dos valores. As URLs das
+fontes vão no array "fontes".`;
 
 export function createIntelRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -146,6 +165,21 @@ export function createIntelRouter(supabase: SupabaseClient): Router {
     });
 
     return res.json({ intel: saved, provider: result.provider, model: result.model });
+  });
+
+  // Memória da campanha (RAG) — o que os agentes já indexaram.
+  router.get('/memory', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data, error } = await supabase.from('knowledge_chunks')
+      .select('source, content, "createdAt"').eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false }).limit(200);
+    if (error) return res.json({ total: 0, bySource: {}, recent: [] });
+    const rows = data ?? [];
+    const bySource: Record<string, number> = {};
+    rows.forEach((r: any) => { bySource[r.source] = (bySource[r.source] || 0) + 1; });
+    const recent = rows.slice(0, 12).map((r: any) => ({ source: r.source, snippet: String(r.content || '').slice(0, 140), createdAt: r.createdAt }));
+    return res.json({ total: rows.length, bySource, recent });
   });
 
   router.get('/adversaries', async (req: Request, res: Response) => {

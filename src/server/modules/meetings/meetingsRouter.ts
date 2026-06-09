@@ -13,6 +13,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { enqueueTask } from '../paperclip/taskQueue';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { chatCompletion, isChatConfigured } from '../ai/chatCompletion';
+import { ingestArtifact } from '../rag/knowledgeIngest';
 
 function campaignIdOf(req: Request): string | undefined {
   return (req as any).user?.campaignId;
@@ -389,6 +390,17 @@ Foco em ações concretas e mensuráveis. Use o contexto da campanha para priori
           updatedAt: new Date().toISOString(),
         })
         .eq('id', req.params.id);
+
+      // RAG: indexa o resumo + decisões da reunião na memória da campanha.
+      void ingestArtifact(supabase, {
+        campaignId,
+        source: 'meeting:summary',
+        title: `Reunião: ${meeting.title || 'Sem título'}`,
+        text: [summary, highlights.length ? `Destaques: ${highlights.join('; ')}` : '',
+          actions.length ? `Ações: ${actions.map((a: any) => a.title || a.descricao || '').filter(Boolean).join('; ')}` : '']
+          .filter(Boolean).join('\n'),
+        metadata: { meetingId: req.params.id, title: meeting.title },
+      });
 
       return res.json({ ok: true, summary, highlights, actions });
     } catch (err: any) {
