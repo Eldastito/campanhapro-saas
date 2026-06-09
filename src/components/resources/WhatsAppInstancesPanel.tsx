@@ -100,6 +100,23 @@ export const WhatsAppInstancesPanel: React.FC = () => {
     return () => clearInterval(interval);
   }, [instances, qrModal]);
 
+  // Quando o modal de QR abre sem QR pronto (ex.: instância recém-reprovisionada),
+  // busca o QR algumas vezes em vez de spinner eterno.
+  React.useEffect(() => {
+    if (!qrModal || qrModal.qrCode) return;
+    let tries = 0;
+    const iv = setInterval(async () => {
+      tries += 1;
+      if (tries > 8) { clearInterval(iv); return; }
+      try {
+        const res = await authedFetch(`/api/v1/whatsapp/instances/${qrModal.instanceId}/qrcode`);
+        const j = await res.json();
+        if (res.ok && j.qrCode) { setQrModal(m => (m ? { ...m, qrCode: j.qrCode } : m)); clearInterval(iv); }
+      } catch { /* segue tentando */ }
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [qrModal]);
+
   const createInstance = async () => {
     if (newName.trim().length < 2) return;
     setCreating(true);

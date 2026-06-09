@@ -146,7 +146,35 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       if (!inst) return res.status(404).json({ error: 'instance_not_found' });
       if (!inst.apiKey) return res.status(409).json({ error: 'instance_not_provisioned' });
 
-      const result = await getQRCode(inst.instanceName, inst.apiKey);
+      let result: { qrCode: string | null; status: any };
+      try {
+        result = await getQRCode(inst.instanceName, inst.apiKey);
+      } catch (qrErr: any) {
+        // Token órfão: a instância sumiu do servidor Evolution (rebuild/reset/
+        // rotação de chave) mas continua no nosso banco → 401/404. Auto-cura:
+        // reprovisiona no servidor com um token novo e devolve um QR válido.
+        if (/_(401|404)\b|_(401|404):/.test(qrErr?.message || '')) {
+          console.warn('[WhatsApp] QR 401/404 — reprovisionando instância órfã', inst.id);
+          const newName = `${slugify(inst.instanceName)}_r${Date.now().toString(36)}`;
+          const evo = await createInstance(newName);
+          await supabaseAdmin.from('whatsapp_instances').update({
+            instanceName: newName,
+            apiKey: evo.apiKey,
+            instanceId: evo.instanceId,
+            status: 'qrcode',
+            lastQRCode: evo.qrCode ?? null,
+            updatedAt: new Date().toISOString(),
+          }).eq('id', inst.id);
+          await audit(supabaseAdmin, {
+            ...actorFromRequest(req),
+            action: 'whatsapp.instance.reprovisioned',
+            severity: 'warn',
+            metadata: { instanceId: inst.id, oldName: inst.instanceName, newName },
+          });
+          return res.json({ qrCode: evo.qrCode ?? null, status: 'qrcode', reprovisioned: true });
+        }
+        throw qrErr;
+      }
 
       await supabaseAdmin
         .from('whatsapp_instances')
@@ -156,7 +184,12 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ qrCode: result.qrCode, status: 'qrcode' });
     } catch (err: any) {
       console.error('[WhatsApp] qrcode:', err);
-      return res.status(500).json({ error: err.message });
+      const msg = err?.message || 'erro';
+      // GLOBAL key inválida ou servidor fora → mensagem acionável (sem loop).
+      if (/_(401|403)\b|_(401|403):/.test(msg)) {
+        return res.status(502).json({ error: 'evolution_auth_failed', detail: 'O servidor WhatsApp recusou a autenticação. Verifique EVOLUTION_GLOBAL_API_KEY no servidor.' });
+      }
+      return res.status(500).json({ error: msg });
     }
   });
 
