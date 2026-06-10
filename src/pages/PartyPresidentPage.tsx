@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned, ShieldCheck,
-  Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity,
+  Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,7 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
  * as abas dele. Fase 1: provisão do partido + lista de candidatos + adicionar.
  */
 interface Candidate {
-  id: string; displayName: string; cargo?: string | null; regiao?: string | null;
+  id: string; displayName: string; cargo?: string | null; regiao?: string | null; phone?: string | null;
   status: string; valorRecebido?: number; campaignId?: string | null; inviteToken?: string | null;
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
   coordCount?: number; leaderCount?: number; valorAlocado?: number;
@@ -104,24 +104,25 @@ const PartyPresidentPage: React.FC = () => {
   const [proofData, setProofData] = React.useState<ProofData | null>(null);
   const [proofLoading, setProofLoading] = React.useState(false);
   const [lightbox, setLightbox] = React.useState<string | null>(null);
-  const [valveBusy, setValveBusy] = React.useState(false);
+  const [valveBusy, setValveBusy] = React.useState<string | null>(null);
 
-  const setValve = async (decision: 'liberado' | 'retido' | 'cortado') => {
-    if (!proofFor) return;
+  // Válvula de repasse — funciona tanto no modal de prova quanto inline (aba Repasses).
+  const setValve = async (decision: 'liberado' | 'retido' | 'cortado', cand?: Candidate) => {
+    const target = cand || proofFor;
+    if (!target) return;
     let note: string | null = null;
     if (decision !== 'liberado') {
       note = window.prompt(decision === 'retido' ? 'Motivo para SEGURAR o repasse (opcional):' : 'Motivo para CORTAR o repasse (opcional):') || null;
     }
-    setValveBusy(true);
+    setValveBusy(target.id);
     try {
-      const r = await authedFetch(`/api/v1/party/candidates/${proofFor.id}/valve`, { method: 'POST', body: JSON.stringify({ decision, note }) });
+      const r = await authedFetch(`/api/v1/party/candidates/${target.id}/valve`, { method: 'POST', body: JSON.stringify({ decision, note }) });
       if (r.ok) {
-        setProofFor({ ...proofFor, repasseStatus: decision, valveNote: note });
-        setCandidates((prev) => prev.map((c) => (c.id === proofFor.id ? { ...c, repasseStatus: decision, valveNote: note } : c)));
-        await openProof({ ...proofFor, repasseStatus: decision }); // recarrega log
+        setCandidates((prev) => prev.map((c) => (c.id === target.id ? { ...c, repasseStatus: decision, valveNote: note } : c)));
+        if (proofFor && proofFor.id === target.id) { setProofFor({ ...proofFor, repasseStatus: decision, valveNote: note }); await openProof({ ...proofFor, repasseStatus: decision }); }
       }
     } catch { /* */ }
-    finally { setValveBusy(false); }
+    finally { setValveBusy(null); }
   };
 
   const openProof = async (c: Candidate) => {
@@ -182,10 +183,19 @@ const PartyPresidentPage: React.FC = () => {
     } finally { setImporting(false); }
   };
 
+  const inviteUrl = (token: string) => `${window.location.origin}/cadastro/partido/${token}`;
   const copyLink = (token?: string | null) => {
     if (!token) return;
-    const url = `${window.location.origin}/cadastro/partido/${token}`;
-    navigator.clipboard?.writeText(url).then(() => { setCopied(token); setTimeout(() => setCopied(null), 1500); }, () => {});
+    navigator.clipboard?.writeText(inviteUrl(token)).then(() => { setCopied(token); setTimeout(() => setCopied(null), 1500); }, () => {});
+  };
+  // Abre o WhatsApp já com a mensagem e o link de cadastro. Usa o telefone do
+  // candidato se houver; senão abre o WhatsApp pra escolher o contato.
+  const sendWhatsApp = (c: Candidate) => {
+    if (!c.inviteToken) return;
+    const msg = `Olá, ${c.displayName}! Faça seu cadastro no ${party?.name || 'partido'} por este link (seu nome já está reservado, é só criar a senha): ${inviteUrl(c.inviteToken)}`;
+    const phone = (c.phone || '').replace(/\D/g, '');
+    const wa = phone ? `https://wa.me/${phone.length <= 11 ? '55' + phone : phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    window.open(wa, '_blank');
   };
 
   const saveRepasse = async () => {
@@ -293,6 +303,12 @@ const PartyPresidentPage: React.FC = () => {
                     </span>
                   )}
                   {c.status === 'pending' && c.inviteToken && (
+                    <button onClick={() => sendWhatsApp(c)} title="Enviar convite no WhatsApp"
+                      className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-300 font-bold">
+                      <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                    </button>
+                  )}
+                  {c.status === 'pending' && c.inviteToken && (
                     <button onClick={() => copyLink(c.inviteToken)} title="Copiar link de cadastro"
                       className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">
                       {copied === c.inviteToken ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copiado</> : <><Link2 className="w-3.5 h-3.5" /> Link</>}
@@ -394,18 +410,34 @@ const PartyPresidentPage: React.FC = () => {
               const recebido = Number(c.valorRecebido) || 0;
               const restante = recebido - (Number(c.valorAlocado) || 0);
               return (
-              <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-bold text-white truncate">{c.displayName}</p>
-                  <p className="text-xs text-slate-400">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'} · 🎯 {c.metasDone}/{c.metasTotal} metas</p>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <div className="text-right">
-                    <p className="text-lg font-black text-white leading-none">{brl(recebido)}</p>
-                    {recebido > 0 && <p className={`text-[11px] font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? `${brl(restante)} a justificar` : 'tudo alocado ✅'}</p>}
+              <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-bold text-white truncate flex items-center gap-2">{c.displayName} <ValveChip status={c.repasseStatus} /></p>
+                    <p className="text-xs text-slate-400">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'} · 🎯 {c.metasDone}/{c.metasTotal} metas</p>
                   </div>
-                  <button onClick={() => openRepasse(c)}
-                    className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300"><Wallet className="w-3.5 h-3.5" /> Repasse</button>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <p className="text-lg font-black text-white leading-none">{brl(recebido)}</p>
+                      {recebido > 0 && <p className={`text-[11px] font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? `${brl(restante)} a justificar` : 'tudo alocado ✅'}</p>}
+                    </div>
+                    <button onClick={() => openRepasse(c)}
+                      className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300"><Wallet className="w-3.5 h-3.5" /> Repasse</button>
+                  </div>
+                </div>
+                {/* Válvula inline: liberar / segurar / cortar o repasse */}
+                <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] text-slate-500 mr-1">Válvula:</span>
+                  {(['liberado', 'retido', 'cortado'] as const).map((d) => {
+                    const active = (c.repasseStatus || 'liberado') === d;
+                    return (
+                      <button key={d} onClick={() => setValve(d, c)} disabled={valveBusy === c.id}
+                        className={`text-[11px] font-bold rounded-lg px-2.5 py-1 border disabled:opacity-50 ${active ? VALVE_META[d].cls : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>
+                        {d === 'liberado' ? '✅ Liberar' : d === 'retido' ? '⏸️ Segurar' : '⛔ Cortar'}
+                      </button>
+                    );
+                  })}
+                  {valveBusy === c.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
                 </div>
               </div>
               );
@@ -612,7 +644,7 @@ const PartyPresidentPage: React.FC = () => {
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {(['liberado', 'retido', 'cortado'] as const).map((d) => (
-                  <button key={d} onClick={() => setValve(d)} disabled={valveBusy}
+                  <button key={d} onClick={() => setValve(d)} disabled={!!valveBusy}
                     className={`text-xs font-bold rounded-lg px-2 py-2 border disabled:opacity-50 transition-colors ${
                       proofFor.repasseStatus === d || (!proofFor.repasseStatus && d === 'liberado')
                         ? VALVE_META[d].cls
