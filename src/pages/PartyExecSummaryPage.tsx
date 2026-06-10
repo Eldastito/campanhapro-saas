@@ -99,7 +99,8 @@ const PartyExecSummaryPage: React.FC = () => {
         <div className="page-break" />
 
         <Sec n={7} title="Modelo de negócio">
-          <P><b>Plano Partido: R$ 2.500/mês — candidatos ilimitados, implementação e suporte inclusos.</b> O valor cobre a estrutura/infra. O retorno real vem do <b>upsell</b>: cada candidato dentro da plataforma é um lead para os planos completos do CampanhaPro (R$ 10k / 15k / 20k <b>por mês, por candidato</b>). É um clássico <b>land-and-expand</b>: a porta entra barata, o caixa vem das evoluções.</P>
+          <P><b>Plano Partido — assinatura mensal, preço sob proposta conforme o tamanho e a necessidade do partido.</b> O modelo é desenhado para a mensalidade do partido cobrir a estrutura/infra, com retorno real vindo do <b>upsell</b>: cada candidato dentro da plataforma é um lead para os planos completos do CampanhaPro (R$ 10k / 15k / 20k <b>por mês, por candidato</b>). É um clássico <b>land-and-expand</b>: a porta entra barata, o caixa vem das evoluções.</P>
+          <p className="text-[11px] text-slate-500 italic leading-relaxed">Cliente-piloto (validação): condição especial de R$ 2.500/mês com candidatos ilimitados — não é tabela definitiva do produto; a precificação padrão será calibrada por porte de partido.</p>
         </Sec>
 
         <Sec n={8} title="A oportunidade">

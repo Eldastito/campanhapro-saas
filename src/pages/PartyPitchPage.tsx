@@ -28,6 +28,13 @@ const Bullet: React.FC<{ icon: any; title: string; children: React.ReactNode }> 
 );
 
 const PartyPitchPage: React.FC = () => {
+  // Preço/condição vêm por parâmetro de URL para a proposta ser reaproveitável
+  // por cliente (ex.: /proposta/partido?preco=2.500&periodo=mês&cond=Candidatos%20ilimitados).
+  // Sem parâmetro, mostra "Sob proposta" — nada de preço chumbado.
+  const q = new URLSearchParams(window.location.search);
+  const preco = q.get('preco');
+  const periodo = q.get('periodo') || 'mês';
+  const cond = q.get('cond') || (preco ? 'Candidatos ilimitados · tudo incluso' : 'Conforme o tamanho do partido');
   return (
     <div id="party-pitch" className="min-h-screen bg-slate-100 text-slate-900 print:bg-white">
       <style>{`
@@ -145,10 +152,10 @@ const PartyPitchPage: React.FC = () => {
         {/* 6. INVESTIMENTO */}
         <Sec n={6} title="Investimento">
           <div className="rounded-2xl border-2 border-indigo-400 bg-indigo-50 p-6 text-center">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Plano Partido — tudo incluso</p>
-            <p className="text-4xl font-black text-slate-900 mt-1">R$ 2.500<span className="text-lg font-bold text-slate-500"> /mês</span></p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Plano Partido</p>
+            <p className="text-4xl font-black text-slate-900 mt-1">{preco ? <>R$ {preco}<span className="text-lg font-bold text-slate-500"> /{periodo}</span></> : <span className="text-2xl">Sob proposta</span>}</p>
+            <p className="text-[12px] text-slate-600 mt-1">{cond}</p>
             <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 mt-3 text-[12px] text-slate-700">
-              <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Candidatos <b>ilimitados</b></span>
               <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Implementação inclusa</span>
               <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Suporte incluso</span>
               <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Telão ao vivo</span>
@@ -156,8 +163,9 @@ const PartyPitchPage: React.FC = () => {
           </div>
           <p className="text-[12px] text-slate-600 mt-3 flex items-start gap-1.5">
             <ArrowRight className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-            Adicione quantos candidatos quiser, quando quiser. E cada candidato pode evoluir para o <b>CampanhaPro completo</b> (CRM + IA + Inteligência) quando precisar de mais.
+            Adicione candidatos conforme o plano, e cada candidato pode evoluir para o <b>CampanhaPro completo</b> (CRM + IA + Inteligência) quando precisar de mais.
           </p>
+          <p className="text-[10px] text-slate-400 mt-2">Valores e condições sob proposta, conforme o tamanho e a necessidade do partido.</p>
         </Sec>
 
         {/* CTA */}
