@@ -45,12 +45,12 @@ const STATUS_LABEL: Record<string, string> = { pending: 'Aguardando cadastro', a
 const TABS = ['Candidatos', 'Ranking', 'Repasses', 'Comprovação', 'Telão'];
 
 const Stat: React.FC<{ icon: any; label: string; value: React.ReactNode; from: string; to: string }> = ({ icon: Icon, label, value, from, to }) => (
-  <div className={`bg-gradient-to-br ${from} ${to} p-5 rounded-3xl border border-white/10`}>
-    <div className="flex items-center justify-between">
-      <p className="text-xs text-slate-300 font-bold uppercase tracking-wider">{label}</p>
-      <Icon className="w-5 h-5 text-white/70" />
+  <div className={`bg-gradient-to-br ${from} ${to} p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-white/10`}>
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-[10px] sm:text-xs text-slate-300 font-bold uppercase tracking-wider truncate">{label}</p>
+      <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white/70 shrink-0" />
     </div>
-    <p className="text-3xl font-black text-white mt-2">{value}</p>
+    <p className="text-xl sm:text-3xl font-black text-white mt-1 sm:mt-2 break-words leading-tight">{value}</p>
   </div>
 );
 
@@ -242,29 +242,29 @@ const PartyPresidentPage: React.FC = () => {
   }
 
   return (
-    <div className="p-6 bg-[#0a0a0b] min-h-screen text-white font-sans">
+    <div className="p-4 sm:p-6 bg-[#0a0a0b] min-h-screen text-white font-sans">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Landmark className="text-indigo-400" /> Centro de Comando
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 sm:mb-8">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2 sm:gap-3 flex-wrap">
+            <span className="flex items-center gap-2"><Landmark className="text-indigo-400 w-6 h-6 shrink-0" /> Centro de Comando</span>
             {party.plan === 'pilot_courtesy' && (
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 align-middle">Cortesia · piloto</span>
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Cortesia · piloto</span>
             )}
           </h1>
-          <p className="text-gray-400">{party.name} · {user?.name}</p>
+          <p className="text-gray-400 text-sm truncate">{party.name} · {user?.name}</p>
         </div>
-        <div className="flex gap-3">
-          <button onClick={() => setImportOpen(true)} className="bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl text-slate-200 font-bold flex items-center gap-2"><Upload className="w-4 h-4" /> Importar</button>
-          <button onClick={() => setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/20">
-            <Plus className="w-4 h-4" /> Novo candidato
+        <div className="flex gap-2 w-full md:w-auto">
+          <button onClick={() => setImportOpen(true)} className="flex-1 md:flex-none justify-center bg-white/5 hover:bg-white/10 px-3 sm:px-4 py-2 rounded-xl text-slate-200 font-bold flex items-center gap-2 text-sm"><Upload className="w-4 h-4" /> Importar</button>
+          <button onClick={() => setAddOpen(true)} className="flex-1 md:flex-none justify-center bg-indigo-600 hover:bg-indigo-500 px-3 sm:px-5 py-2 rounded-xl font-bold flex items-center gap-2 text-sm shadow-lg shadow-indigo-600/20">
+            <Plus className="w-4 h-4" /> <span className="whitespace-nowrap">Novo</span>
           </button>
-          <button onClick={() => logout?.()} className="bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl text-slate-300 flex items-center gap-2"><LogOut className="w-4 h-4" /> Sair</button>
+          <button onClick={() => logout?.()} className="bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl text-slate-300 flex items-center gap-2 text-sm" title="Sair"><LogOut className="w-4 h-4" /></button>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
         <Stat icon={Users} label="Candidatos" value={candidates.length} from="from-indigo-600/20" to="to-blue-600/10" />
         <Stat icon={CheckCircle2} label="Já cadastrados" value={cadastrados} from="from-emerald-600/20" to="to-teal-600/10" />
         <Stat icon={Wallet} label="Total repassado" value={brl(totalRepassado)} from="from-amber-600/20" to="to-orange-600/10" />
@@ -272,10 +272,10 @@ const PartyPresidentPage: React.FC = () => {
       </div>
 
       {/* Tabs (isoladas — presidente só vê o que é dele) */}
-      <div className="flex gap-2 mb-6 border-b border-white/5">
+      <div className="flex gap-1 sm:gap-2 mb-6 border-b border-white/5 overflow-x-auto no-scrollbar">
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${tab === t ? 'border-indigo-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+            className={`px-3 sm:px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0 ${tab === t ? 'border-indigo-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
             {t}
           </button>
         ))}
@@ -290,12 +290,12 @@ const PartyPresidentPage: React.FC = () => {
         ) : (
           <div className="space-y-2">
             {candidates.map((c) => (
-              <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex items-center justify-between gap-3">
+              <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="min-w-0">
                   <p className="font-bold text-white truncate">{c.displayName}</p>
-                  <p className="text-xs text-slate-400">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'}</p>
+                  <p className="text-xs text-slate-400 truncate">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'}</p>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <ScoreChip s={c.score} />
                   {typeof c.metasDone === 'number' && (
                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${c.metasDone === c.metasTotal ? 'bg-emerald-500/15 text-emerald-300' : 'bg-purple-500/15 text-purple-300'}`} title={(c.metas || []).map((m) => `${m.done ? '✅' : '⬜'} ${m.label}`).join('\n')}>
@@ -464,12 +464,12 @@ const PartyPresidentPage: React.FC = () => {
               const hasMedia = !!(com?.hasPhoto || (c.checkinCount || 0) > 0);
               return (
                 <button key={c.id} onClick={() => openProof(c)}
-                  className="w-full text-left bg-[#1c2128] p-4 rounded-2xl border border-white/5 hover:border-white/20 flex items-center justify-between gap-3 transition-colors">
+                  className="w-full text-left bg-[#1c2128] p-4 rounded-2xl border border-white/5 hover:border-white/20 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 transition-colors">
                   <div className="min-w-0">
                     <p className="font-bold text-white truncate">{c.displayName}</p>
                     <p className="text-xs text-slate-400 truncate">{com?.address || (com?.lat ? 'Comitê com localização' : 'Sem comitê cadastrado')}</p>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 sm:shrink-0">
                     <ScoreChip s={c.score} />
                     <span className="text-xs text-slate-400">📸 {c.checkinCount || 0} check-ins</span>
                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.txt}</span>
