@@ -1,0 +1,32 @@
+GUIA DO PRESIDENTE — ROTEIRO DE NARRAÇÃO (LOCUÇÃO)
+Produto: CampanhaPro — Plano Partido | Público: presidente de partido
+Voz sugerida: pt-BR, feminina ou masculina, tom calmo e claro. Ritmo pausado.
+Gere 1 arquivo MP3 por cena (nomeie cena-01.mp3 ... cena-09.mp3).
+======================================================================
+
+[CENA 01 — ENTRAR (LOGIN)]
+Abra o site, digite seu e-mail e sua senha, e clique em Entrar. Pronto — você está no seu Centro de Comando.
+
+[CENA 02 — VISÃO GERAL]
+Aqui em cima você vê o resumo: quantos candidatos tem, quanto já repassou e como vão as metas. Embaixo ficam as abas.
+
+[CENA 03 — ABA CANDIDATOS]
+Na aba Candidatos você cadastra quem vai receber recurso. Clique em "Novo candidato" e preencha o nome. Depois clique em "WhatsApp" e mande o convite pra ele — o nome já vai travado, ele só cria a senha.
+
+[CENA 04 — ABA REPASSES (O RATEIO)]
+Aqui você lança o dinheiro que entregou e diz onde ele vai ser usado. O número vermelho "Restante a justificar" mostra quanto ainda não tem destino — é o seu alarme contra desvio.
+
+[CENA 05 — ABA RANKING]
+O Ranking mostra quem está trabalhando. Verde é candidato em dia, amarelo é atenção, vermelho é risco. Você vê de relance quem recebeu e quem está entregando.
+
+[CENA 06 — ABA COMPROVAÇÃO]
+Aqui está a prova de campo: as quatro fotos do comitê — fachada, interior, placa e a equipe no local — com o ponto no mapa. É como você confere, sem sair da cadeira, que o dinheiro virou estrutura de verdade.
+
+[CENA 07 — A VÁLVULA]
+Não gostou do que viu? Você pode Segurar ou Cortar o próximo repasse com um clique — e fica registrado. Tudo em dia? Libera.
+
+[CENA 08 — O TELÃO]
+Para reuniões, abra o Telão: um mapa ao vivo de todos os comitês, que se atualiza sozinho. É só projetar na TV.
+
+[CENA 09 — ENCERRAMENTO]
+É isso: cadastrar, repassar, conferir a prova e decidir. Qualquer dúvida, fale com a gente.
