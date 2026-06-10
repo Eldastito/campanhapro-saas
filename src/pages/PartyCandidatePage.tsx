@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {
-  Landmark, MapPin, Camera, CheckCircle2, Loader2, LogOut, Target, Building2, Navigation,
+  Landmark, MapPin, Camera, CheckCircle2, Loader2, LogOut, Target, Building2, Navigation, Sparkles, ArrowRight,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -242,6 +242,14 @@ const PartyCandidatePage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Teaser de upgrade — o candidato já é um tenant; o CampanhaPro completo é um passo. */}
+      <a href="/" target="_blank" rel="noreferrer"
+        className="mt-6 block bg-gradient-to-br from-indigo-600/20 to-fuchsia-600/10 border border-indigo-500/30 rounded-3xl p-5 hover:border-indigo-400/50 transition-colors">
+        <p className="font-bold flex items-center gap-2 text-indigo-200"><Sparkles className="w-5 h-5 text-fuchsia-300" /> Quer a campanha completa?</p>
+        <p className="text-sm text-slate-300 mt-1">Este é o modo essencial de comprovação. O <b>CampanhaPro completo</b> traz IA estrategista, CRM de eleitores, pesquisa, agenda com voz, WhatsApp e mapa de calor — tudo já ligado à sua estrutura.</p>
+        <span className="inline-flex items-center gap-1.5 mt-3 text-sm font-bold text-fuchsia-300">Conhecer o plano completo <ArrowRight className="w-4 h-4" /></span>
+      </a>
     </div>
   );
 };

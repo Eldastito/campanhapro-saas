@@ -33,7 +33,7 @@ interface ProofData {
 
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
 const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
-interface Party { id: string; name: string; telaoToken?: string | null; }
+interface Party { id: string; name: string; telaoToken?: string | null; plan?: string | null; }
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
@@ -236,7 +236,12 @@ const PartyPresidentPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3"><Landmark className="text-indigo-400" /> Centro de Comando</h1>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <Landmark className="text-indigo-400" /> Centro de Comando
+            {party.plan === 'pilot_courtesy' && (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 align-middle">Cortesia · piloto</span>
+            )}
+          </h1>
           <p className="text-gray-400">{party.name} · {user?.name}</p>
         </div>
         <div className="flex gap-3">
