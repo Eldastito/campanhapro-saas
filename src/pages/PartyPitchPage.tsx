@@ -143,23 +143,20 @@ const PartyPitchPage: React.FC = () => {
         </Sec>
 
         {/* 6. INVESTIMENTO */}
-        <Sec n={6} title="Investimento — 3 modelos">
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { t: 'Por Assento', d: 'Valor por candidato/mês, com desconto por volume. Ideal para crescer aos poucos.', tag: 'recorrente' },
-              { t: 'Pacote por Ciclo', d: 'Valor fechado por temporada eleitoral, time todo incluso. Previsibilidade total.', tag: 'recomendado', hi: true },
-              { t: 'Base + Upgrade', d: 'Entrada baixa por candidato; cada um pode evoluir para o CampanhaPro completo.', tag: 'flexível' },
-            ].map((m, i) => (
-              <div key={i} className={`rounded-xl p-4 border ${m.hi ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200'}`}>
-                <p className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${m.hi ? 'text-indigo-600' : 'text-slate-400'}`}>{m.tag}</p>
-                <p className="text-sm font-black text-slate-900">{m.t}</p>
-                <p className="text-[11px] text-slate-600 mt-1 leading-snug">{m.d}</p>
-              </div>
-            ))}
+        <Sec n={6} title="Investimento">
+          <div className="rounded-2xl border-2 border-indigo-400 bg-indigo-50 p-6 text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">Plano Partido — tudo incluso</p>
+            <p className="text-4xl font-black text-slate-900 mt-1">R$ 2.500<span className="text-lg font-bold text-slate-500"> /mês</span></p>
+            <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 mt-3 text-[12px] text-slate-700">
+              <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Candidatos <b>ilimitados</b></span>
+              <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Implementação inclusa</span>
+              <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Suporte incluso</span>
+              <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Telão ao vivo</span>
+            </div>
           </div>
-          <p className="text-[12px] text-slate-600 mt-3 flex items-center gap-1.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            Proposta sob medida conforme o número de candidatos. <b className="ml-1">Pacote fechado por ciclo recomendado para o seu partido.</b>
+          <p className="text-[12px] text-slate-600 mt-3 flex items-start gap-1.5">
+            <ArrowRight className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+            Adicione quantos candidatos quiser, quando quiser. E cada candidato pode evoluir para o <b>CampanhaPro completo</b> (CRM + IA + Inteligência) quando precisar de mais.
           </p>
         </Sec>
 
