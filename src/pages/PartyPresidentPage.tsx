@@ -15,8 +15,11 @@ interface Candidate {
   id: string; displayName: string; cargo?: string | null; regiao?: string | null;
   status: string; valorRecebido?: number; campaignId?: string | null; inviteToken?: string | null;
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
-  coordCount?: number; leaderCount?: number;
+  coordCount?: number; leaderCount?: number; valorAlocado?: number;
 }
+
+const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
+const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
 interface Party { id: string; name: string; }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -54,8 +57,15 @@ const PartyPresidentPage: React.FC = () => {
   const [importing, setImporting] = React.useState(false);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [repasseFor, setRepasseFor] = React.useState<Candidate | null>(null);
-  const [repForm, setRepForm] = React.useState({ valor: '', data: '', destino: 'comite', descricao: '' });
+  const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
+  const [repItems, setRepItems] = React.useState<{ categoria: string; valor: string }[]>([]);
   const [savingRep, setSavingRep] = React.useState(false);
+
+  const openRepasse = (c: Candidate) => {
+    setRepasseFor(c);
+    setRepForm({ valor: '', data: '', descricao: '' });
+    setRepItems(DEFAULT_CATS.map((categoria) => ({ categoria, valor: '' })));
+  };
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -107,14 +117,15 @@ const PartyPresidentPage: React.FC = () => {
 
   const saveRepasse = async () => {
     if (!repasseFor) return;
-    const v = Number(repForm.valor.replace(/\./g, '').replace(',', '.'));
+    const v = parseBRL(repForm.valor);
     if (!(v > 0)) return;
+    const itens = repItems.map((it) => ({ categoria: it.categoria.trim(), valor: parseBRL(it.valor) })).filter((it) => it.categoria && it.valor > 0);
     setSavingRep(true);
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${repasseFor.id}/repasses`, {
-        method: 'POST', body: JSON.stringify({ ...repForm, valor: v }),
+        method: 'POST', body: JSON.stringify({ valor: v, data: repForm.data, descricao: repForm.descricao, itens }),
       });
-      if (r.ok) { setRepasseFor(null); setRepForm({ valor: '', data: '', destino: 'comite', descricao: '' }); await load(); }
+      if (r.ok) { setRepasseFor(null); await load(); }
     } finally { setSavingRep(false); }
   };
 
@@ -208,7 +219,7 @@ const PartyPresidentPage: React.FC = () => {
                       {copied === c.inviteToken ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copiado</> : <><Link2 className="w-3.5 h-3.5" /> Link</>}
                     </button>
                   )}
-                  <button onClick={() => { setRepasseFor(c); setRepForm({ valor: '', data: '', destino: 'comite', descricao: '' }); }}
+                  <button onClick={() => openRepasse(c)}
                     className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300" title="Registrar repasse">
                     <Wallet className="w-3.5 h-3.5" /> Repasse
                   </button>
@@ -226,20 +237,30 @@ const PartyPresidentPage: React.FC = () => {
           <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para registrar repasses.</div>
         ) : (
           <div className="space-y-2">
-            <p className="text-sm text-slate-400 mb-1">Total repassado: <b className="text-white">{brl(totalRepassado)}</b> · ordenado por valor</p>
-            {[...candidates].sort((a, b) => (Number(b.valorRecebido) || 0) - (Number(a.valorRecebido) || 0)).map((c) => (
+            <p className="text-sm text-slate-400 mb-1">
+              Total repassado: <b className="text-white">{brl(totalRepassado)}</b>
+              {' · '}A justificar: <b className="text-rose-400">{brl(candidates.reduce((s, c) => s + Math.max(0, (Number(c.valorRecebido) || 0) - (Number(c.valorAlocado) || 0)), 0))}</b>
+            </p>
+            {[...candidates].sort((a, b) => (Number(b.valorRecebido) || 0) - (Number(a.valorRecebido) || 0)).map((c) => {
+              const recebido = Number(c.valorRecebido) || 0;
+              const restante = recebido - (Number(c.valorAlocado) || 0);
+              return (
               <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-bold text-white truncate">{c.displayName}</p>
                   <p className="text-xs text-slate-400">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'} · 🎯 {c.metasDone}/{c.metasTotal} metas</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-lg font-black text-white">{brl(Number(c.valorRecebido) || 0)}</span>
-                  <button onClick={() => { setRepasseFor(c); setRepForm({ valor: '', data: '', destino: 'comite', descricao: '' }); }}
+                  <div className="text-right">
+                    <p className="text-lg font-black text-white leading-none">{brl(recebido)}</p>
+                    {recebido > 0 && <p className={`text-[11px] font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? `${brl(restante)} a justificar` : 'tudo alocado ✅'}</p>}
+                  </div>
+                  <button onClick={() => openRepasse(c)}
                     className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300"><Wallet className="w-3.5 h-3.5" /> Repasse</button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )
       )}
@@ -294,34 +315,55 @@ const PartyPresidentPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: registrar repasse */}
-      {repasseFor && (
+      {/* Modal: registrar repasse com RATEIO */}
+      {repasseFor && (() => {
+        const total = parseBRL(repForm.valor);
+        const alocado = repItems.reduce((s, it) => s + parseBRL(it.valor), 0);
+        const restante = total - alocado;
+        return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !savingRep && setRepasseFor(null)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <h4 className="font-bold text-white">Registrar repasse</h4>
               <button onClick={() => setRepasseFor(null)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
             <p className="text-xs text-slate-400 mb-3">Para <b className="text-slate-200">{repasseFor.displayName}</b></p>
-            <div className="space-y-2">
-              <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor (ex.: 1.500,00) *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-              <div className="grid grid-cols-2 gap-2">
-                <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-                <select value={repForm.destino} onChange={(e) => setRepForm({ ...repForm, destino: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white">
-                  <option value="comite">Aluguel do comitê</option>
-                  <option value="coordenador">Coordenador</option>
-                  <option value="lideres">Líderes</option>
-                  <option value="outro">Outro</option>
-                </select>
-              </div>
-              <input value={repForm.descricao} onChange={(e) => setRepForm({ ...repForm, descricao: e.target.value })} placeholder="Descrição (opcional)" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor total recebido *" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold" />
+              <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
             </div>
-            <button onClick={saveRepasse} disabled={savingRep || !repForm.valor.trim()} className="w-full mt-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
-              {savingRep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />} Registrar
+
+            <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Como o dinheiro será aplicado</p>
+            <div className="space-y-1.5 mb-2">
+              {repItems.map((it, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={it.categoria} onChange={(e) => setRepItems(repItems.map((x, j) => j === i ? { ...x, categoria: e.target.value } : x))}
+                    placeholder="Item" className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-slate-200" />
+                  <input value={it.valor} onChange={(e) => setRepItems(repItems.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))}
+                    placeholder="R$" className="w-28 bg-slate-950 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white text-right" />
+                  <button onClick={() => setRepItems(repItems.filter((_, j) => j !== i))} className="text-slate-500 hover:text-rose-400"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setRepItems([...repItems, { categoria: '', valor: '' }])} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 mb-3"><Plus className="w-3.5 h-3.5" /> Adicionar item</button>
+
+            {/* Resumo: alocado × restante (o sinal de alerta) */}
+            <div className="rounded-xl bg-slate-950 border border-white/10 p-3 mb-3 text-sm">
+              <div className="flex justify-between text-slate-400"><span>Recebido</span><span className="text-white font-bold">{brl(total)}</span></div>
+              <div className="flex justify-between text-slate-400"><span>Alocado</span><span className="text-slate-200">{brl(alocado)}</span></div>
+              <div className={`flex justify-between font-black mt-1 pt-1 border-t border-white/5 ${restante > 0.005 ? 'text-rose-400' : restante < -0.005 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                <span>{restante < -0.005 ? 'Excede o recebido!' : 'Restante a justificar'}</span><span>{brl(restante)}</span>
+              </div>
+            </div>
+
+            <button onClick={saveRepasse} disabled={savingRep || !(total > 0)} className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+              {savingRep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />} Registrar repasse
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

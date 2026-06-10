@@ -139,20 +139,29 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const party = await candidateOfPresident(userId, req.params.id);
     if (!party) return res.status(404).json({ error: 'not_found' });
-    const { valor, data, destino, descricao } = req.body || {};
+    const { valor, data, descricao, itens } = req.body || {};
     const v = Number(valor);
     if (!(v > 0)) return res.status(400).json({ error: 'valor_invalido' });
+    // Rateio: cada item = { categoria, valor }. Só entram os com valor > 0.
+    const cleanItens = Array.isArray(itens)
+      ? itens.map((i: any) => ({ categoria: String(i.categoria || '').slice(0, 60), valor: Number(i.valor) || 0 }))
+        .filter((i: any) => i.categoria && i.valor > 0)
+      : [];
     const { data: ins, error } = await supabase.from('party_repasses').insert({
       partyId: (party as any).id, candidateId: req.params.id, valor: v,
       data: /^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : null,
-      destino: destino?.trim() || null, descricao: descricao?.trim() || null, createdBy: userId,
+      descricao: descricao?.trim() || null, itens: cleanItens, createdBy: userId,
     }).select('*').single();
     if (error) return res.status(500).json({ error: error.message });
-    // recalcula o cache do total recebido
-    const { data: all } = await supabase.from('party_repasses').select('valor').eq('candidateId', req.params.id);
-    const total = (all || []).reduce((s: number, r: any) => s + Number(r.valor || 0), 0);
-    await supabase.from('party_candidates').update({ valorRecebido: total, updatedAt: new Date().toISOString() }).eq('id', req.params.id);
-    return res.json({ repasse: ins, total });
+    // recalcula caches: total recebido e total alocado (soma dos itens de todos os repasses)
+    const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', req.params.id);
+    const totalRecebido = (all || []).reduce((s: number, r: any) => s + Number(r.valor || 0), 0);
+    const totalAlocado = (all || []).reduce((s: number, r: any) =>
+      s + (Array.isArray(r.itens) ? r.itens.reduce((a: number, it: any) => a + Number(it.valor || 0), 0) : 0), 0);
+    await supabase.from('party_candidates').update({
+      valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
+    }).eq('id', req.params.id);
+    return res.json({ repasse: ins, total: totalRecebido, alocado: totalAlocado });
   });
 
   return router;
