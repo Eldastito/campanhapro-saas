@@ -250,6 +250,15 @@ const PartyCandidatePage: React.FC = () => {
         <p className="text-sm text-slate-300 mt-1">Este é o modo essencial de comprovação. O <b>CampanhaPro completo</b> traz IA estrategista, CRM de eleitores, pesquisa, agenda com voz, WhatsApp e mapa de calor — tudo já ligado à sua estrutura.</p>
         <span className="inline-flex items-center gap-1.5 mt-3 text-sm font-bold text-fuchsia-300">Conhecer o plano completo <ArrowRight className="w-4 h-4" /></span>
       </a>
+
+      {/* Compliance / LGPD — transparência, não vigilância */}
+      <div className="mt-6 mb-2 text-[11px] leading-relaxed text-slate-500 border-t border-white/5 pt-4">
+        <p className="font-bold text-slate-400 mb-1">Privacidade e transparência</p>
+        <p>
+          A foto e a localização do comitê/check-ins são registradas no ato apenas para <b>comprovar a aplicação dos recursos da campanha</b> ao presidente do seu partido — é prestação de contas, não monitoramento pessoal.
+          Os dados ficam armazenados com segurança e são usados só para essa finalidade (LGPD, art. 7º). Você pode falar com a coordenação do partido para corrigir ou remover informações.
+        </p>
+      </div>
     </div>
   );
 };
