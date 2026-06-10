@@ -169,6 +169,22 @@ const PartyCandidatePage: React.FC = () => {
         </div>
       )}
 
+      {/* Score do candidato — o mesmo que o presidente vê */}
+      {data.score && (
+        <div className={`mb-4 rounded-3xl p-4 border flex items-center gap-3 ${
+          data.score.level === 'green' ? 'bg-emerald-500/10 border-emerald-500/30'
+          : data.score.level === 'yellow' ? 'bg-amber-500/10 border-amber-500/30'
+          : 'bg-rose-500/10 border-rose-500/30'}`}>
+          <span className="text-3xl">{data.score.emoji}</span>
+          <div className="min-w-0">
+            <p className="font-black text-white">Seu índice de comprovação: {data.score.score}/100</p>
+            {data.score.reasons?.length
+              ? <p className="text-xs text-slate-300 mt-0.5">Para melhorar: {data.score.reasons.slice(0, 2).join(' · ')}</p>
+              : <p className="text-xs text-emerald-300 mt-0.5">Tudo em dia! Continue fazendo check-ins.</p>}
+          </div>
+        </div>
+      )}
+
       {/* Metas */}
       <div className="bg-gradient-to-br from-purple-600/15 to-fuchsia-600/10 border border-white/10 rounded-3xl p-5 mb-6">
         <div className="flex items-center justify-between mb-3">

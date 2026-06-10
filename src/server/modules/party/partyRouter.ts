@@ -11,6 +11,7 @@
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
+import { computeScore } from './score';
 
 const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
@@ -50,12 +51,18 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const candidateIds = candidates.map((c: any) => c.id);
     const committees: Record<string, any> = {};
     const checkinCount: Record<string, number> = {};
+    const lastCheckinAt: Record<string, string> = {};
     if (candidateIds.length) {
       const { data: coms } = await supabase.from('party_committees')
         .select('candidateId, address, lat, lng, photo, "geoSource"').in('candidateId', candidateIds);
       for (const cm of coms || []) committees[(cm as any).candidateId] = cm;
-      const { data: cks } = await supabase.from('party_checkins').select('candidateId').in('candidateId', candidateIds);
-      for (const ck of cks || []) checkinCount[(ck as any).candidateId] = (checkinCount[(ck as any).candidateId] || 0) + 1;
+      const { data: cks } = await supabase.from('party_checkins').select('candidateId, "createdAt"').in('candidateId', candidateIds);
+      for (const ck of cks || []) {
+        const k = (ck as any).candidateId;
+        checkinCount[k] = (checkinCount[k] || 0) + 1;
+        const at = (ck as any).createdAt;
+        if (at && (!lastCheckinAt[k] || at > lastCheckinAt[k])) lastCheckinAt[k] = at;
+      }
     }
 
     const enriched = candidates.map((c: any) => {
@@ -67,11 +74,20 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         { label: 'Coordenador na equipe', done: t.coord >= 1 },
         { label: '5 líderes ativos', done: t.lider >= 5 },
       ];
+      const score = computeScore({
+        status: c.status,
+        committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
+        checkinCount: checkinCount[c.id] || 0,
+        lastCheckinAt: lastCheckinAt[c.id] || null,
+        coordCount: t.coord, leaderCount: t.lider,
+        valorRecebido: Number(c.valorRecebido) || 0, valorAlocado: Number(c.valorAlocado) || 0,
+      });
       return {
         ...c, coordCount: t.coord, leaderCount: t.lider,
         committee: com ? { address: com.address, lat: com.lat, lng: com.lng, hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
-        checkinCount: checkinCount[c.id] || 0,
+        checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length,
+        score,
       };
     });
     return res.json({ party, candidates: enriched });
@@ -224,7 +240,15 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       { label: 'Cadastrar 1 coordenador', done: t.coord >= 1 },
       { label: 'Cadastrar 5 líderes', done: t.lider >= 5 },
     ];
-    return res.json({ candidate: cand, partyName: (party as any)?.name, committee: committee || null, checkins: checkins || [], metas });
+    const score = computeScore({
+      status: cand.status,
+      committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
+      checkinCount: (checkins || []).length,
+      lastCheckinAt: (checkins || [])[0]?.createdAt || null,
+      coordCount: t.coord, leaderCount: t.lider,
+      valorRecebido: Number(cand.valorRecebido) || 0, valorAlocado: Number(cand.valorAlocado) || 0,
+    });
+    return res.json({ candidate: cand, partyName: (party as any)?.name, committee: committee || null, checkins: checkins || [], metas, score });
   });
 
   router.post('/candidate/committee', async (req: Request, res: Response) => {

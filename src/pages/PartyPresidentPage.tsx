@@ -17,7 +17,12 @@ interface Candidate {
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
   coordCount?: number; leaderCount?: number; valorAlocado?: number;
   committee?: { address?: string; lat?: number; lng?: number; hasPhoto?: boolean; geoSource?: string | null } | null;
-  checkinCount?: number;
+  checkinCount?: number; lastCheckinAt?: string | null;
+  score?: ScoreInfo;
+}
+interface ScoreInfo {
+  score: number; level: 'green' | 'yellow' | 'red'; emoji: string; reasons: string[];
+  breakdown?: { cadastro: number; comite: number; atividade: number; equipe: number; contas: number };
 }
 interface ProofData {
   committee?: { address?: string | null; lat?: number | null; lng?: number | null; photo?: string | null; geoSource?: string | null; updatedAt?: string | null } | null;
@@ -46,6 +51,22 @@ const Stat: React.FC<{ icon: any; label: string; value: React.ReactNode; from: s
     <p className="text-3xl font-black text-white mt-2">{value}</p>
   </div>
 );
+
+const SCORE_CLS: Record<string, string> = {
+  green: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  yellow: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  red: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+};
+const ScoreChip: React.FC<{ s?: ScoreInfo; size?: 'sm' | 'md' }> = ({ s, size = 'sm' }) => {
+  if (!s) return null;
+  const tip = s.reasons.length ? s.reasons.map((r) => `• ${r}`).join('\n') : 'Tudo em dia ✅';
+  return (
+    <span title={tip}
+      className={`font-bold rounded-full border whitespace-nowrap ${SCORE_CLS[s.level]} ${size === 'md' ? 'text-sm px-3 py-1' : 'text-[11px] px-2 py-0.5'}`}>
+      {s.emoji} {s.score}
+    </span>
+  );
+};
 
 const PartyPresidentPage: React.FC = () => {
   const { user, logout } = useAuth();
@@ -228,6 +249,7 @@ const PartyPresidentPage: React.FC = () => {
                   <p className="text-xs text-slate-400">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
+                  <ScoreChip s={c.score} />
                   {typeof c.metasDone === 'number' && (
                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${c.metasDone === c.metasTotal ? 'bg-emerald-500/15 text-emerald-300' : 'bg-purple-500/15 text-purple-300'}`} title={(c.metas || []).map((m) => `${m.done ? '✅' : '⬜'} ${m.label}`).join('\n')}>
                       🎯 {c.metasDone}/{c.metasTotal}
@@ -309,6 +331,7 @@ const PartyPresidentPage: React.FC = () => {
                     <p className="text-xs text-slate-400 truncate">{com?.address || (com?.lat ? 'Comitê com localização' : 'Sem comitê cadastrado')}</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    <ScoreChip s={c.score} />
                     <span className="text-xs text-slate-400">📸 {c.checkinCount || 0} check-ins</span>
                     <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.txt}</span>
                     {hasMedia && <span className="text-[11px] text-indigo-300 font-bold whitespace-nowrap">Ver fotos →</span>}
@@ -424,12 +447,28 @@ const PartyPresidentPage: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setProofFor(null)}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
-              <div className="min-w-0">
-                <h4 className="font-bold text-white truncate">{proofFor.displayName}</h4>
-                <p className="text-xs text-slate-400">Comprovação de campo</p>
+              <div className="min-w-0 flex items-center gap-2">
+                <ScoreChip s={proofFor.score} size="md" />
+                <div className="min-w-0">
+                  <h4 className="font-bold text-white truncate">{proofFor.displayName}</h4>
+                  <p className="text-xs text-slate-400">Comprovação de campo</p>
+                </div>
               </div>
               <button onClick={() => setProofFor(null)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
+
+            {/* Por que esse score — os alertas do motor anti-fraude */}
+            {proofFor.score && proofFor.score.reasons.length > 0 && (
+              <div className="mb-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-amber-300 mb-1">Pontos de atenção</p>
+                <ul className="space-y-0.5">
+                  {proofFor.score.reasons.map((r, i) => <li key={i} className="text-xs text-amber-100/90 flex gap-1.5"><span>•</span><span>{r}</span></li>)}
+                </ul>
+              </div>
+            )}
+            {proofFor.score && proofFor.score.reasons.length === 0 && (
+              <div className="mb-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200 font-bold">✅ Tudo em dia — comprovação completa e contas alocadas.</div>
+            )}
 
             {proofLoading ? (
               <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>
