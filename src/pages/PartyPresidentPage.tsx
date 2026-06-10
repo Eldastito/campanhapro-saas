@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned, ShieldCheck,
-  Loader2, LogOut, X, CheckCircle2,
+  Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,7 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
  */
 interface Candidate {
   id: string; displayName: string; cargo?: string | null; regiao?: string | null;
-  status: string; valorRecebido?: number; campaignId?: string | null;
+  status: string; valorRecebido?: number; campaignId?: string | null; inviteToken?: string | null;
 }
 interface Party { id: string; name: string; }
 
@@ -47,6 +47,10 @@ const PartyPresidentPage: React.FC = () => {
   const [addOpen, setAddOpen] = React.useState(false);
   const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', phone: '' });
   const [adding, setAdding] = React.useState(false);
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [importText, setImportText] = React.useState('');
+  const [importing, setImporting] = React.useState(false);
+  const [copied, setCopied] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -75,6 +79,25 @@ const PartyPresidentPage: React.FC = () => {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
       if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', phone: '' }); setAddOpen(false); await load(); }
     } finally { setAdding(false); }
+  };
+
+  const importRows = async () => {
+    const rows = importText.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
+      const [displayName, cargo, regiao, phone] = line.split(/[;,\t]/).map((s) => (s || '').trim());
+      return { displayName, cargo, regiao, phone };
+    }).filter((r) => r.displayName);
+    if (!rows.length) return;
+    setImporting(true);
+    try {
+      const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
+      if (r.ok) { setImportText(''); setImportOpen(false); await load(); }
+    } finally { setImporting(false); }
+  };
+
+  const copyLink = (token?: string | null) => {
+    if (!token) return;
+    const url = `${window.location.origin}/cadastro/partido/${token}`;
+    navigator.clipboard?.writeText(url).then(() => { setCopied(token); setTimeout(() => setCopied(null), 1500); }, () => {});
   };
 
   const totalRepassado = candidates.reduce((s, c) => s + (Number(c.valorRecebido) || 0), 0);
@@ -113,6 +136,7 @@ const PartyPresidentPage: React.FC = () => {
           <p className="text-gray-400">{party.name} · {user?.name}</p>
         </div>
         <div className="flex gap-3">
+          <button onClick={() => setImportOpen(true)} className="bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl text-slate-200 font-bold flex items-center gap-2"><Upload className="w-4 h-4" /> Importar</button>
           <button onClick={() => setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/20">
             <Plus className="w-4 h-4" /> Novo candidato
           </button>
@@ -152,7 +176,13 @@ const PartyPresidentPage: React.FC = () => {
                   <p className="font-bold text-white">{c.displayName}</p>
                   <p className="text-xs text-slate-400">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'}</p>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
+                  {c.status === 'pending' && c.inviteToken && (
+                    <button onClick={() => copyLink(c.inviteToken)} title="Copiar link de cadastro"
+                      className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">
+                      {copied === c.inviteToken ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copiado</> : <><Link2 className="w-3.5 h-3.5" /> Link</>}
+                    </button>
+                  )}
                   <span className="text-sm text-slate-300">{brl(Number(c.valorRecebido) || 0)}</span>
                   <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${STATUS_BADGE[c.status] || STATUS_BADGE.pending}`}>{STATUS_LABEL[c.status] || c.status}</span>
                 </div>
@@ -189,6 +219,25 @@ const PartyPresidentPage: React.FC = () => {
             </div>
             <button onClick={addCandidate} disabled={adding || !form.displayName.trim()} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: importar planilha (cola) */}
+      {importOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !importing && setImportOpen(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-bold text-white">Importar candidatos</h4>
+              <button onClick={() => setImportOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-xs text-slate-400 mb-2">Cole uma linha por candidato, separando por vírgula:<br /><span className="text-slate-500">Nome, Cargo, Cidade, Telefone</span></p>
+            <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={8}
+              placeholder={'João Silva, Vereador, Niterói, 21999990000\nMaria Souza, Prefeita, São Gonçalo, 21988880000'}
+              className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono" />
+            <button onClick={importRows} disabled={importing || !importText.trim()} className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Importar candidatos
             </button>
           </div>
         </div>

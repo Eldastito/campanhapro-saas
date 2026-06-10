@@ -10,6 +10,9 @@
  */
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { randomBytes } from 'crypto';
+
+const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
 export function createPartyRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -51,7 +54,6 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
     const { displayName, cargo, regiao, phone } = req.body || {};
     if (!displayName?.trim()) return res.status(400).json({ error: 'displayName_obrigatorio' });
-    const inviteToken = `pc_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
     const { data, error } = await supabase.from('party_candidates').insert({
       partyId: party.id,
       displayName: String(displayName).slice(0, 160),
@@ -59,10 +61,32 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       regiao: regiao?.trim() || null,
       phone: phone?.trim() || null,
       status: 'pending',
-      inviteToken,
+      inviteToken: newToken(),
     }).select('*').single();
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ candidate: data });
+  });
+
+  // Import em lote (planilha do presidente). Body: { rows: [{displayName,cargo,regiao,phone}] }
+  router.post('/candidates/import', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await partyOf(userId);
+    if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const toInsert = rows.slice(0, 500).map((r: any) => ({
+      partyId: party.id,
+      displayName: String(r.displayName || r.nome || '').trim().slice(0, 160),
+      cargo: (r.cargo || '').toString().trim() || null,
+      regiao: (r.regiao || r.cidade || '').toString().trim() || null,
+      phone: (r.phone || r.telefone || '').toString().trim() || null,
+      status: 'pending',
+      inviteToken: newToken(),
+    })).filter((x: any) => x.displayName);
+    if (!toInsert.length) return res.status(400).json({ error: 'nenhuma_linha_valida' });
+    const { data, error } = await supabase.from('party_candidates').insert(toInsert).select('id');
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ created: (data || []).length });
   });
 
   return router;
