@@ -248,8 +248,8 @@ const PartyPresidentPage: React.FC = () => {
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2 sm:gap-3 flex-wrap">
             <span className="flex items-center gap-2"><Landmark className="text-indigo-400 w-6 h-6 shrink-0" /> Centro de Comando</span>
-            {party.plan === 'pilot_courtesy' && (
-              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Cortesia · piloto</span>
+            {party.plan && party.plan !== 'pending_payment' && (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Plano Partido</span>
             )}
           </h1>
           <p className="text-gray-400 text-sm truncate">{party.name} · {user?.name}</p>
