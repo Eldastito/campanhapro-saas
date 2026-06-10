@@ -33,7 +33,7 @@ interface ProofData {
 
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
 const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
-interface Party { id: string; name: string; }
+interface Party { id: string; name: string; telaoToken?: string | null; }
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
@@ -445,12 +445,31 @@ const PartyPresidentPage: React.FC = () => {
         )
       )}
 
-      {tab === 'Telão' && (
-        <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">
-          <MapPinned className="w-10 h-10 mx-auto mb-2 opacity-50" />
-          <p>Mapa ao vivo do partido — em breve (Fase 7).</p>
-        </div>
-      )}
+      {tab === 'Telão' && (() => {
+        const telaoUrl = party?.telaoToken ? `${window.location.origin}/telao/partido/${party.telaoToken}` : '';
+        return (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-br from-indigo-600/15 to-purple-600/10 border border-white/10 rounded-3xl p-5">
+              <p className="font-bold flex items-center gap-2 mb-1"><MapPinned className="w-5 h-5 text-indigo-300" /> Telão ao vivo do partido</p>
+              <p className="text-sm text-slate-400 mb-4">Mapa em tela cheia com os comitês (cor = saúde do candidato), check-ins e o placar 🟢🟡🔴. Abra numa TV/projetor — atualiza sozinho. O link é público (sem login) e não mostra valores em R$.</p>
+              {telaoUrl ? (
+                <>
+                  <div className="flex items-center gap-2 bg-slate-950 border border-white/10 rounded-xl px-3 py-2 mb-3">
+                    <input readOnly value={telaoUrl} className="flex-1 bg-transparent text-xs text-slate-300 outline-none" onFocus={(e) => e.target.select()} />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <a href={telaoUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm"><MapPinned className="w-4 h-4" /> Abrir telão em nova aba</a>
+                    <button onClick={() => { navigator.clipboard?.writeText(telaoUrl).then(() => { setCopied(party!.telaoToken!); setTimeout(() => setCopied(null), 1500); }, () => {}); }}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 font-bold text-sm">
+                      {copied === party?.telaoToken ? <><Check className="w-4 h-4 text-emerald-400" /> Copiado</> : <><Link2 className="w-4 h-4" /> Copiar link</>}
+                    </button>
+                  </div>
+                </>
+              ) : <p className="text-sm text-slate-500">Gerando link do telão… recarregue a página.</p>}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal: novo candidato */}
       {addOpen && (

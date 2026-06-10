@@ -30,6 +30,12 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const party = await partyOf(userId);
     if (!party) return res.json({ party: null, candidates: [] });
+    // Garante o token do telão público (gera 1x, idempotente).
+    if (!party.telaoToken) {
+      const tk = `tl_${randomBytes(9).toString('hex')}`;
+      await supabase.from('parties').update({ telaoToken: tk }).eq('id', party.id);
+      party.telaoToken = tk;
+    }
     const { data: rows } = await supabase.from('party_candidates')
       .select('*').eq('partyId', party.id).order('createdAt', { ascending: false });
     const candidates = rows ?? [];

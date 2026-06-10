@@ -8,9 +8,78 @@
  */
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { computeScore } from './score';
 
 export function createPartyPublicRouter(supabase: SupabaseClient): Router {
   const router = Router();
+
+  // TELÃO público (sem auth, link tokenizado). Mostra ESTRUTURA no mapa — comitês,
+  // check-ins e a saúde (cor do score) por candidato. NÃO expõe valores em R$.
+  router.get('/telao/:token', async (req: Request, res: Response) => {
+    const { data: party } = await supabase.from('parties').select('id, name').eq('telaoToken', req.params.token).maybeSingle();
+    if (!party) return res.status(404).json({ error: 'telao_invalido' });
+    const partyId = (party as any).id;
+    const { data: cands } = await supabase.from('party_candidates')
+      .select('id, displayName, regiao, status, campaignId, valorRecebido, valorAlocado').eq('partyId', partyId);
+    const candidates = cands || [];
+    const ids = candidates.map((c: any) => c.id);
+    const campIds = candidates.map((c: any) => c.campaignId).filter(Boolean);
+
+    const committees: Record<string, any> = {};
+    const checkinCount: Record<string, number> = {};
+    const lastCheckinAt: Record<string, string> = {};
+    const checkinPoints: { lat: number; lng: number }[] = [];
+    if (ids.length) {
+      const { data: coms } = await supabase.from('party_committees').select('candidateId, lat, lng, photo, "geoSource"').in('candidateId', ids);
+      for (const cm of coms || []) committees[(cm as any).candidateId] = cm;
+      const { data: cks } = await supabase.from('party_checkins').select('candidateId, lat, lng, "createdAt"').in('candidateId', ids);
+      for (const ck of cks || []) {
+        const k = (ck as any).candidateId;
+        checkinCount[k] = (checkinCount[k] || 0) + 1;
+        const at = (ck as any).createdAt;
+        if (at && (!lastCheckinAt[k] || at > lastCheckinAt[k])) lastCheckinAt[k] = at;
+        if (typeof (ck as any).lat === 'number') checkinPoints.push({ lat: (ck as any).lat, lng: (ck as any).lng });
+      }
+    }
+    const team: Record<string, { coord: number; lider: number }> = {};
+    if (campIds.length) {
+      const { data: members } = await supabase.from('users').select('campaignId, type').in('campaignId', campIds).in('type', ['Coordenador', 'Líder']);
+      for (const m of members || []) {
+        const k = (m as any).campaignId; team[k] = team[k] || { coord: 0, lider: 0 };
+        if ((m as any).type === 'Coordenador') team[k].coord++; else team[k].lider++;
+      }
+    }
+
+    let green = 0, yellow = 0, red = 0;
+    const points = candidates.map((c: any) => {
+      const com = committees[c.id];
+      const t = (c.campaignId && team[c.campaignId]) || { coord: 0, lider: 0 };
+      const sc = computeScore({
+        status: c.status,
+        committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
+        checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
+        coordCount: t.coord, leaderCount: t.lider,
+        valorRecebido: Number(c.valorRecebido) || 0, valorAlocado: Number(c.valorAlocado) || 0,
+      });
+      if (sc.level === 'green') green++; else if (sc.level === 'yellow') yellow++; else red++;
+      return {
+        displayName: c.displayName, regiao: c.regiao || null,
+        lat: com?.lat ?? null, lng: com?.lng ?? null, hasPhoto: !!com?.photo,
+        level: sc.level, checkins: checkinCount[c.id] || 0,
+      };
+    });
+
+    return res.json({
+      partyName: (party as any).name,
+      points, checkinPoints,
+      stats: {
+        candidates: candidates.length,
+        committees: Object.keys(committees).length,
+        checkins: Object.values(checkinCount).reduce((a, b) => a + b, 0),
+        green, yellow, red,
+      },
+    });
+  });
 
   // Dados do convite — para a página de cadastro mostrar o contexto (nome travado).
   router.get('/invite/:token', async (req: Request, res: Response) => {

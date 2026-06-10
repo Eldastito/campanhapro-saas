@@ -18,6 +18,7 @@ import UseCasesPage from './pages/UseCasesPage';
 import PartyPitchPage from './pages/PartyPitchPage';
 import PartyExecSummaryPage from './pages/PartyExecSummaryPage';
 import PublicPartyRegisterPage from './pages/PublicPartyRegisterPage';
+import PartyTelaoPage from './pages/PartyTelaoPage';
 
 /**
  * Definição centralizada de rotas para a plataforma Campanha Pró.
@@ -73,6 +74,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/proposta/partido" element={<PartyPitchPage />} />
                 <Route path="/sumario/partido" element={<PartyExecSummaryPage />} />
                 <Route path="/cadastro/partido/:token" element={<PublicPartyRegisterPage />} />
+                <Route path="/telao/partido/:token" element={<PartyTelaoPage />} />
                 <Route path="/demonstracao" element={<UseCasesPage />} />
 
                 {/* Rota Privada (Main App) — força onboarding se ainda não houver campaignId.
