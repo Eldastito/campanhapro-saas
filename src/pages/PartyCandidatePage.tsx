@@ -21,6 +21,8 @@ const PartyCandidatePage: React.FC = () => {
   const [addr, setAddr] = React.useState('');
   const [geo, setGeo] = React.useState<{ lat: number; lng: number } | null>(null);
   const [photo, setPhoto] = React.useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+  const [geoDenied, setGeoDenied] = React.useState(false);
 
   const load = React.useCallback(async () => {
     try {
@@ -32,45 +34,62 @@ const PartyCandidatePage: React.FC = () => {
   }, []);
   React.useEffect(() => { load(); }, [load]);
 
+  // GPS OBRIGATÓRIO — captura no ato. Em falha, sinaliza p/ mostrar o guia.
+  const ensureGeo = async () => {
+    if (geo) return geo;
+    try { const g = await getGeo(); setGeo(g); setGeoDenied(false); return g; }
+    catch (e: any) { setGeoDenied(true); throw e; }
+  };
+
+  const postWithTimeout = async (url: string, body: any) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 25000);
+    try { return await authedFetch(url, { method: 'POST', body: JSON.stringify(body), signal: ctrl.signal }); }
+    finally { clearTimeout(t); }
+  };
+
   const capturePhoto = async (file: File | undefined, setter: (s: string) => void) => {
     if (!file) return;
-    try { setter(await compressImage(file)); } catch (e: any) { setMsg(e.message); }
+    setPhotoBusy(true); setMsg(null);
+    try { setter(await compressImage(file)); }
+    catch { setMsg('Não consegui processar a foto (formato não suportado pelo navegador?). Tente tirar de novo.'); }
+    finally { setPhotoBusy(false); }
   };
 
   const pegarGps = async () => {
     setBusy('gps'); setMsg(null);
-    try { setGeo(await getGeo()); setMsg('Localização capturada ✅'); }
-    catch (e: any) { setMsg(`📍 ${e.message} Você ainda pode salvar — mas a localização deixa a comprovação mais forte. Autorize o GPS nas permissões do navegador/celular.`); }
+    try { await ensureGeo(); setMsg('Localização capturada ✅'); }
+    catch (e: any) { setMsg(`📍 ${e.message}`); }
     finally { setBusy(null); }
   };
 
-  // GPS é OPCIONAL — não bloqueia o salvamento (só fortalece a prova).
   const salvarComite = async () => {
-    if (!addr.trim() && !photo && !geo) { setMsg('Preencha o endereço, a localização ou uma foto.'); return; }
     setBusy('comite'); setMsg(null);
+    let g: { lat: number; lng: number };
+    try { g = await ensureGeo(); }
+    catch { setBusy(null); setMsg('📍 Precisamos da sua localização para registrar o comitê. Veja abaixo como liberar.'); return; }
     try {
-      const r = await authedFetch('/api/v1/party/candidate/committee', {
-        method: 'POST', body: JSON.stringify({ address: addr, lat: geo?.lat ?? null, lng: geo?.lng ?? null, photo }),
-      });
-      if (r.ok) { setPhoto(null); await load(); setMsg('Comitê salvo!' + (geo ? '' : ' (sem GPS — autorize a localização para a comprovação ficar forte.)')); }
+      const r = await postWithTimeout('/api/v1/party/candidate/committee', { address: addr, lat: g.lat, lng: g.lng, photo });
+      if (r.ok) { setPhoto(null); await load(); setMsg('✅ Comitê salvo!'); }
       else { const j = await r.json().catch(() => ({})); setMsg(`Erro ao salvar: ${j.detail || j.error || 'tente de novo'}`); }
-    } catch (e: any) { setMsg(`Erro ao salvar: ${e.message}`); }
+    } catch (e: any) { setMsg(e?.name === 'AbortError' ? 'Demorou demais — verifique sua conexão e tente de novo.' : `Erro ao salvar: ${e.message}`); }
     finally { setBusy(null); }
   };
 
   const fazerCheckin = async (file: File | undefined) => {
     if (!file) return;
     setBusy('checkin'); setMsg(null);
+    let ph: string;
+    try { ph = await compressImage(file); }
+    catch { setBusy(null); setMsg('Não consegui processar a foto. Tente tirar de novo.'); return; }
+    let g: { lat: number; lng: number };
+    try { g = await ensureGeo(); }
+    catch { setBusy(null); setMsg('📍 Precisamos da sua localização para o check-in. Veja abaixo como liberar.'); return; }
     try {
-      const ph = await compressImage(file);
-      let g: { lat: number; lng: number } | null = null;
-      try { g = await getGeo(); } catch { /* GPS opcional — segue sem */ }
-      const r = await authedFetch('/api/v1/party/candidate/checkin', {
-        method: 'POST', body: JSON.stringify({ tipo: 'comite', lat: g?.lat ?? null, lng: g?.lng ?? null, photo: ph }),
-      });
-      if (r.ok) { await load(); setMsg('Check-in registrado!' + (g ? ' (com GPS ✅)' : ' (sem GPS — autorize a localização para a prova ficar forte.)')); }
+      const r = await postWithTimeout('/api/v1/party/candidate/checkin', { tipo: 'comite', lat: g.lat, lng: g.lng, photo: ph });
+      if (r.ok) { await load(); setMsg('✅ Check-in registrado com GPS!'); }
       else { const j = await r.json().catch(() => ({})); setMsg(`Erro no check-in: ${j.detail || j.error || 'tente de novo'}`); }
-    } catch (e: any) { setMsg(`Erro no check-in: ${e.message}`); }
+    } catch (e: any) { setMsg(e?.name === 'AbortError' ? 'Demorou demais — verifique sua conexão.' : `Erro no check-in: ${e.message}`); }
     finally { setBusy(null); }
   };
 
@@ -96,6 +115,23 @@ const PartyCandidatePage: React.FC = () => {
       </div>
 
       {msg && <div className="mb-4 text-sm bg-indigo-500/10 border border-indigo-500/30 text-indigo-200 rounded-xl px-3 py-2">{msg}</div>}
+
+      {/* Guia: liberar localização (GPS é obrigatório p/ a comprovação valer) */}
+      {geoDenied && (
+        <div className="mb-4 bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 text-sm">
+          <p className="font-bold text-amber-200 flex items-center gap-1.5"><Navigation className="w-4 h-4" /> Libere sua localização para comprovar</p>
+          <ol className="list-decimal list-inside text-amber-100/80 mt-2 space-y-1 text-xs">
+            <li>Ligue o <b>GPS/Localização</b> do seu celular.</li>
+            <li>Toque no <b>cadeado</b> (ou ícone ⓘ) ao lado do endereço do site, acima.</li>
+            <li>Em <b>Permissões → Localização</b>, escolha <b>Permitir</b>.</li>
+            <li>Recarregue a página e toque em <b>"Tentar liberar"</b> abaixo.</li>
+          </ol>
+          <button onClick={async () => { try { await ensureGeo(); setMsg('Localização liberada ✅'); } catch (e: any) { setMsg(`📍 Ainda bloqueado: ${e.message}`); } }}
+            className="mt-3 text-xs bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg px-3 py-1.5 flex items-center gap-1.5">
+            <Navigation className="w-3.5 h-3.5" /> Tentar liberar
+          </button>
+        </div>
+      )}
 
       {/* Metas */}
       <div className="bg-gradient-to-br from-purple-600/15 to-fuchsia-600/10 border border-white/10 rounded-3xl p-5 mb-6">
@@ -124,8 +160,8 @@ const PartyCandidatePage: React.FC = () => {
             {busy === 'gps' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />} {geo ? 'Localização capturada' : 'Usar minha localização'}
           </button>
           <label className="px-3 py-2 rounded-xl text-sm flex items-center gap-2 bg-white/5 text-slate-200 cursor-pointer">
-            <Camera className="w-4 h-4" /> {photo ? 'Foto pronta' : 'Foto do comitê'}
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => capturePhoto(e.target.files?.[0], setPhoto)} />
+            {photoBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />} {photoBusy ? 'Processando…' : photo ? 'Foto pronta ✅' : 'Foto do comitê'}
+            <input type="file" accept="image/*" capture="environment" className="hidden" disabled={photoBusy} onChange={(e) => capturePhoto(e.target.files?.[0], setPhoto)} />
           </label>
         </div>
         {(photo || committee?.photo) && <img src={photo || committee.photo} alt="comitê" className="w-full max-h-48 object-cover rounded-xl mb-2" />}
