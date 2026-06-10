@@ -73,13 +73,14 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/sumario/partido" element={<PartyExecSummaryPage />} />
                 <Route path="/demonstracao" element={<UseCasesPage />} />
 
-                {/* Rota Privada (Main App) — força onboarding se ainda não houver campaignId */}
+                {/* Rota Privada (Main App) — força onboarding se ainda não houver campaignId.
+                    Exceção: Presidente de Partido (produto Partido) não tem campanha própria. */}
                 <Route
                     path="/app/*"
                     element={
                         !user
                             ? <Navigate to="/login" replace />
-                            : !user.campaignId
+                            : (!user.campaignId && user.type !== 'Presidente de Partido')
                                 ? <Navigate to="/welcome" replace />
                                 : <App />
                     }
