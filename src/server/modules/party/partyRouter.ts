@@ -46,14 +46,33 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       }
     }
 
+    // Comitês + contagem de check-ins por candidato (comprovação).
+    const candidateIds = candidates.map((c: any) => c.id);
+    const committees: Record<string, any> = {};
+    const checkinCount: Record<string, number> = {};
+    if (candidateIds.length) {
+      const { data: coms } = await supabase.from('party_committees')
+        .select('candidateId, address, lat, lng, photo').in('candidateId', candidateIds);
+      for (const cm of coms || []) committees[(cm as any).candidateId] = cm;
+      const { data: cks } = await supabase.from('party_checkins').select('candidateId').in('candidateId', candidateIds);
+      for (const ck of cks || []) checkinCount[(ck as any).candidateId] = (checkinCount[(ck as any).candidateId] || 0) + 1;
+    }
+
     const enriched = candidates.map((c: any) => {
       const t = (c.campaignId && team[c.campaignId]) || { coord: 0, lider: 0 };
+      const com = committees[c.id];
       const metas = [
         { label: 'Candidato cadastrado', done: c.status === 'active' },
+        { label: 'Comitê com foto/GPS', done: !!(com && com.photo && com.lat) },
         { label: 'Coordenador na equipe', done: t.coord >= 1 },
         { label: '5 líderes ativos', done: t.lider >= 5 },
       ];
-      return { ...c, coordCount: t.coord, leaderCount: t.lider, metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length };
+      return {
+        ...c, coordCount: t.coord, leaderCount: t.lider,
+        committee: com ? { address: com.address, lat: com.lat, lng: com.lng, hasPhoto: !!com.photo } : null,
+        checkinCount: checkinCount[c.id] || 0,
+        metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length,
+      };
     });
     return res.json({ party, candidates: enriched });
   });
@@ -162,6 +181,71 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
     }).eq('id', req.params.id);
     return res.json({ repasse: ins, total: totalRecebido, alocado: totalAlocado });
+  });
+
+  // ---- Lado do CANDIDATO de partido (comprovação) ----
+  async function myCandidate(userId: string) {
+    const { data } = await supabase.from('party_candidates').select('*').eq('userId', userId).maybeSingle();
+    return data as any | null;
+  }
+
+  router.get('/candidate/me', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const cand = await myCandidate(userId);
+    if (!cand) return res.status(404).json({ error: 'not_found' });
+    const { data: party } = await supabase.from('parties').select('name').eq('id', cand.partyId).maybeSingle();
+    const { data: committee } = await supabase.from('party_committees').select('*').eq('candidateId', cand.id).maybeSingle();
+    const { data: checkins } = await supabase.from('party_checkins')
+      .select('id, tipo, lat, lng, nota, "createdAt"').eq('candidateId', cand.id).order('createdAt', { ascending: false }).limit(20);
+    // metas do candidato (mesma lógica)
+    const t = { coord: 0, lider: 0 };
+    if (cand.campaignId) {
+      const { data: members } = await supabase.from('users').select('type').eq('campaignId', cand.campaignId).in('type', ['Coordenador', 'Líder']);
+      for (const m of members || []) { if ((m as any).type === 'Coordenador') t.coord++; else t.lider++; }
+    }
+    const com = committee as any;
+    const metas = [
+      { label: 'Concluir seu cadastro', done: cand.status === 'active' },
+      { label: 'Cadastrar o comitê (foto + GPS)', done: !!(com && com.photo && com.lat) },
+      { label: 'Cadastrar 1 coordenador', done: t.coord >= 1 },
+      { label: 'Cadastrar 5 líderes', done: t.lider >= 5 },
+    ];
+    return res.json({ candidate: cand, partyName: (party as any)?.name, committee: committee || null, checkins: checkins || [], metas });
+  });
+
+  router.post('/candidate/committee', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const cand = await myCandidate(userId);
+    if (!cand) return res.status(404).json({ error: 'not_found' });
+    const { address, lat, lng, photo } = req.body || {};
+    const { data, error } = await supabase.from('party_committees').upsert({
+      candidateId: cand.id, partyId: cand.partyId,
+      address: address ? String(address).slice(0, 300) : null,
+      lat: Number(lat) || null, lng: Number(lng) || null,
+      photo: photo ? String(photo).slice(0, 700000) : null,
+      updatedAt: new Date().toISOString(),
+    }, { onConflict: 'candidateId' }).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ committee: data });
+  });
+
+  router.post('/candidate/checkin', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const cand = await myCandidate(userId);
+    if (!cand) return res.status(404).json({ error: 'not_found' });
+    const { tipo, lat, lng, photo, nota } = req.body || {};
+    const { data, error } = await supabase.from('party_checkins').insert({
+      candidateId: cand.id, partyId: cand.partyId, userId,
+      tipo: ['comite', 'evento', 'visita', 'reuniao'].includes(tipo) ? tipo : 'comite',
+      lat: Number(lat) || null, lng: Number(lng) || null,
+      photo: photo ? String(photo).slice(0, 700000) : null,
+      nota: nota ? String(nota).slice(0, 300) : null,
+    }).select('id, "createdAt"').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ checkin: data });
   });
 
   return router;

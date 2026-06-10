@@ -66,7 +66,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
 
     // 3) perfil na tabela users (tipo Candidato, campanha própria)
     const { error: uErr } = await supabase.from('users').insert({
-      id: uid, name: (cand as any).displayName, email: mail, type: 'Candidato',
+      id: uid, name: (cand as any).displayName, email: mail, type: 'Candidato de Partido',
       campaignId, isSupremeAdmin: false, phone: phone?.trim() || (cand as any).phone || null,
     });
     if (uErr) {

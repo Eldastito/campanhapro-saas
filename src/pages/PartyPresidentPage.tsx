@@ -16,6 +16,8 @@ interface Candidate {
   status: string; valorRecebido?: number; campaignId?: string | null; inviteToken?: string | null;
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
   coordCount?: number; leaderCount?: number; valorAlocado?: number;
+  committee?: { address?: string; lat?: number; lng?: number; hasPhoto?: boolean } | null;
+  checkinCount?: number;
 }
 
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
@@ -265,11 +267,38 @@ const PartyPresidentPage: React.FC = () => {
         )
       )}
 
-      {(tab === 'Comprovação' || tab === 'Telão') && (
+      {tab === 'Comprovação' && (
+        candidates.length === 0 ? (
+          <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para acompanhar a comprovação.</div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm text-slate-400 mb-1">Comitês geolocalizados e check-ins por candidato — a prova de que a estrutura existe.</p>
+            {candidates.map((c) => {
+              const com = c.committee;
+              const proven = !!(com && com.lat && com.hasPhoto);
+              return (
+                <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-bold text-white truncate">{c.displayName}</p>
+                    <p className="text-xs text-slate-400">{com?.address || (com?.lat ? 'Comitê com GPS' : 'Sem comitê cadastrado')}</p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-xs text-slate-400">📸 {c.checkinCount || 0} check-ins</span>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${proven ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border-rose-500/30'}`}>
+                      {proven ? '✅ Comitê comprovado' : '⚠️ Sem comprovação'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {tab === 'Telão' && (
         <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">
-          {tab === 'Comprovação' && <ShieldCheck className="w-10 h-10 mx-auto mb-2 opacity-50" />}
-          {tab === 'Telão' && <MapPinned className="w-10 h-10 mx-auto mb-2 opacity-50" />}
-          <p>Em breve nesta fase do produto.</p>
+          <MapPinned className="w-10 h-10 mx-auto mb-2 opacity-50" />
+          <p>Mapa ao vivo do partido — em breve (Fase 7).</p>
         </div>
       )}
 

@@ -27,7 +27,7 @@ export interface AuthenticatedUser {
   uid?: string;
   name: string;
   email: string;
-  type: 'Admin' | 'Coordenador' | 'Líder' | 'Apoiador' | 'Colaborador' | 'Pesquisador' | 'Fiscal' | 'Candidato' | 'Presidente de Partido' | 'Suporte' | 'Manutenção' | 'blocked';
+  type: 'Admin' | 'Coordenador' | 'Líder' | 'Apoiador' | 'Colaborador' | 'Pesquisador' | 'Fiscal' | 'Candidato' | 'Presidente de Partido' | 'Candidato de Partido' | 'Suporte' | 'Manutenção' | 'blocked';
   plan?: Plan;
   role?: string;
   phone?: string;

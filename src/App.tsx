@@ -10,6 +10,7 @@ import CandidateDashboardPage from './pages/CandidateDashboardPage';
 import LeaderDashboardPage from './pages/LeaderDashboardPage';
 import FiscalPage from './pages/FiscalPage';
 import PartyPresidentPage from './pages/PartyPresidentPage';
+import PartyCandidatePage from './pages/PartyCandidatePage';
 import SupremeAdminPage from './pages/SupremeAdminPage';
 import BlockedPage from './pages/BlockedPage';
 import LoadingScreen from './components/ui/LoadingScreen';
@@ -85,6 +86,10 @@ const App: React.FC = () => {
         case 'Presidente de Partido':
             // Produto PARTIDO — não usa DataProvider (campanha); carrega o próprio agregado.
             return <PartyPresidentPage />;
+
+        case 'Candidato de Partido':
+            // Candidato dentro do partido — experiência enxuta de comprovação.
+            return <PartyCandidatePage />;
 
         default:
             // 'Apoiador', 'Colaborador', 'Suporte', 'Manutenção'
