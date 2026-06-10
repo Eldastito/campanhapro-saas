@@ -71,6 +71,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
 
     return res.json({
       partyName: (party as any).name,
+      channel: `party-telao-${partyId}`,
       points, checkinPoints,
       stats: {
         candidates: candidates.length,

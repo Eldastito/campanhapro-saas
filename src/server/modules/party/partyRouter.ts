@@ -15,6 +15,20 @@ import { computeScore } from './score';
 
 const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
+// Broadcast (pub/sub) p/ o telão público atualizar no INSTANTE do evento, sem
+// expor tabela nenhuma a RLS. Envia só um "ping" vazio; o telão re-busca os dados
+// pelo endpoint seguro. Fire-and-forget (nunca bloqueia a resposta).
+const RT_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const RT_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function broadcastTelao(partyId?: string | null) {
+  if (!RT_URL || !RT_KEY || !partyId) return;
+  fetch(`${RT_URL}/realtime/v1/api/broadcast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: RT_KEY, Authorization: `Bearer ${RT_KEY}` },
+    body: JSON.stringify({ messages: [{ topic: `party-telao-${partyId}`, event: 'update', payload: {} }] }),
+  }).catch(() => { /* best-effort */ });
+}
+
 export function createPartyRouter(supabase: SupabaseClient): Router {
   const router = Router();
 
@@ -203,6 +217,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     await supabase.from('party_candidates').update({
       valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
     }).eq('id', req.params.id);
+    broadcastTelao((party as any).id);
     return res.json({ repasse: ins, total: totalRecebido, alocado: totalAlocado });
   });
 
@@ -296,6 +311,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       updatedAt: new Date().toISOString(),
     }, { onConflict: 'candidateId' }).select('*').single();
     if (error) return res.status(500).json({ error: error.message });
+    broadcastTelao(cand.partyId);
     return res.json({ committee: data });
   });
 
@@ -313,6 +329,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       nota: nota ? String(nota).slice(0, 300) : null,
     }).select('id, "createdAt"').single();
     if (error) return res.status(500).json({ error: error.message });
+    broadcastTelao(cand.partyId);
     return res.json({ checkin: data });
   });
 

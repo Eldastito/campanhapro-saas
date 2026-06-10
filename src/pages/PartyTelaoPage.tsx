@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useParams } from 'react-router-dom';
 import { Loader2, MapPin } from 'lucide-react';
+import { supabase } from '../lib/supabaseClient';
 
 /**
  * TELÃO público do PARTIDO (link tokenizado, sem login). Para o presidente
@@ -10,10 +11,10 @@ import { Loader2, MapPin } from 'lucide-react';
  */
 const LEVEL_COLOR: Record<string, string> = { green: '#10b981', yellow: '#f59e0b', red: '#f43f5e' };
 const esc = (s: any) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] || c));
-const REFRESH_MS = 45_000;
+const SAFETY_POLL_MS = 120_000; // rede de segurança caso um broadcast se perca
 
 interface TelaoPoint { displayName: string; regiao: string | null; lat: number | null; lng: number | null; hasPhoto: boolean; level: string; checkins: number; }
-interface TelaoData { partyName: string; points: TelaoPoint[]; checkinPoints: { lat: number; lng: number }[]; stats: { candidates: number; committees: number; checkins: number; green: number; yellow: number; red: number }; }
+interface TelaoData { partyName: string; channel?: string; points: TelaoPoint[]; checkinPoints: { lat: number; lng: number }[]; stats: { candidates: number; committees: number; checkins: number; green: number; yellow: number; red: number }; }
 
 const PartyTelaoPage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -33,7 +34,16 @@ const PartyTelaoPage: React.FC = () => {
     finally { setLoading(false); }
   }, [token]);
 
-  React.useEffect(() => { load(); const t = setInterval(load, REFRESH_MS); return () => clearInterval(t); }, [load]);
+  React.useEffect(() => { load(); const t = setInterval(load, SAFETY_POLL_MS); return () => clearInterval(t); }, [load]);
+
+  // Tempo real: assina o canal Broadcast do partido. O backend dá um "ping" quando
+  // há comitê/check-in/repasse novo → re-buscamos na hora (sem expor tabela a RLS).
+  React.useEffect(() => {
+    const topic = data?.channel;
+    if (!topic) return;
+    const ch = supabase.channel(topic).on('broadcast', { event: 'update' }, () => { load(); }).subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [data?.channel, load]);
 
   // Init do mapa (1x)
   React.useEffect(() => {
@@ -83,7 +93,7 @@ const PartyTelaoPage: React.FC = () => {
       {/* Cabeçalho flutuante */}
       <div className="absolute top-0 left-0 right-0 z-[500] pointer-events-none p-4 sm:p-6 bg-gradient-to-b from-black/70 to-transparent">
         <h1 className="text-2xl sm:text-3xl font-black tracking-tight">{data!.partyName}</h1>
-        <p className="text-xs text-slate-400">Telão ao vivo · estrutura de campo · atualiza a cada {REFRESH_MS / 1000}s</p>
+        <p className="text-xs text-slate-400">Telão ao vivo · estrutura de campo · atualiza em tempo real</p>
       </div>
 
       {/* Placar 🟢🟡🔴 + totais */}
