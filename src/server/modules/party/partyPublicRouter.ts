@@ -30,7 +30,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     const lastCheckinAt: Record<string, string> = {};
     const checkinPoints: { lat: number; lng: number }[] = [];
     if (ids.length) {
-      const { data: coms } = await supabase.from('party_committees').select('candidateId, lat, lng, photo, "geoSource"').in('candidateId', ids);
+      const { data: coms } = await supabase.from('party_committees').select('candidateId, address, lat, lng, photo, "geoSource"').in('candidateId', ids);
       for (const cm of coms || []) committees[(cm as any).candidateId] = cm;
       const { data: cks } = await supabase.from('party_checkins').select('candidateId, lat, lng, "createdAt"').in('candidateId', ids);
       for (const ck of cks || []) {
@@ -63,7 +63,11 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
       });
       if (sc.level === 'green') green++; else if (sc.level === 'yellow') yellow++; else red++;
       return {
-        displayName: c.displayName, regiao: c.regiao || null,
+        displayName: c.displayName,
+        // Texto do popup = localização REAL do pino (endereço do comitê), com
+        // a região declarada só como fallback (evita pino na Gávea dizer "Niterói").
+        local: com?.address || c.regiao || null,
+        approx: !!com && com.geoSource === 'address',
         lat: com?.lat ?? null, lng: com?.lng ?? null, hasPhoto: !!com?.photo,
         level: sc.level, checkins: checkinCount[c.id] || 0,
       };

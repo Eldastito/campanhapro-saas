@@ -13,7 +13,7 @@ const LEVEL_COLOR: Record<string, string> = { green: '#10b981', yellow: '#f59e0b
 const esc = (s: any) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] || c));
 const SAFETY_POLL_MS = 120_000; // rede de segurança caso um broadcast se perca
 
-interface TelaoPoint { displayName: string; regiao: string | null; lat: number | null; lng: number | null; hasPhoto: boolean; level: string; checkins: number; }
+interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; level: string; checkins: number; }
 interface TelaoData { partyName: string; channel?: string; points: TelaoPoint[]; checkinPoints: { lat: number; lng: number }[]; stats: { candidates: number; committees: number; checkins: number; green: number; yellow: number; red: number }; }
 
 const PartyTelaoPage: React.FC = () => {
@@ -74,7 +74,7 @@ const PartyTelaoPage: React.FC = () => {
       if (typeof p.lat !== 'number' || typeof p.lng !== 'number') return;
       const color = LEVEL_COLOR[p.level] || '#94a3b8';
       const mk = L.circleMarker([p.lat, p.lng], { radius: 11, fillColor: color, color: '#fff', weight: 2, fillOpacity: 0.9 });
-      mk.bindPopup(`<div style="min-width:170px"><b>${esc(p.displayName)}</b>${p.regiao ? `<br/><span style="opacity:.7">${esc(p.regiao)}</span>` : ''}<br/><span style="color:${color}">●</span> ${p.checkins} check-in(s)${p.hasPhoto ? ' · 📸' : ''}</div>`);
+      mk.bindPopup(`<div style="min-width:170px"><b>${esc(p.displayName)}</b>${p.local ? `<br/><span style="opacity:.7">${esc(p.local)}${p.approx ? ' (aprox.)' : ''}</span>` : ''}<br/><span style="color:${color}">●</span> ${p.checkins} check-in(s)${p.hasPhoto ? ' · 📸' : ''}</div>`);
       mk.addTo(lgRef.current.comites); pts.push([p.lat, p.lng]);
     });
 
