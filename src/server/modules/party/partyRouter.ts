@@ -31,6 +31,8 @@ function broadcastTelao(partyId?: string | null) {
 
 const PROOF_BUCKET = 'party-proofs';
 const SIGNED_TTL = 60 * 60; // 1h
+const MAX_COMMITTEE_PHOTOS = 4;     // fachada · interior · placa/material · equipe
+const PHOTO_QUOTA_PER_CANDIDATE = 80; // ~6,5 MB/candidato → teto ~1 GB por partido (130)
 
 export function createPartyRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -55,6 +57,15 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (stored.startsWith('data:')) return stored; // legado inline
     const { data } = await supabase.storage.from(PROOF_BUCKET).createSignedUrl(stored, SIGNED_TTL);
     return data?.signedUrl || null;
+  }
+
+  // Quantas fotos o candidato já tem (comitê + check-ins) — para a cota anti-abuso/disco.
+  async function countCandidatePhotos(candidateId: string): Promise<number> {
+    const { data: com } = await supabase.from('party_committees').select('photos').eq('candidateId', candidateId).maybeSingle();
+    const comN = Array.isArray((com as any)?.photos) ? (com as any).photos.length : 0;
+    const { count } = await supabase.from('party_checkins').select('id', { count: 'exact', head: true })
+      .eq('candidateId', candidateId).not('photo', 'is', null);
+    return comN + (count || 0);
   }
 
   async function partyOf(userId: string) {
@@ -252,7 +263,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     if (!(await candidateOfPresident(userId, req.params.id))) return res.status(404).json({ error: 'not_found' });
     const { data: committee } = await supabase.from('party_committees')
-      .select('address, lat, lng, photo, "geoSource", "updatedAt"').eq('candidateId', req.params.id).maybeSingle();
+      .select('address, lat, lng, photo, photos, "geoSource", "updatedAt"').eq('candidateId', req.params.id).maybeSingle();
     const { data: checkins } = await supabase.from('party_checkins')
       .select('id, tipo, lat, lng, photo, nota, "createdAt"').eq('candidateId', req.params.id)
       .order('createdAt', { ascending: false }).limit(30);
@@ -260,7 +271,13 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       .select('decision, note, "createdAt"').eq('candidateId', req.params.id)
       .order('createdAt', { ascending: false }).limit(10);
     // Assina as fotos (PATH no banco → URL temporária).
-    const committeeSigned = committee ? { ...committee, photo: await signPhoto((committee as any).photo) } : null;
+    const comPhotos: string[] = Array.isArray((committee as any)?.photos) && (committee as any).photos.length
+      ? (committee as any).photos : ((committee as any)?.photo ? [(committee as any).photo] : []);
+    const committeeSigned = committee ? {
+      ...committee,
+      photo: await signPhoto((committee as any).photo),
+      photos: (await Promise.all(comPhotos.map((p) => signPhoto(p)))).filter(Boolean),
+    } : null;
     const checkinsSigned = await Promise.all((checkins || []).map(async (c: any) => ({ ...c, photo: await signPhoto(c.photo) })));
     return res.json({ committee: committeeSigned, checkins: checkinsSigned, valveLog: valveLog || [] });
   });
@@ -320,7 +337,13 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       coordCount: t.coord, leaderCount: t.lider,
       valorRecebido: Number(cand.valorRecebido) || 0, valorAlocado: Number(cand.valorAlocado) || 0,
     });
-    const committeeSigned = committee ? { ...committee, photo: await signPhoto((committee as any).photo) } : null;
+    const cPhotos: string[] = Array.isArray((committee as any)?.photos) && (committee as any).photos.length
+      ? (committee as any).photos : ((committee as any)?.photo ? [(committee as any).photo] : []);
+    const committeeSigned = committee ? {
+      ...committee,
+      photo: await signPhoto((committee as any).photo),
+      photos: (await Promise.all(cPhotos.map((p) => signPhoto(p)))).filter(Boolean),
+    } : null;
     return res.json({ candidate: cand, partyName: (party as any)?.name, committee: committeeSigned, checkins: checkins || [], metas, score });
   });
 
@@ -329,25 +352,36 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const cand = await myCandidate(userId);
     if (!cand) return res.status(404).json({ error: 'not_found' });
-    const { address, lat, lng, photo, geoSource } = req.body || {};
+    const { address, lat, lng, photos, geoSource } = req.body || {};
     const hasGeo = Number(lat) && Number(lng);
-    // Preserva a foto atual quando não vier foto nova; sobe nova foto pro storage.
-    const existing = (await supabase.from('party_committees').select('photo').eq('candidateId', cand.id).maybeSingle()).data as any;
-    let photoPath: string | null = existing?.photo || null;
-    if (typeof photo === 'string' && photo.startsWith('data:')) {
-      photoPath = (await uploadPhoto(`party/${cand.partyId}/committee/${cand.id}.jpg`, photo)) || photoPath;
+    const existing = (await supabase.from('party_committees').select('photos, photo').eq('candidateId', cand.id).maybeSingle()).data as any;
+    const existingPhotos: string[] = Array.isArray(existing?.photos) ? existing.photos
+      : (existing?.photo ? [existing.photo] : []); // migra legado (1 foto) p/ lista
+
+    // photos = array de até 4 slots; cada um: data URL (nova), "KEEP" (mantém atual) ou vazio.
+    const slots: any[] = Array.isArray(photos) ? photos.slice(0, MAX_COMMITTEE_PHOTOS) : [];
+    const finalPaths: string[] = [];
+    for (let i = 0; i < slots.length; i++) {
+      const v = slots[i];
+      if (typeof v === 'string' && v.startsWith('data:')) {
+        const p = await uploadPhoto(`party/${cand.partyId}/committee/${cand.id}/${i}.jpg`, v);
+        if (p) finalPaths.push(p);
+      } else if (v === 'KEEP' && existingPhotos[i]) {
+        finalPaths.push(existingPhotos[i]);
+      }
     }
     const { data, error } = await supabase.from('party_committees').upsert({
       candidateId: cand.id, partyId: cand.partyId,
       address: address ? String(address).slice(0, 300) : null,
       lat: Number(lat) || null, lng: Number(lng) || null,
       geoSource: hasGeo ? (geoSource === 'address' ? 'address' : 'gps') : null,
-      photo: photoPath,
+      photos: finalPaths, photo: finalPaths[0] || null, // photo = capa (compat)
       updatedAt: new Date().toISOString(),
     }, { onConflict: 'candidateId' }).select('*').single();
     if (error) return res.status(500).json({ error: error.message });
     broadcastTelao(cand.partyId);
-    return res.json({ committee: { ...data, photo: await signPhoto((data as any)?.photo) } });
+    const signed = await Promise.all(finalPaths.map((p) => signPhoto(p)));
+    return res.json({ committee: { ...data, photos: signed.filter(Boolean), photo: signed[0] || null } });
   });
 
   router.post('/candidate/checkin', async (req: Request, res: Response) => {
@@ -356,6 +390,13 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const cand = await myCandidate(userId);
     if (!cand) return res.status(404).json({ error: 'not_found' });
     const { tipo, lat, lng, photo, nota } = req.body || {};
+    // Cota anti-abuso/disco: barra acima do teto por candidato.
+    if (typeof photo === 'string' && photo.startsWith('data:')) {
+      const used = await countCandidatePhotos(cand.id);
+      if (used >= PHOTO_QUOTA_PER_CANDIDATE) {
+        return res.status(409).json({ error: 'cota_fotos_atingida', detail: `Limite de ${PHOTO_QUOTA_PER_CANDIDATE} fotos por candidato atingido.` });
+      }
+    }
     const photoPath = (typeof photo === 'string' && photo.startsWith('data:'))
       ? await uploadPhoto(`party/${cand.partyId}/checkin/${cand.id}-${randomBytes(6).toString('hex')}.jpg`, photo)
       : null;

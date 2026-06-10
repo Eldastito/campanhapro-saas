@@ -12,6 +12,14 @@ import { geocode } from '../lib/geocode';
  * virou estrutura — cadastra o comitê (foto + GPS) e faz check-ins
  * geolocalizados. Tudo alimenta o painel do presidente e o score.
  */
+// As 4 fotos padronizadas que provam o comitê sem dar margem a fraude.
+const COMMITTEE_SLOTS = [
+  { key: 'fachada', label: 'Fachada', hint: 'Frente do comitê com o NÚMERO e o nome da RUA visíveis.' },
+  { key: 'interior', label: 'Interior', hint: 'Por dentro: mesas, cadeiras, estrutura funcionando.' },
+  { key: 'placa', label: 'Placa / material', hint: 'Placa, banner ou material de campanha no local.' },
+  { key: 'equipe', label: 'Selfie da equipe', hint: 'Você (e a equipe) dentro do comitê, mostrando que está ativo.' },
+];
+
 const PartyCandidatePage: React.FC = () => {
   const { user, logout } = useAuth();
   const [loading, setLoading] = React.useState(true);
@@ -22,15 +30,21 @@ const PartyCandidatePage: React.FC = () => {
   const [addr, setAddr] = React.useState('');
   const [geo, setGeo] = React.useState<{ lat: number; lng: number } | null>(null);
   const [geoStatus, setGeoStatus] = React.useState<CapturedGeo['status'] | null>(null);
-  const [photo, setPhoto] = React.useState<string | null>(null);
-  const [photoBusy, setPhotoBusy] = React.useState(false);
+  // 4 slots: cada um é data URL (nova foto), URL assinada (carregada do banco) ou null.
+  const [photos, setPhotos] = React.useState<(string | null)[]>([null, null, null, null]);
+  const [photoBusySlot, setPhotoBusySlot] = React.useState<number | null>(null);
   const inApp = React.useMemo(() => isInAppBrowser(), []);
 
   const load = React.useCallback(async () => {
     try {
       const r = await authedFetch('/api/v1/party/candidate/me');
       const j = await r.json();
-      if (r.ok) { setData(j); setAddr(j.committee?.address || ''); if (j.committee?.lat) { setGeo({ lat: j.committee.lat, lng: j.committee.lng }); setGeoStatus('ok'); } }
+      if (r.ok) {
+        setData(j); setAddr(j.committee?.address || '');
+        if (j.committee?.lat) { setGeo({ lat: j.committee.lat, lng: j.committee.lng }); setGeoStatus('ok'); }
+        const loaded = j.committee?.photos || [];
+        setPhotos([0, 1, 2, 3].map((i) => loaded[i] || null));
+      }
     } catch { /* */ }
     finally { setLoading(false); }
   }, []);
@@ -56,12 +70,15 @@ const PartyCandidatePage: React.FC = () => {
     finally { clearTimeout(t); }
   };
 
-  const capturePhoto = async (file: File | undefined, setter: (s: string) => void) => {
+  const capturePhotoSlot = async (i: number, file: File | undefined) => {
     if (!file) return;
-    setPhotoBusy(true); setMsg(null);
-    try { setter(await compressImage(file)); setMsg({ kind: 'ok', text: 'Foto pronta ✅ — agora toque em salvar.' }); }
-    catch { setMsg({ kind: 'err', text: 'Não consegui processar a foto. Tente tirar de novo.' }); }
-    finally { setPhotoBusy(false); }
+    setPhotoBusySlot(i); setMsg(null);
+    try {
+      const compressed = await compressImage(file);
+      setPhotos((prev) => prev.map((p, idx) => (idx === i ? compressed : p)));
+      setMsg({ kind: 'ok', text: `Foto "${COMMITTEE_SLOTS[i].label}" pronta ✅ — toque em salvar quando terminar as 4.` });
+    } catch { setMsg({ kind: 'err', text: 'Não consegui processar a foto. Tente tirar de novo.' }); }
+    finally { setPhotoBusySlot(null); }
   };
 
   const pegarGps = async () => {
@@ -75,8 +92,9 @@ const PartyCandidatePage: React.FC = () => {
 
   // Comitê: SEMPRE salva (com ou sem GPS). Ordem de comprovação:
   //   1) GPS no local (prova forte)  2) endereço geocodificado (aproximado)  3) sem localização
+  const photoCount = photos.filter(Boolean).length;
   const salvarComite = async () => {
-    if (!addr.trim() && !photo && !geo) { setMsg({ kind: 'warn', text: 'Preencha o endereço, tire a foto ou capture o GPS antes de salvar.' }); return; }
+    if (!addr.trim() && photoCount === 0 && !geo) { setMsg({ kind: 'warn', text: 'Preencha o endereço, tire as fotos ou capture o GPS antes de salvar.' }); return; }
     setBusy('comite'); setMsg(null);
     let g = await tryGeo();
     let geoSource: 'gps' | 'address' | undefined = g ? 'gps' : undefined;
@@ -85,13 +103,17 @@ const PartyCandidatePage: React.FC = () => {
       const gc = await geocode(addr.trim());
       if (gc) { g = gc; geoSource = 'address'; }
     }
+    // Cada slot vira: data URL (nova), "KEEP" (já estava salva) ou null (vazio).
+    const payloadPhotos = photos.map((p) => (p ? (p.startsWith('data:') ? p : 'KEEP') : null));
     try {
-      const r = await postWithTimeout('/api/v1/party/candidate/committee', { address: addr, lat: g?.lat ?? null, lng: g?.lng ?? null, geoSource, photo });
+      const r = await postWithTimeout('/api/v1/party/candidate/committee', { address: addr, lat: g?.lat ?? null, lng: g?.lng ?? null, geoSource, photos: payloadPhotos });
       if (r.ok) {
-        setPhoto(null); await load();
-        setMsg(geoSource === 'gps' ? { kind: 'ok', text: '✅ Comitê salvo COM GPS no local (prova forte)!' }
-             : geoSource === 'address' ? { kind: 'ok', text: '✅ Comitê salvo! Localização aproximada pelo endereço. Para a prova forte, ligue o GPS no local e toque em "Atualizar comitê".' }
-             : { kind: 'warn', text: '✅ Comitê salvo — mas SEM localização. Preencha o endereço ou ligue o GPS e toque em "Atualizar comitê".' });
+        await load();
+        const faltam = COMMITTEE_SLOTS.length - photoCount;
+        const fotosMsg = faltam > 0 ? ` Faltam ${faltam} foto(s) para a comprovação completa.` : ' As 4 fotos estão completas! ✅';
+        setMsg(geoSource === 'gps' ? { kind: faltam > 0 ? 'warn' : 'ok', text: `✅ Comitê salvo COM GPS no local.${fotosMsg}` }
+             : geoSource === 'address' ? { kind: 'warn', text: `✅ Comitê salvo (localização aproximada pelo endereço). Para prova forte, ligue o GPS no local e atualize.${fotosMsg}` }
+             : { kind: 'warn', text: `✅ Comitê salvo — SEM localização. Ligue o GPS e atualize.${fotosMsg}` });
       } else { const j = await r.json().catch(() => ({})); setMsg({ kind: 'err', text: `Erro ao salvar: ${j.detail || j.error || 'tente de novo'}` }); }
     } catch (e: any) { setMsg({ kind: 'err', text: e?.name === 'AbortError' ? 'Demorou demais — verifique sua conexão e tente de novo.' : `Erro ao salvar: ${e.message}` }); }
     finally { setBusy(null); }
@@ -202,23 +224,37 @@ const PartyCandidatePage: React.FC = () => {
 
       {/* Comitê */}
       <div className="bg-[#1c2128] border border-white/5 rounded-3xl p-5 mb-6">
-        <p className="font-bold flex items-center gap-2 mb-3"><Building2 className="w-5 h-5 text-indigo-300" /> Comitê</p>
-        {committee && committee.lat && (
-          <div className="mb-3 text-xs text-emerald-300 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Comitê cadastrado {committee.photo ? '(com foto)' : ''} · GPS ok</div>
-        )}
-        <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="Endereço do comitê" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white mb-2" />
-        <div className="flex flex-wrap gap-2 mb-2">
-          <button onClick={pegarGps} disabled={busy === 'gps'} className={`px-3 py-2 rounded-xl text-sm flex items-center gap-2 ${geo ? 'bg-emerald-600/20 text-emerald-300' : 'bg-white/5 text-slate-200'}`}>
-            {busy === 'gps' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />} {geo ? 'Localização capturada' : 'Usar minha localização'}
-          </button>
-          <label className="px-3 py-2 rounded-xl text-sm flex items-center gap-2 bg-white/5 text-slate-200 cursor-pointer">
-            {photoBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />} {photoBusy ? 'Processando…' : photo ? 'Foto pronta ✅' : 'Foto do comitê'}
-            <input type="file" accept="image/*" className="hidden" disabled={photoBusy} onChange={(e) => capturePhoto(e.target.files?.[0], setPhoto)} />
-          </label>
+        <div className="flex items-center justify-between mb-1">
+          <p className="font-bold flex items-center gap-2"><Building2 className="w-5 h-5 text-indigo-300" /> Comitê</p>
+          <span className={`text-xs font-bold ${photoCount === 4 ? 'text-emerald-300' : 'text-amber-300'}`}>{photoCount}/4 fotos</span>
         </div>
-        {(photo || committee?.photo) && <img src={photo || committee.photo} alt="comitê" className="w-full max-h-48 object-cover rounded-xl mb-2" />}
-        {photo && <p className="text-xs text-amber-300 mb-2 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Foto preparada — toque em <b>salvar</b> abaixo para enviar.</p>}
-        <button onClick={salvarComite} disabled={busy === 'comite'} className={`w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 ${photo ? 'ring-2 ring-amber-400/70 animate-pulse' : ''}`}>
+        <p className="text-xs text-slate-400 mb-3">Envie as <b>4 fotos</b> abaixo no local, com o GPS ligado. É o que prova que o comitê existe de verdade.</p>
+
+        <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="Endereço do comitê (rua, número, bairro)" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white mb-2" />
+        <button onClick={pegarGps} disabled={busy === 'gps'} className={`w-full mb-3 px-3 py-2 rounded-xl text-sm flex items-center justify-center gap-2 ${geo ? 'bg-emerald-600/20 text-emerald-300' : 'bg-white/5 text-slate-200'}`}>
+          {busy === 'gps' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Navigation className="w-4 h-4" />} {geo ? 'Localização capturada ✅' : 'Usar minha localização (GPS)'}
+        </button>
+
+        {/* 4 slots de foto padronizados */}
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          {COMMITTEE_SLOTS.map((slot, i) => (
+            <label key={slot.key} className="relative block rounded-xl overflow-hidden border border-white/10 bg-slate-950 cursor-pointer aspect-[4/3]">
+              {photos[i]
+                ? <img src={photos[i] as string} alt={slot.label} className="absolute inset-0 w-full h-full object-cover" />
+                : <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-2">
+                    {photoBusySlot === i ? <Loader2 className="w-5 h-5 animate-spin text-indigo-300" /> : <Camera className="w-5 h-5 text-slate-500 mb-1" />}
+                  </div>}
+              {/* rótulo + dica sempre visíveis */}
+              <div className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1">
+                <p className="text-[11px] font-bold text-white flex items-center gap-1">{photos[i] ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <span className="text-amber-300">{i + 1}.</span>} {slot.label}</p>
+                <p className="text-[9px] text-slate-300 leading-tight">{slot.hint}</p>
+              </div>
+              <input type="file" accept="image/*" className="hidden" disabled={photoBusySlot !== null} onChange={(e) => capturePhotoSlot(i, e.target.files?.[0])} />
+            </label>
+          ))}
+        </div>
+
+        <button onClick={salvarComite} disabled={busy === 'comite'} className={`w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 ${photos.some((p) => p && p.startsWith('data:')) ? 'ring-2 ring-amber-400/70 animate-pulse' : ''}`}>
           {busy === 'comite' ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />} {busy === 'comite' ? 'Salvando…' : committee ? 'Atualizar comitê' : 'Salvar comitê'}
         </button>
       </div>

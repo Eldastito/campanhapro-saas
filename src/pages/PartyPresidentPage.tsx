@@ -26,7 +26,7 @@ interface ScoreInfo {
   breakdown?: { cadastro: number; comite: number; atividade: number; equipe: number; contas: number };
 }
 interface ProofData {
-  committee?: { address?: string | null; lat?: number | null; lng?: number | null; photo?: string | null; geoSource?: string | null; updatedAt?: string | null } | null;
+  committee?: { address?: string | null; lat?: number | null; lng?: number | null; photo?: string | null; photos?: string[]; geoSource?: string | null; updatedAt?: string | null } | null;
   checkins?: { id: string; tipo?: string; lat?: number | null; lng?: number | null; photo?: string | null; nota?: string | null; createdAt?: string }[];
   valveLog?: { decision: string; note?: string | null; createdAt: string }[];
 }
@@ -640,9 +640,15 @@ const PartyPresidentPage: React.FC = () => {
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Comitê</p>
                   {proofData?.committee ? (
                     <div className="bg-[#1c2128] rounded-2xl border border-white/5 p-3">
-                      {proofData.committee.photo
-                        ? <img src={proofData.committee.photo} alt="comitê" onClick={() => setLightbox(proofData.committee!.photo!)} className="w-full max-h-56 object-cover rounded-xl mb-2 cursor-zoom-in" />
-                        : <div className="text-xs text-slate-500 mb-2">Sem foto do comitê.</div>}
+                      {(() => {
+                        const fotos = (proofData.committee!.photos && proofData.committee!.photos!.length)
+                          ? proofData.committee!.photos! : (proofData.committee!.photo ? [proofData.committee!.photo] : []);
+                        return fotos.length
+                          ? <div className="grid grid-cols-2 gap-1.5 mb-2">
+                              {fotos.map((f, i) => <img key={i} src={f} alt={`comitê ${i + 1}`} onClick={() => setLightbox(f)} className="w-full h-24 object-cover rounded-lg cursor-zoom-in" />)}
+                            </div>
+                          : <div className="text-xs text-slate-500 mb-2">Sem fotos do comitê.</div>;
+                      })()}
                       <p className="text-sm text-white">{proofData.committee.address || 'Endereço não informado'}</p>
                       <div className="flex items-center gap-2 mt-1 flex-wrap">
                         {proofData.committee.lat ? (
