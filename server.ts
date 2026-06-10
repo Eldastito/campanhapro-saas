@@ -232,6 +232,7 @@ async function startServer() {
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
   app.use(express.json({
+    limit: '8mb', // comporta fotos comprimidas (comprovação do Partido) sem estourar 100kb
     verify: (req: any, _res, buf) => { req.rawBody = buf; },
   }));
 

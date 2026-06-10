@@ -39,31 +39,38 @@ const PartyCandidatePage: React.FC = () => {
 
   const pegarGps = async () => {
     setBusy('gps'); setMsg(null);
-    try { setGeo(await getGeo()); } catch (e: any) { setMsg(e.message); }
+    try { setGeo(await getGeo()); setMsg('Localização capturada ✅'); }
+    catch (e: any) { setMsg(`📍 ${e.message} Você ainda pode salvar — mas a localização deixa a comprovação mais forte. Autorize o GPS nas permissões do navegador/celular.`); }
     finally { setBusy(null); }
   };
 
+  // GPS é OPCIONAL — não bloqueia o salvamento (só fortalece a prova).
   const salvarComite = async () => {
-    if (!geo) { setMsg('Toque em "Usar minha localização" no comitê.'); return; }
+    if (!addr.trim() && !photo && !geo) { setMsg('Preencha o endereço, a localização ou uma foto.'); return; }
     setBusy('comite'); setMsg(null);
     try {
       const r = await authedFetch('/api/v1/party/candidate/committee', {
-        method: 'POST', body: JSON.stringify({ address: addr, lat: geo.lat, lng: geo.lng, photo }),
+        method: 'POST', body: JSON.stringify({ address: addr, lat: geo?.lat ?? null, lng: geo?.lng ?? null, photo }),
       });
-      if (r.ok) { setPhoto(null); await load(); setMsg('Comitê salvo!'); }
-    } finally { setBusy(null); }
+      if (r.ok) { setPhoto(null); await load(); setMsg('Comitê salvo!' + (geo ? '' : ' (sem GPS — autorize a localização para a comprovação ficar forte.)')); }
+      else { const j = await r.json().catch(() => ({})); setMsg(`Erro ao salvar: ${j.detail || j.error || 'tente de novo'}`); }
+    } catch (e: any) { setMsg(`Erro ao salvar: ${e.message}`); }
+    finally { setBusy(null); }
   };
 
   const fazerCheckin = async (file: File | undefined) => {
+    if (!file) return;
     setBusy('checkin'); setMsg(null);
     try {
-      const g = await getGeo();
-      const ph = file ? await compressImage(file) : null;
+      const ph = await compressImage(file);
+      let g: { lat: number; lng: number } | null = null;
+      try { g = await getGeo(); } catch { /* GPS opcional — segue sem */ }
       const r = await authedFetch('/api/v1/party/candidate/checkin', {
-        method: 'POST', body: JSON.stringify({ tipo: 'comite', lat: g.lat, lng: g.lng, photo: ph }),
+        method: 'POST', body: JSON.stringify({ tipo: 'comite', lat: g?.lat ?? null, lng: g?.lng ?? null, photo: ph }),
       });
-      if (r.ok) { await load(); setMsg('Check-in registrado!'); }
-    } catch (e: any) { setMsg(e.message); }
+      if (r.ok) { await load(); setMsg('Check-in registrado!' + (g ? ' (com GPS ✅)' : ' (sem GPS — autorize a localização para a prova ficar forte.)')); }
+      else { const j = await r.json().catch(() => ({})); setMsg(`Erro no check-in: ${j.detail || j.error || 'tente de novo'}`); }
+    } catch (e: any) { setMsg(`Erro no check-in: ${e.message}`); }
     finally { setBusy(null); }
   };
 
