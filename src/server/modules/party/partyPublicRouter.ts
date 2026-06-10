@@ -8,7 +8,6 @@
  */
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { randomUUID } from 'crypto';
 
 export function createPartyPublicRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -48,15 +47,31 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
       return res.status(400).json({ error: 'falha_criar_usuario', detail: authErr?.message });
     }
     const uid = created.user.id;
-    const campaignId = randomUUID();   // tenant próprio do candidato (reusa isolamento existente)
 
-    // 2) perfil na tabela users (tipo Candidato, campanha própria)
+    // 2) cria a CAMPANHA (tenant) do candidato — users.campaignId é FK p/ campaigns.id.
+    const { data: party } = await supabase.from('parties').select('name').eq('id', (cand as any).partyId).maybeSingle();
+    const { data: camp, error: campErr } = await supabase.from('campaigns').insert({
+      name: (cand as any).displayName,
+      candidateName: (cand as any).displayName,
+      party: (party as any)?.name || null,
+      electionRole: (cand as any).cargo || null,
+      electionCity: (cand as any).regiao || null,
+      createdBy: uid,
+    }).select('id').single();
+    if (campErr || !camp?.id) {
+      await (supabase as any).auth.admin.deleteUser(uid).catch(() => {});
+      return res.status(500).json({ error: 'falha_campanha', detail: campErr?.message });
+    }
+    const campaignId = (camp as any).id;
+
+    // 3) perfil na tabela users (tipo Candidato, campanha própria)
     const { error: uErr } = await supabase.from('users').insert({
       id: uid, name: (cand as any).displayName, email: mail, type: 'Candidato',
       campaignId, isSupremeAdmin: false, phone: phone?.trim() || (cand as any).phone || null,
     });
     if (uErr) {
       await (supabase as any).auth.admin.deleteUser(uid).catch(() => {}); // rollback best-effort
+      await supabase.from('campaigns').delete().eq('id', campaignId).then(() => {}, () => {});
       return res.status(500).json({ error: 'falha_perfil', detail: uErr.message });
     }
 
