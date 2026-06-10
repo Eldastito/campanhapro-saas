@@ -16,8 +16,12 @@ interface Candidate {
   status: string; valorRecebido?: number; campaignId?: string | null; inviteToken?: string | null;
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
   coordCount?: number; leaderCount?: number; valorAlocado?: number;
-  committee?: { address?: string; lat?: number; lng?: number; hasPhoto?: boolean } | null;
+  committee?: { address?: string; lat?: number; lng?: number; hasPhoto?: boolean; geoSource?: string | null } | null;
   checkinCount?: number;
+}
+interface ProofData {
+  committee?: { address?: string | null; lat?: number | null; lng?: number | null; photo?: string | null; geoSource?: string | null; updatedAt?: string | null } | null;
+  checkins?: { id: string; tipo?: string; lat?: number | null; lng?: number | null; photo?: string | null; nota?: string | null; createdAt?: string }[];
 }
 
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
@@ -62,6 +66,20 @@ const PartyPresidentPage: React.FC = () => {
   const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
   const [repItems, setRepItems] = React.useState<{ categoria: string; valor: string }[]>([]);
   const [savingRep, setSavingRep] = React.useState(false);
+  const [proofFor, setProofFor] = React.useState<Candidate | null>(null);
+  const [proofData, setProofData] = React.useState<ProofData | null>(null);
+  const [proofLoading, setProofLoading] = React.useState(false);
+  const [lightbox, setLightbox] = React.useState<string | null>(null);
+
+  const openProof = async (c: Candidate) => {
+    setProofFor(c); setProofData(null); setProofLoading(true);
+    try {
+      const r = await authedFetch(`/api/v1/party/candidates/${c.id}/proof`);
+      const j = await r.json();
+      if (r.ok) setProofData(j);
+    } catch { /* */ }
+    finally { setProofLoading(false); }
+  };
 
   const openRepasse = (c: Candidate) => {
     setRepasseFor(c);
@@ -275,20 +293,27 @@ const PartyPresidentPage: React.FC = () => {
             <p className="text-sm text-slate-400 mb-1">Comitês geolocalizados e check-ins por candidato — a prova de que a estrutura existe.</p>
             {candidates.map((c) => {
               const com = c.committee;
-              const proven = !!(com && com.lat && com.hasPhoto);
+              const strong = !!(com && com.lat && com.hasPhoto && com.geoSource === 'gps');
+              const approx = !!(com && com.lat && com.hasPhoto && com.geoSource === 'address');
+              const badge = strong
+                ? { cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', txt: '✅ GPS no local' }
+                : approx
+                  ? { cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30', txt: '📍 Aproximado (endereço)' }
+                  : { cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30', txt: '⚠️ Sem comprovação' };
+              const hasMedia = !!(com?.hasPhoto || (c.checkinCount || 0) > 0);
               return (
-                <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex items-center justify-between gap-3">
+                <button key={c.id} onClick={() => openProof(c)}
+                  className="w-full text-left bg-[#1c2128] p-4 rounded-2xl border border-white/5 hover:border-white/20 flex items-center justify-between gap-3 transition-colors">
                   <div className="min-w-0">
                     <p className="font-bold text-white truncate">{c.displayName}</p>
-                    <p className="text-xs text-slate-400">{com?.address || (com?.lat ? 'Comitê com GPS' : 'Sem comitê cadastrado')}</p>
+                    <p className="text-xs text-slate-400 truncate">{com?.address || (com?.lat ? 'Comitê com localização' : 'Sem comitê cadastrado')}</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <span className="text-xs text-slate-400">📸 {c.checkinCount || 0} check-ins</span>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${proven ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-rose-500/15 text-rose-300 border-rose-500/30'}`}>
-                      {proven ? '✅ Comitê comprovado' : '⚠️ Sem comprovação'}
-                    </span>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${badge.cls}`}>{badge.txt}</span>
+                    {hasMedia && <span className="text-[11px] text-indigo-300 font-bold whitespace-nowrap">Ver fotos →</span>}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -393,6 +418,82 @@ const PartyPresidentPage: React.FC = () => {
         </div>
         );
       })()}
+
+      {/* Modal: prova visual (comitê + check-ins com fotos) */}
+      {proofFor && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setProofFor(null)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="min-w-0">
+                <h4 className="font-bold text-white truncate">{proofFor.displayName}</h4>
+                <p className="text-xs text-slate-400">Comprovação de campo</p>
+              </div>
+              <button onClick={() => setProofFor(null)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+
+            {proofLoading ? (
+              <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>
+            ) : (
+              <div className="space-y-4">
+                {/* Comitê */}
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Comitê</p>
+                  {proofData?.committee ? (
+                    <div className="bg-[#1c2128] rounded-2xl border border-white/5 p-3">
+                      {proofData.committee.photo
+                        ? <img src={proofData.committee.photo} alt="comitê" onClick={() => setLightbox(proofData.committee!.photo!)} className="w-full max-h-56 object-cover rounded-xl mb-2 cursor-zoom-in" />
+                        : <div className="text-xs text-slate-500 mb-2">Sem foto do comitê.</div>}
+                      <p className="text-sm text-white">{proofData.committee.address || 'Endereço não informado'}</p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {proofData.committee.lat ? (
+                          <a href={`https://www.google.com/maps?q=${proofData.committee.lat},${proofData.committee.lng}`} target="_blank" rel="noreferrer"
+                            className="text-[11px] text-indigo-300 hover:text-indigo-200 underline">Ver no mapa</a>
+                        ) : <span className="text-[11px] text-slate-500">Sem localização</span>}
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                          proofData.committee.geoSource === 'gps' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          : proofData.committee.geoSource === 'address' ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          : 'bg-rose-500/15 text-rose-300 border-rose-500/30'}`}>
+                          {proofData.committee.geoSource === 'gps' ? '✅ GPS no local' : proofData.committee.geoSource === 'address' ? '📍 Aproximado (endereço)' : '⚠️ Sem GPS'}
+                        </span>
+                      </div>
+                    </div>
+                  ) : <div className="text-xs text-slate-500">Comitê ainda não cadastrado.</div>}
+                </div>
+
+                {/* Check-ins */}
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Check-ins ({proofData?.checkins?.length || 0})</p>
+                  {proofData?.checkins?.length ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {proofData.checkins.map((ck) => (
+                        <div key={ck.id} className="bg-[#1c2128] rounded-xl border border-white/5 overflow-hidden">
+                          {ck.photo
+                            ? <img src={ck.photo} alt="check-in" onClick={() => setLightbox(ck.photo!)} className="w-full h-28 object-cover cursor-zoom-in" />
+                            : <div className="w-full h-28 flex items-center justify-center text-[11px] text-slate-600">sem foto</div>}
+                          <div className="p-2">
+                            <p className="text-[10px] text-slate-400">{ck.createdAt ? new Date(ck.createdAt).toLocaleString('pt-BR') : ''}</p>
+                            {ck.lat ? (
+                              <a href={`https://www.google.com/maps?q=${ck.lat},${ck.lng}`} target="_blank" rel="noreferrer" className="text-[10px] text-indigo-300 underline">📍 mapa</a>
+                            ) : <span className="text-[10px] text-rose-300">sem GPS</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div className="text-xs text-slate-500">Nenhum check-in registrado ainda.</div>}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox de foto em tela cheia */}
+      {lightbox && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] p-4" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="foto" className="max-w-full max-h-full object-contain rounded-xl" />
+          <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 text-white/80 hover:text-white"><X className="w-6 h-6" /></button>
+        </div>
+      )}
     </div>
   );
 };

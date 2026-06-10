@@ -54,21 +54,34 @@ export const isInAppBrowser = (): boolean => {
 
 export const compressImage = (file: File, max = 800, quality = 0.5): Promise<string> =>
   new Promise((resolve, reject) => {
+    // Guarda contra travamento: alguns webviews/formatos (HEIC do iPhone) não
+    // disparam onload nem onerror — sem isso o botão fica "Processando…" pra sempre.
+    let settled = false;
+    const fail = (m: string) => { if (!settled) { settled = true; reject(new Error(m)); } };
+    const ok = (s: string) => { if (!settled) { settled = true; resolve(s); } };
+    const watchdog = setTimeout(() => fail('A foto demorou demais para processar. Tente outra foto (formato JPG/PNG).'), 15000);
+
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        let { width, height } = img;
-        if (width > height && width > max) { height = Math.round((height * max) / width); width = max; }
-        else if (height >= width && height > max) { width = Math.round((width * max) / height); height = max; }
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        clearTimeout(watchdog);
+        try {
+          let { width, height } = img;
+          if (!width || !height) return fail('Imagem sem dimensões — tente outra foto.');
+          if (width > height && width > max) { height = Math.round((height * max) / width); width = max; }
+          else if (height >= width && height > max) { width = Math.round((width * max) / height); height = max; }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return fail('Navegador não suportou o processamento da foto.');
+          ctx.drawImage(img, 0, 0, width, height);
+          ok(canvas.toDataURL('image/jpeg', quality));
+        } catch { fail('Falha ao processar a imagem.'); }
       };
-      img.onerror = () => reject(new Error('Falha ao processar a imagem.'));
+      img.onerror = () => { clearTimeout(watchdog); fail('Formato de foto não suportado (tente JPG/PNG).'); };
       img.src = reader.result as string;
     };
-    reader.onerror = () => reject(new Error('Falha ao ler o arquivo.'));
-    reader.readAsDataURL(file);
+    reader.onerror = () => { clearTimeout(watchdog); fail('Falha ao ler o arquivo.'); };
+    try { reader.readAsDataURL(file); } catch { clearTimeout(watchdog); fail('Não consegui abrir a foto.'); }
   });

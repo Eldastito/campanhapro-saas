@@ -5,6 +5,7 @@ import {
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import { captureGeo, compressImage, isInAppBrowser, GEO_MESSAGES, type CapturedGeo } from '../lib/captureUtils';
+import { geocode } from '../lib/geocode';
 
 /**
  * Experiência ENXUTA do candidato dentro do partido: comprova que o dinheiro
@@ -72,17 +73,25 @@ const PartyCandidatePage: React.FC = () => {
     } finally { setBusy(null); }
   };
 
-  // Comitê: SEMPRE salva (com ou sem GPS). Sem GPS = comprovação fraca (sinal p/ o presidente), não erro.
+  // Comitê: SEMPRE salva (com ou sem GPS). Ordem de comprovação:
+  //   1) GPS no local (prova forte)  2) endereço geocodificado (aproximado)  3) sem localização
   const salvarComite = async () => {
     if (!addr.trim() && !photo && !geo) { setMsg({ kind: 'warn', text: 'Preencha o endereço, tire a foto ou capture o GPS antes de salvar.' }); return; }
     setBusy('comite'); setMsg(null);
-    const g = await tryGeo();
+    let g = await tryGeo();
+    let geoSource: 'gps' | 'address' | undefined = g ? 'gps' : undefined;
+    // Fallback: sem GPS, tenta localizar pelo endereço digitado (usa o geocode que já funciona no mapa).
+    if (!g && addr.trim()) {
+      const gc = await geocode(addr.trim());
+      if (gc) { g = gc; geoSource = 'address'; }
+    }
     try {
-      const r = await postWithTimeout('/api/v1/party/candidate/committee', { address: addr, lat: g?.lat ?? null, lng: g?.lng ?? null, photo });
+      const r = await postWithTimeout('/api/v1/party/candidate/committee', { address: addr, lat: g?.lat ?? null, lng: g?.lng ?? null, geoSource, photo });
       if (r.ok) {
         setPhoto(null); await load();
-        setMsg(g ? { kind: 'ok', text: '✅ Comitê salvo COM GPS!' }
-                 : { kind: 'warn', text: '✅ Comitê salvo — mas SEM localização. Ligue o GPS e toque em "Atualizar comitê" para a comprovação valer no painel do partido.' });
+        setMsg(geoSource === 'gps' ? { kind: 'ok', text: '✅ Comitê salvo COM GPS no local (prova forte)!' }
+             : geoSource === 'address' ? { kind: 'ok', text: '✅ Comitê salvo! Localização aproximada pelo endereço. Para a prova forte, ligue o GPS no local e toque em "Atualizar comitê".' }
+             : { kind: 'warn', text: '✅ Comitê salvo — mas SEM localização. Preencha o endereço ou ligue o GPS e toque em "Atualizar comitê".' });
       } else { const j = await r.json().catch(() => ({})); setMsg({ kind: 'err', text: `Erro ao salvar: ${j.detail || j.error || 'tente de novo'}` }); }
     } catch (e: any) { setMsg({ kind: 'err', text: e?.name === 'AbortError' ? 'Demorou demais — verifique sua conexão e tente de novo.' : `Erro ao salvar: ${e.message}` }); }
     finally { setBusy(null); }
@@ -192,8 +201,9 @@ const PartyCandidatePage: React.FC = () => {
           </label>
         </div>
         {(photo || committee?.photo) && <img src={photo || committee.photo} alt="comitê" className="w-full max-h-48 object-cover rounded-xl mb-2" />}
-        <button onClick={salvarComite} disabled={busy === 'comite'} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
-          {busy === 'comite' ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />} {committee ? 'Atualizar comitê' : 'Salvar comitê'}
+        {photo && <p className="text-xs text-amber-300 mb-2 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Foto preparada — toque em <b>salvar</b> abaixo para enviar.</p>}
+        <button onClick={salvarComite} disabled={busy === 'comite'} className={`w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 ${photo ? 'ring-2 ring-amber-400/70 animate-pulse' : ''}`}>
+          {busy === 'comite' ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />} {busy === 'comite' ? 'Salvando…' : committee ? 'Atualizar comitê' : 'Salvar comitê'}
         </button>
       </div>
 

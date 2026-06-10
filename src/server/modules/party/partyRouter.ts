@@ -52,7 +52,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const checkinCount: Record<string, number> = {};
     if (candidateIds.length) {
       const { data: coms } = await supabase.from('party_committees')
-        .select('candidateId, address, lat, lng, photo').in('candidateId', candidateIds);
+        .select('candidateId, address, lat, lng, photo, "geoSource"').in('candidateId', candidateIds);
       for (const cm of coms || []) committees[(cm as any).candidateId] = cm;
       const { data: cks } = await supabase.from('party_checkins').select('candidateId').in('candidateId', candidateIds);
       for (const ck of cks || []) checkinCount[(ck as any).candidateId] = (checkinCount[(ck as any).candidateId] || 0) + 1;
@@ -69,7 +69,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       ];
       return {
         ...c, coordCount: t.coord, leaderCount: t.lider,
-        committee: com ? { address: com.address, lat: com.lat, lng: com.lng, hasPhoto: !!com.photo } : null,
+        committee: com ? { address: com.address, lat: com.lat, lng: com.lng, hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
         checkinCount: checkinCount[c.id] || 0,
         metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length,
       };
@@ -183,6 +183,19 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     return res.json({ repasse: ins, total: totalRecebido, alocado: totalAlocado });
   });
 
+  // Prova visual de um candidato (presidente): comitê + check-ins COM as fotos.
+  router.get('/candidates/:id/proof', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await candidateOfPresident(userId, req.params.id))) return res.status(404).json({ error: 'not_found' });
+    const { data: committee } = await supabase.from('party_committees')
+      .select('address, lat, lng, photo, "geoSource", "updatedAt"').eq('candidateId', req.params.id).maybeSingle();
+    const { data: checkins } = await supabase.from('party_checkins')
+      .select('id, tipo, lat, lng, photo, nota, "createdAt"').eq('candidateId', req.params.id)
+      .order('createdAt', { ascending: false }).limit(30);
+    return res.json({ committee: committee || null, checkins: checkins || [] });
+  });
+
   // ---- Lado do CANDIDATO de partido (comprovação) ----
   async function myCandidate(userId: string) {
     const { data } = await supabase.from('party_candidates').select('*').eq('userId', userId).maybeSingle();
@@ -219,11 +232,13 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const cand = await myCandidate(userId);
     if (!cand) return res.status(404).json({ error: 'not_found' });
-    const { address, lat, lng, photo } = req.body || {};
+    const { address, lat, lng, photo, geoSource } = req.body || {};
+    const hasGeo = Number(lat) && Number(lng);
     const { data, error } = await supabase.from('party_committees').upsert({
       candidateId: cand.id, partyId: cand.partyId,
       address: address ? String(address).slice(0, 300) : null,
       lat: Number(lat) || null, lng: Number(lng) || null,
+      geoSource: hasGeo ? (geoSource === 'address' ? 'address' : 'gps') : null,
       photo: photo ? String(photo).slice(0, 700000) : null,
       updatedAt: new Date().toISOString(),
     }, { onConflict: 'candidateId' }).select('*').single();
