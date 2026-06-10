@@ -40,13 +40,13 @@ export const AppRoutes: React.FC = () => {
                 <Route
                     path="/login"
                     element={user
-                        ? <Navigate to={user.campaignId ? '/app' : '/welcome'} replace />
+                        ? <Navigate to={(user.campaignId || user.type === 'Presidente de Partido') ? '/app' : '/welcome'} replace />
                         : <LoginPage />}
                 />
                 <Route
                     path="/register"
                     element={user
-                        ? <Navigate to={user.campaignId ? '/app' : '/welcome'} replace />
+                        ? <Navigate to={(user.campaignId || user.type === 'Presidente de Partido') ? '/app' : '/welcome'} replace />
                         : <RegisterPage />}
                 />
                 <Route
