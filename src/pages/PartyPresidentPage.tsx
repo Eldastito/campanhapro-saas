@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned, ShieldCheck,
-  Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check,
+  Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,6 +19,7 @@ interface Candidate {
   committee?: { address?: string; lat?: number; lng?: number; hasPhoto?: boolean; geoSource?: string | null } | null;
   checkinCount?: number; lastCheckinAt?: string | null;
   score?: ScoreInfo;
+  repasseStatus?: string; valveNote?: string | null;
 }
 interface ScoreInfo {
   score: number; level: 'green' | 'yellow' | 'red'; emoji: string; reasons: string[];
@@ -27,6 +28,7 @@ interface ScoreInfo {
 interface ProofData {
   committee?: { address?: string | null; lat?: number | null; lng?: number | null; photo?: string | null; geoSource?: string | null; updatedAt?: string | null } | null;
   checkins?: { id: string; tipo?: string; lat?: number | null; lng?: number | null; photo?: string | null; nota?: string | null; createdAt?: string }[];
+  valveLog?: { decision: string; note?: string | null; createdAt: string }[];
 }
 
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
@@ -40,7 +42,7 @@ const STATUS_BADGE: Record<string, string> = {
 };
 const STATUS_LABEL: Record<string, string> = { pending: 'Aguardando cadastro', active: 'Cadastrado', concluded: 'Concluído' };
 
-const TABS = ['Candidatos', 'Repasses', 'Comprovação', 'Telão'];
+const TABS = ['Candidatos', 'Ranking', 'Repasses', 'Comprovação', 'Telão'];
 
 const Stat: React.FC<{ icon: any; label: string; value: React.ReactNode; from: string; to: string }> = ({ icon: Icon, label, value, from, to }) => (
   <div className={`bg-gradient-to-br ${from} ${to} p-5 rounded-3xl border border-white/10`}>
@@ -57,6 +59,17 @@ const SCORE_CLS: Record<string, string> = {
   yellow: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
   red: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
 };
+const VALVE_META: Record<string, { label: string; cls: string; emoji: string }> = {
+  liberado: { label: 'Repasse liberado', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', emoji: '✅' },
+  retido: { label: 'Repasse segurado', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30', emoji: '⏸️' },
+  cortado: { label: 'Repasse cortado', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30', emoji: '⛔' },
+};
+const ValveChip: React.FC<{ status?: string }> = ({ status }) => {
+  if (!status || status === 'liberado') return null;
+  const m = VALVE_META[status]; if (!m) return null;
+  return <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${m.cls}`}>{m.emoji} {status === 'retido' ? 'Segurado' : 'Cortado'}</span>;
+};
+
 const ScoreChip: React.FC<{ s?: ScoreInfo; size?: 'sm' | 'md' }> = ({ s, size = 'sm' }) => {
   if (!s) return null;
   const tip = s.reasons.length ? s.reasons.map((r) => `• ${r}`).join('\n') : 'Tudo em dia ✅';
@@ -91,6 +104,25 @@ const PartyPresidentPage: React.FC = () => {
   const [proofData, setProofData] = React.useState<ProofData | null>(null);
   const [proofLoading, setProofLoading] = React.useState(false);
   const [lightbox, setLightbox] = React.useState<string | null>(null);
+  const [valveBusy, setValveBusy] = React.useState(false);
+
+  const setValve = async (decision: 'liberado' | 'retido' | 'cortado') => {
+    if (!proofFor) return;
+    let note: string | null = null;
+    if (decision !== 'liberado') {
+      note = window.prompt(decision === 'retido' ? 'Motivo para SEGURAR o repasse (opcional):' : 'Motivo para CORTAR o repasse (opcional):') || null;
+    }
+    setValveBusy(true);
+    try {
+      const r = await authedFetch(`/api/v1/party/candidates/${proofFor.id}/valve`, { method: 'POST', body: JSON.stringify({ decision, note }) });
+      if (r.ok) {
+        setProofFor({ ...proofFor, repasseStatus: decision, valveNote: note });
+        setCandidates((prev) => prev.map((c) => (c.id === proofFor.id ? { ...c, repasseStatus: decision, valveNote: note } : c)));
+        await openProof({ ...proofFor, repasseStatus: decision }); // recarrega log
+      }
+    } catch { /* */ }
+    finally { setValveBusy(false); }
+  };
 
   const openProof = async (c: Candidate) => {
     setProofFor(c); setProofData(null); setProofLoading(true);
@@ -274,6 +306,76 @@ const PartyPresidentPage: React.FC = () => {
         )
       )}
 
+      {tab === 'Ranking' && (
+        candidates.length === 0 ? (
+          <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para ver o ranking.</div>
+        ) : (() => {
+          const ranked = [...candidates].sort((a, b) => (b.score?.score || 0) - (a.score?.score || 0));
+          const greens = candidates.filter((c) => c.score?.level === 'green').length;
+          const yellows = candidates.filter((c) => c.score?.level === 'yellow').length;
+          const reds = candidates.filter((c) => c.score?.level === 'red').length;
+          const aJustificar = candidates.reduce((s, c) => s + Math.max(0, (Number(c.valorRecebido) || 0) - (Number(c.valorAlocado) || 0)), 0);
+          const medal = (i: number) => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`);
+          const lastSeen = (iso?: string | null) => {
+            if (!iso) return 'nunca';
+            const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+            return d <= 0 ? 'hoje' : d === 1 ? 'ontem' : `${d}d`;
+          };
+          return (
+            <div className="space-y-4">
+              {/* Resumo do partido */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-emerald-300">{greens}</p><p className="text-[11px] text-slate-400">🟢 Em dia</p></div>
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-amber-300">{yellows}</p><p className="text-[11px] text-slate-400">🟡 Atenção</p></div>
+                <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-rose-300">{reds}</p><p className="text-[11px] text-slate-400">🔴 Risco</p></div>
+                <div className="bg-slate-800/60 border border-white/10 rounded-2xl p-3 text-center"><p className="text-lg font-black text-rose-300 leading-tight mt-1">{brl(aJustificar)}</p><p className="text-[11px] text-slate-400">a justificar</p></div>
+              </div>
+
+              {/* Pódio top 3 */}
+              {ranked.length >= 3 && (
+                <div className="bg-gradient-to-br from-indigo-600/15 to-purple-600/10 border border-white/10 rounded-3xl p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-indigo-300 mb-3 flex items-center gap-1.5"><Trophy className="w-4 h-4" /> Destaques do partido</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {ranked.slice(0, 3).map((c, i) => (
+                      <button key={c.id} onClick={() => openProof(c)} className="text-center bg-[#1c2128] rounded-2xl border border-white/5 hover:border-white/20 p-3 transition-colors">
+                        <div className="text-2xl">{medal(i)}</div>
+                        <p className="text-sm font-bold text-white truncate mt-1">{c.displayName}</p>
+                        <ScoreChip s={c.score} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tabela lado a lado: recebeu × entregou × score */}
+              <div className="bg-[#1c2128] border border-white/5 rounded-3xl overflow-hidden">
+                <div className="hidden sm:grid grid-cols-[2rem_1fr_5rem_6rem_6rem_5rem] gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-white/5">
+                  <span>#</span><span>Candidato</span><span className="text-center">Score</span><span className="text-right">Recebeu</span><span className="text-right">A justificar</span><span className="text-center">Ativo</span>
+                </div>
+                {ranked.map((c, i) => {
+                  const recebido = Number(c.valorRecebido) || 0;
+                  const restante = recebido - (Number(c.valorAlocado) || 0);
+                  return (
+                    <button key={c.id} onClick={() => openProof(c)}
+                      className="w-full grid grid-cols-[2rem_1fr_5rem] sm:grid-cols-[2rem_1fr_5rem_6rem_6rem_5rem] gap-2 px-4 py-3 items-center text-left hover:bg-white/5 border-b border-white/5 last:border-0 transition-colors">
+                      <span className="font-black text-slate-400">{medal(i)}</span>
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1.5"><span className="font-bold text-white truncate">{c.displayName}</span><ValveChip status={c.repasseStatus} /></span>
+                        <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'}</span>
+                      </span>
+                      <span className="text-center"><ScoreChip s={c.score} /></span>
+                      <span className="hidden sm:block text-right text-sm text-white">{brl(recebido)}</span>
+                      <span className={`hidden sm:block text-right text-sm font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? brl(restante) : '—'}</span>
+                      <span className="hidden sm:flex items-center justify-center gap-1 text-[11px] text-slate-400"><Activity className="w-3 h-3" /> {lastSeen(c.lastCheckinAt)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()
+      )}
+
       {tab === 'Repasses' && (
         candidates.length === 0 ? (
           <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para registrar repasses.</div>
@@ -406,6 +508,12 @@ const PartyPresidentPage: React.FC = () => {
             </div>
             <p className="text-xs text-slate-400 mb-3">Para <b className="text-slate-200">{repasseFor.displayName}</b></p>
 
+            {repasseFor.repasseStatus && repasseFor.repasseStatus !== 'liberado' && (
+              <div className={`mb-3 rounded-xl p-3 text-xs border ${VALVE_META[repasseFor.repasseStatus]?.cls}`}>
+                {VALVE_META[repasseFor.repasseStatus]?.emoji} Atenção: você marcou o repasse deste candidato como <b>{repasseFor.repasseStatus === 'retido' ? 'SEGURADO' : 'CORTADO'}</b>{repasseFor.valveNote ? ` (${repasseFor.valveNote})` : ''}. Registrar mesmo assim ficará no histórico.
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2 mb-3">
               <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor total recebido *" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold" />
               <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
@@ -469,6 +577,35 @@ const PartyPresidentPage: React.FC = () => {
             {proofFor.score && proofFor.score.reasons.length === 0 && (
               <div className="mb-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200 font-bold">✅ Tudo em dia — comprovação completa e contas alocadas.</div>
             )}
+
+            {/* VÁLVULA — decisão do presidente sobre o repasse */}
+            <div className="mb-4 bg-slate-950/60 border border-white/10 rounded-2xl p-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Válvula de repasse</p>
+                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${VALVE_META[proofFor.repasseStatus || 'liberado']?.cls}`}>
+                  {VALVE_META[proofFor.repasseStatus || 'liberado']?.emoji} {VALVE_META[proofFor.repasseStatus || 'liberado']?.label}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(['liberado', 'retido', 'cortado'] as const).map((d) => (
+                  <button key={d} onClick={() => setValve(d)} disabled={valveBusy}
+                    className={`text-xs font-bold rounded-lg px-2 py-2 border disabled:opacity-50 transition-colors ${
+                      proofFor.repasseStatus === d || (!proofFor.repasseStatus && d === 'liberado')
+                        ? VALVE_META[d].cls
+                        : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>
+                    {d === 'liberado' ? '✅ Liberar' : d === 'retido' ? '⏸️ Segurar' : '⛔ Cortar'}
+                  </button>
+                ))}
+              </div>
+              {proofFor.valveNote && <p className="text-[11px] text-slate-400 mt-2">Motivo: {proofFor.valveNote}</p>}
+              {proofData?.valveLog && proofData.valveLog.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-white/5 space-y-0.5">
+                  {proofData.valveLog.slice(0, 4).map((l, i) => (
+                    <p key={i} className="text-[10px] text-slate-500">{new Date(l.createdAt).toLocaleString('pt-BR')} — {VALVE_META[l.decision]?.emoji} {l.decision}{l.note ? ` · ${l.note}` : ''}</p>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {proofLoading ? (
               <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>

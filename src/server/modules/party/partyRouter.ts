@@ -88,6 +88,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length,
         score,
+        repasseStatus: c.repasseStatus || 'liberado', valveNote: c.valveNote || null,
       };
     });
     return res.json({ party, candidates: enriched });
@@ -209,7 +210,29 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const { data: checkins } = await supabase.from('party_checkins')
       .select('id, tipo, lat, lng, photo, nota, "createdAt"').eq('candidateId', req.params.id)
       .order('createdAt', { ascending: false }).limit(30);
-    return res.json({ committee: committee || null, checkins: checkins || [] });
+    const { data: valveLog } = await supabase.from('party_valve_log')
+      .select('decision, note, "createdAt"').eq('candidateId', req.params.id)
+      .order('createdAt', { ascending: false }).limit(10);
+    return res.json({ committee: committee || null, checkins: checkins || [], valveLog: valveLog || [] });
+  });
+
+  // Válvula de repasse: presidente libera / segura / corta + registra no log.
+  router.post('/candidates/:id/valve', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await candidateOfPresident(userId, req.params.id);
+    if (!party) return res.status(404).json({ error: 'not_found' });
+    const decision = String(req.body?.decision || '');
+    if (!['liberado', 'retido', 'cortado'].includes(decision)) return res.status(400).json({ error: 'decision_invalida' });
+    const note = req.body?.note ? String(req.body.note).slice(0, 300) : null;
+    const now = new Date().toISOString();
+    await supabase.from('party_candidates').update({
+      repasseStatus: decision, valveNote: note, valveUpdatedAt: now, updatedAt: now,
+    }).eq('id', req.params.id);
+    await supabase.from('party_valve_log').insert({
+      partyId: (party as any).id, candidateId: req.params.id, decision, note, createdBy: userId,
+    });
+    return res.json({ ok: true, repasseStatus: decision });
   });
 
   // ---- Lado do CANDIDATO de partido (comprovação) ----
