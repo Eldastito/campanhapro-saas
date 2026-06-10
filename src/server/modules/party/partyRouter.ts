@@ -29,8 +29,33 @@ function broadcastTelao(partyId?: string | null) {
   }).catch(() => { /* best-effort */ });
 }
 
+const PROOF_BUCKET = 'party-proofs';
+const SIGNED_TTL = 60 * 60; // 1h
+
 export function createPartyRouter(supabase: SupabaseClient): Router {
   const router = Router();
+
+  // Sobe a foto (data URL base64) pro object storage e devolve o PATH guardado no
+  // banco (não mais o base64). Mantém o banco leve. Retorna null em falha (não quebra o fluxo).
+  async function uploadPhoto(path: string, dataUrl: unknown): Promise<string | null> {
+    if (typeof dataUrl !== 'string') return null;
+    const m = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(dataUrl);
+    if (!m) return typeof dataUrl === 'string' && !dataUrl.startsWith('data:') ? dataUrl : null; // já é path
+    try {
+      const buffer = Buffer.from(m[2], 'base64');
+      const { error } = await supabase.storage.from(PROOF_BUCKET).upload(path, buffer, { contentType: m[1], upsert: true });
+      if (error) { console.warn('[party] upload foto falhou:', error.message); return null; }
+      return path;
+    } catch (e: any) { console.warn('[party] upload exceção:', e?.message); return null; }
+  }
+
+  // Converte o que está no banco em algo exibível: PATH → URL assinada; base64 legado → passa direto.
+  async function signPhoto(stored: string | null | undefined): Promise<string | null> {
+    if (!stored) return null;
+    if (stored.startsWith('data:')) return stored; // legado inline
+    const { data } = await supabase.storage.from(PROOF_BUCKET).createSignedUrl(stored, SIGNED_TTL);
+    return data?.signedUrl || null;
+  }
 
   async function partyOf(userId: string) {
     const { data } = await supabase.from('parties').select('*').eq('presidentId', userId).maybeSingle();
@@ -234,7 +259,10 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const { data: valveLog } = await supabase.from('party_valve_log')
       .select('decision, note, "createdAt"').eq('candidateId', req.params.id)
       .order('createdAt', { ascending: false }).limit(10);
-    return res.json({ committee: committee || null, checkins: checkins || [], valveLog: valveLog || [] });
+    // Assina as fotos (PATH no banco → URL temporária).
+    const committeeSigned = committee ? { ...committee, photo: await signPhoto((committee as any).photo) } : null;
+    const checkinsSigned = await Promise.all((checkins || []).map(async (c: any) => ({ ...c, photo: await signPhoto(c.photo) })));
+    return res.json({ committee: committeeSigned, checkins: checkinsSigned, valveLog: valveLog || [] });
   });
 
   // Válvula de repasse: presidente libera / segura / corta + registra no log.
@@ -292,7 +320,8 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       coordCount: t.coord, leaderCount: t.lider,
       valorRecebido: Number(cand.valorRecebido) || 0, valorAlocado: Number(cand.valorAlocado) || 0,
     });
-    return res.json({ candidate: cand, partyName: (party as any)?.name, committee: committee || null, checkins: checkins || [], metas, score });
+    const committeeSigned = committee ? { ...committee, photo: await signPhoto((committee as any).photo) } : null;
+    return res.json({ candidate: cand, partyName: (party as any)?.name, committee: committeeSigned, checkins: checkins || [], metas, score });
   });
 
   router.post('/candidate/committee', async (req: Request, res: Response) => {
@@ -302,17 +331,23 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!cand) return res.status(404).json({ error: 'not_found' });
     const { address, lat, lng, photo, geoSource } = req.body || {};
     const hasGeo = Number(lat) && Number(lng);
+    // Preserva a foto atual quando não vier foto nova; sobe nova foto pro storage.
+    const existing = (await supabase.from('party_committees').select('photo').eq('candidateId', cand.id).maybeSingle()).data as any;
+    let photoPath: string | null = existing?.photo || null;
+    if (typeof photo === 'string' && photo.startsWith('data:')) {
+      photoPath = (await uploadPhoto(`party/${cand.partyId}/committee/${cand.id}.jpg`, photo)) || photoPath;
+    }
     const { data, error } = await supabase.from('party_committees').upsert({
       candidateId: cand.id, partyId: cand.partyId,
       address: address ? String(address).slice(0, 300) : null,
       lat: Number(lat) || null, lng: Number(lng) || null,
       geoSource: hasGeo ? (geoSource === 'address' ? 'address' : 'gps') : null,
-      photo: photo ? String(photo).slice(0, 700000) : null,
+      photo: photoPath,
       updatedAt: new Date().toISOString(),
     }, { onConflict: 'candidateId' }).select('*').single();
     if (error) return res.status(500).json({ error: error.message });
     broadcastTelao(cand.partyId);
-    return res.json({ committee: data });
+    return res.json({ committee: { ...data, photo: await signPhoto((data as any)?.photo) } });
   });
 
   router.post('/candidate/checkin', async (req: Request, res: Response) => {
@@ -321,11 +356,14 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const cand = await myCandidate(userId);
     if (!cand) return res.status(404).json({ error: 'not_found' });
     const { tipo, lat, lng, photo, nota } = req.body || {};
+    const photoPath = (typeof photo === 'string' && photo.startsWith('data:'))
+      ? await uploadPhoto(`party/${cand.partyId}/checkin/${cand.id}-${randomBytes(6).toString('hex')}.jpg`, photo)
+      : null;
     const { data, error } = await supabase.from('party_checkins').insert({
       candidateId: cand.id, partyId: cand.partyId, userId,
       tipo: ['comite', 'evento', 'visita', 'reuniao'].includes(tipo) ? tipo : 'comite',
       lat: Number(lat) || null, lng: Number(lng) || null,
-      photo: photo ? String(photo).slice(0, 700000) : null,
+      photo: photoPath,
       nota: nota ? String(nota).slice(0, 300) : null,
     }).select('id, "createdAt"').single();
     if (error) return res.status(500).json({ error: error.message });
