@@ -60,7 +60,8 @@ const AdminApp: React.FC = () => {
     const tabs = React.useMemo(() => {
         if (!permissions || !userType) return [];
         
-        const isAdmin = userType === 'Admin' || userType === 'Coordenador';
+        // 'Candidato de Partido' opera como coordenador na plataforma cortesia.
+        const isAdmin = userType === 'Admin' || userType === 'Coordenador' || userType === 'Candidato de Partido';
 
         // 1. Permissões básicas do perfil
         let allowedTabs = permissions[userType] || ['Dashboard'];

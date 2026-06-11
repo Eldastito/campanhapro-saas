@@ -52,7 +52,11 @@ export const DEFAULT_PERMISSIONS: ProfilePermissions = {
     'Pesquisador': ['Dashboard', 'Visitas', 'Ajuda'],
     'Fiscal':      ['Dashboard', 'Dia das Eleições', 'Ajuda'],
     'Suporte':     ['Dashboard', 'Visitas', 'Ajuda'],
-    'Manutenção':  ['Dashboard', 'Visitas', 'Ajuda']
+    'Manutenção':  ['Dashboard', 'Visitas', 'Ajuda'],
+    // Candidato de Partido — quando usa a plataforma em modo CORTESIA (Opção B),
+    // opera como coordenador (CRM, equipes, visitas, formulários, etc). A
+    // fiscalização do partido fica no PartyCandidatePage, fora daqui.
+    'Candidato de Partido': ['Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento', 'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas', 'Dia das Eleições', 'Analytics', 'CRM', 'Permissões', 'Configurações', 'Ajuda'],
 };
 
 export const PLAN_CONFIGS = {
