@@ -20,6 +20,7 @@ import CsvImportModal from '../components/crm/CsvImportModal';
 import WhatsAppBlastModal from '../components/crm/WhatsAppBlastModal';
 import { usePlanStatus, isAiLocked } from '../hooks/usePlanStatus';
 import UpgradeModal, { LockBadge } from '../components/plan/UpgradeModal';
+import AiTrialCard from '../components/plan/AiTrialCard';
 
 interface ClassifyContactsButtonProps {
   campaignId: string | undefined;
@@ -314,6 +315,9 @@ const CRMPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Trial 24h IA — só pro plano grátis. Mostra progresso → elegível → ativo → expirado. */}
+      <AiTrialCard className="mb-6" />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="bg-[#161b22] p-6 rounded-3xl border border-white/5 relative overflow-hidden group">
