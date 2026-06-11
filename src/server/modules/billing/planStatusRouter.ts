@@ -20,7 +20,7 @@ export function createPlanStatusRouter(supabase: SupabaseClient): Router {
     if (!cid) return res.status(400).json({ error: 'sem_campanha' });
 
     const { data: cfg } = await supabase.from('campaign_configs')
-      .select('"planTier", features, limits, "aiTrialUntil", "aiTrialUsed", "aiTrialStartedAt"')
+      .select('"planTier", features, limits, "aiTrialUntil", "aiTrialUsed", "aiTrialStartedAt", "electionDate"')
       .eq('id', cid).maybeSingle();
     if (!cfg) return res.status(404).json({ error: 'sem_config' });
 
@@ -56,6 +56,7 @@ export function createPlanStatusRouter(supabase: SupabaseClient): Router {
         leadsThreshold: TRIAL_LEAD_THRESHOLD,
         leadsCount: leads.count || 0,
       },
+      electionDate: (cfg as any).electionDate,
     });
   });
 

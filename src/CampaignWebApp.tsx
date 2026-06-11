@@ -6,6 +6,7 @@ import { LOCAL_STORAGE_KEYS } from './constants';
 import { useAuth } from './contexts/AuthContext';
 import { useProfilePermissions } from './contexts/PermissionsContext';
 import Header from './components/Header';
+import ElectionCountdownBanner from './components/plan/ElectionCountdownBanner';
 import Tabs from './components/Tabs';
 import GuidedTour from './components/ui/GuidedTour';
 import ErrorBoundary from './components/dev/ErrorBoundary';
@@ -184,6 +185,7 @@ const AdminApp: React.FC = () => {
     return (
         <div className="min-h-screen bg-slate-800 text-slate-50 font-sans">
             <Header logoUrl={headerLogo} />
+            <ElectionCountdownBanner />
             <main className="container mx-auto p-4 sm:p-6 md:p-8">
                 <Tabs tabs={tabs} iconMap={iconMap}>
                     {tabs.map(tab => (

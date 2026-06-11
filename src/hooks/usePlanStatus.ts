@@ -26,7 +26,16 @@ export interface PlanStatus {
     startedAt: string | null; eligible: boolean;
     leadsThreshold: number; leadsCount: number;
   };
+  electionDate?: string | null;
 }
+
+/** Dias restantes até a eleição (0 = hoje, negativo = passou). */
+export const daysToElection = (s: PlanStatus | null): number | null => {
+  if (!s?.electionDate) return null;
+  const target = new Date(s.electionDate); target.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+};
 
 const TTL_MS = 60_000;
 let cache: { data: PlanStatus | null; at: number } = { data: null, at: 0 };
