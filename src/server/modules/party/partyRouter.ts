@@ -147,7 +147,9 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         repasseStatus: c.repasseStatus || 'liberado', valveNote: c.valveNote || null,
       };
     });
-    return res.json({ party, candidates: enriched });
+    // Não vaza dados de cobrança pro presidente (valor só no Supreme Admin).
+    const { billingNote, ...partySafe } = party as any;
+    return res.json({ party: partySafe, candidates: enriched });
   });
 
   // Provisiona o partido do presidente (idempotente).
