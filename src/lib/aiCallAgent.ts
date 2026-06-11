@@ -420,6 +420,40 @@ export async function callAgent(
     // opts.maxTokens (quando informado) sobrescreve o teto do AGENT_CONFIGS.
     const config: AgentConfig = opts.maxTokens ? { ...baseConfig, maxTokens: opts.maxTokens } : baseConfig;
 
+    // 0. ENFORCEMENT DE PLANO: bloqueia IA no GRÁTIS (libera só durante trial 24h).
+    if (supabaseAdmin && opts.campaignId) {
+        try {
+            const { checkAiQuota } = await import('../server/modules/billing/quotaEnforcer');
+            const quota = await checkAiQuota(supabaseAdmin, opts.campaignId, {
+                // Trial 24h: máx 25 classificações (agentId='classifier') ou 5 dossiês ('competitive_intel').
+                // Por simplicidade nesta fase, qualquer call do trial vale 1; cota dura por uso total.
+                trialCotaCheck: (used) => used < 30,
+            });
+            if (!quota.ok) {
+                await supabaseAdmin.from('agent_runs').insert({
+                    campaignId: opts.campaignId, userId: opts.userId || null,
+                    managerRunId: opts.managerRunId || null, agentId,
+                    provider: 'none', model: 'none', action: 'plan_blocked',
+                    promptExcerpt: prompt.slice(0, 500), tokensIn: 0, tokensOut: 0, costCentsUsd: 0,
+                    status: 'plan_blocked', error: quota.upgradeMessage || 'Recurso de IA bloqueado pelo plano.',
+                }).then(() => {}, () => {});
+                const err: any = new Error(quota.upgradeMessage || 'IA bloqueada pelo plano.');
+                err.code = 'PLAN_BLOCKED'; err.feature = 'ai_calls'; err.planTier = quota.planTier;
+                err.upgradeMessage = quota.upgradeMessage;
+                throw err;
+            }
+            // Trial ativo? incrementa o contador atomicamente (best-effort).
+            if (quota.resetAt) {
+                await supabaseAdmin.rpc('increment_ai_trial_used', { p_campaign_id: opts.campaignId })
+                    .then(() => {}, () => {});
+            }
+        } catch (e: any) {
+            if (e?.code === 'PLAN_BLOCKED') throw e;
+            // Outras falhas do enforcement não bloqueiam (fail-open p/ não quebrar pagantes).
+            console.warn('[callAgent] enforcement falhou (segue):', e?.message);
+        }
+    }
+
     // 1. Budget check (não-bloqueante se Supabase admin não disponível)
     if (supabaseAdmin) {
         const spent = await getMonthSpentCents(supabaseAdmin, opts.campaignId);

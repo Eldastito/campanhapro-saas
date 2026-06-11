@@ -12,6 +12,7 @@ import {
   reconnectInstance,
 } from '../integrations/evolutionApiClient';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { checkWhatsAppQuota } from '../billing/quotaEnforcer';
 
 function campaignIdOf(req: Request): string | undefined {
   return (req as any).user?.campaignId ?? (req.query.campaignId as string | undefined);
@@ -370,6 +371,20 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
 
       if (eligible.length === 0) {
         return res.status(400).json({ error: 'Nenhum contato elegível encontrado com os filtros selecionados' });
+      }
+
+      // ENFORCEMENT: cota diária de WhatsApp do plano (100/dia no Grátis, ilimitado no Pro).
+      const quota = await checkWhatsAppQuota(supabaseAdmin, cid, eligible.length);
+      if (!quota.ok) {
+        return res.status(429).json({
+          error: 'quota_exceeded',
+          feature: 'whatsapp_blast',
+          used: quota.used, limit: quota.limit,
+          remaining: Math.max(0, (quota.limit || 0) - (quota.used || 0)),
+          attempted: eligible.length,
+          resetAt: quota.resetAt, planTier: quota.planTier,
+          upgradeMessage: quota.upgradeMessage,
+        });
       }
 
       // Create blast record

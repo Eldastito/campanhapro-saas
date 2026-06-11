@@ -36,6 +36,7 @@ import {
   expensiveLimiter, messagingLimiter, mutationLimiter, webhookLimiter,
 } from './src/server/middleware/perCampaignRateLimit';
 import { createBillingRouter } from './src/server/modules/billing/billingRouter';
+import { createPlanStatusRouter } from './src/server/modules/billing/planStatusRouter';
 import { createPaymentWebhookRouter } from './src/server/modules/billing/paymentWebhookRouter';
 import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
 import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
@@ -255,6 +256,7 @@ async function startServer() {
     app.use('/api/v1/whatsapp', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'whatsapp_omnichannel'), createWhatsappRouter(supabaseAdmin));
     app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'rag'), requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
     app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
+    app.use('/api/v1/plan', requireAuth, createPlanStatusRouter(supabaseAdmin));
     app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
     app.use('/api/v1/team', requireAuth, mutationLimiter, createTeamInvitesRouter(supabaseAdmin));
     // Token-based routes: GET is public so the email-link landing page can render
