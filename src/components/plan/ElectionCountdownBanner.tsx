@@ -14,6 +14,7 @@ import * as React from 'react';
 import { ArrowRight, X, AlertTriangle, Sparkles, Zap, Skull } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { usePlanStatus, isFree, daysToElection } from '../../hooks/usePlanStatus';
+import { useAuth } from '../../contexts/AuthContext';
 
 const DISMISS_KEY = 'electionBannerDismissed';
 
@@ -70,6 +71,7 @@ function tierFor(days: number): Tier | null {
 
 const ElectionCountdownBanner: React.FC = () => {
   const { status } = usePlanStatus();
+  const { user } = useAuth();
   const [dismissed, setDismissed] = React.useState(() => {
     try { return sessionStorage.getItem(DISMISS_KEY) === '1'; } catch { return false; }
   });
@@ -78,8 +80,22 @@ const ElectionCountdownBanner: React.FC = () => {
   if (!status || !isFree(status) || dismissed) return null;
   const days = daysToElection(status);
   if (days === null) return null;
-  const tier = tierFor(days);
+  let tier = tierFor(days);
   if (!tier) return null;
+
+  // Adaptação especial para candidato/coordenador/líder DE PARTIDO usando a
+  // plataforma em modo cortesia. O texto evita "vire pago" e foca em mostrar
+  // que o ESSENCIAL é cortesia do partido, mas o Pro libera IA/dossiê/Dia D.
+  const isFromParty = user?.type === 'Candidato de Partido';
+  if (isFromParty) {
+    tier = {
+      ...tier,
+      subtitle: tier === TIERS[3]
+        ? '🎁 O essencial é cortesia do seu partido. Mas IA, dossiê e Dia D só no Pro — e seu opositor pode estar usando.'
+        : '🎁 Você tem o essencial de cortesia via partido. Quer IA, dossiê e Dia D? Plano Pro.',
+      cta: 'Ver Plano Pro',
+    };
+  }
 
   const dismiss = () => {
     try { sessionStorage.setItem(DISMISS_KEY, '1'); } catch { /* */ }

@@ -9,6 +9,8 @@
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeScore } from './score';
+import { ensureCampaignConfig } from '../../../utils/planUtils';
+import { Plan } from '../../../types/user';
 
 export function createPartyPublicRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -153,6 +155,10 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     await supabase.from('party_candidates').update({
       userId: uid, campaignId, status: 'active', updatedAt: new Date().toISOString(),
     }).eq('id', (cand as any).id);
+
+    // 4) provisiona o plano GRÁTIS na campanha — assim que ele entrar na plataforma
+    //    (modo cortesia), já encontra CRM, agenda, formulários liberados; IA travada.
+    await ensureCampaignConfig(supabase, campaignId, Plan.GRATIS).catch(() => {});
 
     return res.json({ ok: true });
   });

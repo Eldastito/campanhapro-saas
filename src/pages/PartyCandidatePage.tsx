@@ -279,13 +279,34 @@ const PartyCandidatePage: React.FC = () => {
         )}
       </div>
 
-      {/* Teaser de upgrade — o candidato já é um tenant; o CampanhaPro completo é um passo. */}
-      <a href="/" target="_blank" rel="noreferrer"
-        className="mt-6 block bg-gradient-to-br from-indigo-600/20 to-fuchsia-600/10 border border-indigo-500/30 rounded-3xl p-5 hover:border-indigo-400/50 transition-colors">
-        <p className="font-bold flex items-center gap-2 text-indigo-200"><Sparkles className="w-5 h-5 text-fuchsia-300" /> Quer a campanha completa?</p>
-        <p className="text-sm text-slate-300 mt-1">Este é o modo essencial de comprovação. O <b>CampanhaPro completo</b> traz IA estrategista, CRM de eleitores, pesquisa, agenda com voz, WhatsApp e mapa de calor — tudo já ligado à sua estrutura.</p>
-        <span className="inline-flex items-center gap-1.5 mt-3 text-sm font-bold text-fuchsia-300">Conhecer o plano completo <ArrowRight className="w-4 h-4" /></span>
-      </a>
+      {/* Cortesia da plataforma — o partido contratou o produto Partido; aqui oferecemos
+          o ESSENCIAL do CampanhaPro de cortesia + caminho pago pro completo. */}
+      <div className="mt-6 bg-gradient-to-br from-indigo-600/15 to-fuchsia-600/10 border border-indigo-500/30 rounded-3xl p-5">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="bg-indigo-500/20 border border-indigo-500/30 rounded-2xl p-2.5 shrink-0">
+            <Sparkles className="w-5 h-5 text-fuchsia-300" />
+          </div>
+          <div>
+            <p className="font-black text-indigo-100 text-lg leading-tight">CampanhaPro de cortesia</p>
+            <p className="text-xs text-slate-400">Cedido por <b>{data.partyName || 'seu partido'}</b></p>
+          </div>
+        </div>
+        <p className="text-sm text-slate-300 mb-4">
+          Além de prestar contas, você pode <b>organizar sua campanha</b>: CRM de eleitores,
+          agenda, formulários, equipe — tudo grátis enquanto durar o piloto. Quer mais?
+          O <b className="text-fuchsia-300">Plano Pro</b> tem IA estrategista, dossiê de adversários e Dia D.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button onClick={() => { import('./PartyCandidateShell').then((m) => m.setPartyView('platform')); }}
+            className="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 text-white">
+            <Sparkles className="w-4 h-4" /> Acessar a plataforma
+          </button>
+          <a href="/assinar" target="_blank" rel="noreferrer"
+            className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 text-fuchsia-200 text-sm">
+            Conhecer Plano Pro <ArrowRight className="w-4 h-4" />
+          </a>
+        </div>
+      </div>
 
       {/* Compliance / LGPD — transparência, não vigilância */}
       <div className="mt-6 mb-2 text-[11px] leading-relaxed text-slate-500 border-t border-white/5 pt-4">

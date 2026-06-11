@@ -10,7 +10,7 @@ import CandidateDashboardPage from './pages/CandidateDashboardPage';
 import LeaderDashboardPage from './pages/LeaderDashboardPage';
 import FiscalPage from './pages/FiscalPage';
 import PartyPresidentPage from './pages/PartyPresidentPage';
-import PartyCandidatePage from './pages/PartyCandidatePage';
+import PartyCandidateShell from './pages/PartyCandidateShell';
 import SupremeAdminPage from './pages/SupremeAdminPage';
 import BlockedPage from './pages/BlockedPage';
 import LoadingScreen from './components/ui/LoadingScreen';
@@ -88,8 +88,10 @@ const App: React.FC = () => {
             return <PartyPresidentPage />;
 
         case 'Candidato de Partido':
-            // Candidato dentro do partido — experiência enxuta de comprovação.
-            return <PartyCandidatePage />;
+            // Candidato dentro do partido — shell com 2 áreas:
+            // 1. Tela enxuta de comprovação (default, obrigação ao partido).
+            // 2. Plataforma CampanhaPro em modo cortesia (degustação).
+            return <PartyCandidateShell />;
 
         default:
             // 'Apoiador', 'Colaborador', 'Suporte', 'Manutenção'
