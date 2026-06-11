@@ -6,20 +6,23 @@ import { Plan } from '../types/user';
 // A plataforma tem DOIS planos comercialmente: Limitado e Completo.
 // Internamente mapeamos para 3 enums legados (Essencial, Estrategico, Total).
 
-export type PlanTier = 'limitado' | 'completo';
+export type PlanTier = 'gratis' | 'limitado' | 'completo';
 
 export interface PlanConfigData {
   planTier: PlanTier;
   features: string[];
   limits: {
-    aiCalls: number;
-    teamMembers: number;
-    visits: number;
+    aiCalls: number;       // chamadas de IA/mês (0 = travado, só durante trial liberado)
+    teamMembers: number;   // limite de membros operacionais
+    visits: number;        // limite de visitas registradas
+    whatsappPerDay: number; // disparos WhatsApp por dia POR CAMPANHA
+    forms: number;          // formulários ativos
   };
 }
 
 // Mapeamento Plan (user-level enum) → PlanTier (feature access)
 export const PLAN_TO_TIER: Record<Plan, PlanTier> = {
+  [Plan.GRATIS]: 'gratis',
   [Plan.ESSENCIAL]: 'limitado',
   [Plan.ESTRATEGICO]: 'limitado',
   [Plan.TOTAL]: 'completo',
@@ -27,10 +30,17 @@ export const PLAN_TO_TIER: Record<Plan, PlanTier> = {
 
 // Features de cada tier — keys usadas no featureToTabMap em CampaignWebApp
 export const TIER_CONFIG: Record<PlanTier, PlanConfigData> = {
+  gratis: {
+    planTier: 'gratis',
+    // Plano grátis: foco em COLETA (gera lead p/ IA aprender), IA travada,
+    // Dia D travado (gatilho de conversão na reta final).
+    features: ['dashboard', 'crm', 'visits', 'team', 'forms', 'engagement', 'help'],
+    limits: { aiCalls: 0, teamMembers: 10, visits: 1000, whatsappPerDay: 100, forms: 5 }
+  },
   limitado: {
     planTier: 'limitado',
     features: ['dashboard', 'visits', 'team', 'help'],
-    limits: { aiCalls: 100, teamMembers: 50, visits: 1000 }
+    limits: { aiCalls: 100, teamMembers: 50, visits: 1000, whatsappPerDay: 1000, forms: 20 }
   },
   completo: {
     planTier: 'completo',
@@ -40,7 +50,7 @@ export const TIER_CONFIG: Record<PlanTier, PlanConfigData> = {
       'resources', 'crm', 'demonstration', 'analytics',
       'election_day'
     ],
-    limits: { aiCalls: 999999, teamMembers: 999999, visits: 999999 }
+    limits: { aiCalls: 999999, teamMembers: 999999, visits: 999999, whatsappPerDay: 999999, forms: 999999 }
   }
 };
 
@@ -57,6 +67,17 @@ export function getPlanConfig(plan: Plan): PlanConfigData {
 // São FEATURE KEYS (não nomes de aba). Cada plano superior inclui os
 // módulos dos inferiores. Total = planTier 'completo' (vê tudo).
 // ============================================================
+// PLANO GRÁTIS — isca de conversão. Estratégia:
+// • LIBERA: o que gera lead (CRM, formulários, equipe, visitas, engajamento básico).
+// • TRAVA: IA (ai_agents, intelligence, scenarios, content_studio, rag, paperclip),
+//          Dia D (election_day - gatilho de venda na reta final),
+//          Financeiro, Analytics avançado, Reuniões com transcrição,
+//          Orquestrador, Compliance, Budget CEO.
+// • Cotas duras: 100 WhatsApp/dia POR CAMPANHA, 10 membros, 5 forms, 0 IA.
+const GRATIS_FEATURES = [
+  'dashboard', 'crm', 'help', 'visits', 'team', 'engagement', 'forms', 'resources',
+];
+
 const ESSENCIAL_FEATURES = [
   'dashboard', 'crm', 'help', 'visits', 'team', 'engagement',
   'resources', 'goals', 'routines', 'ai_agents', 'forms',
@@ -72,6 +93,7 @@ const TOTAL_FEATURES = [
 ];
 
 export const PLAN_FEATURES: Record<Plan, string[]> = {
+  [Plan.GRATIS]: GRATIS_FEATURES,
   [Plan.ESSENCIAL]: ESSENCIAL_FEATURES,
   [Plan.ESTRATEGICO]: ESTRATEGICO_FEATURES,
   [Plan.TOTAL]: TOTAL_FEATURES,
@@ -110,6 +132,8 @@ export async function syncPlanForCampaign(
         ai_calls: config.limits.aiCalls,
         team_members: config.limits.teamMembers,
         visits: config.limits.visits,
+        whatsapp_per_day: config.limits.whatsappPerDay,
+        forms: config.limits.forms,
       },
       status: 'active',
     }, { onConflict: 'id' });
@@ -124,7 +148,7 @@ export async function syncPlanForCampaign(
 export async function ensureCampaignConfig(
   supabase: any,
   campaignId: string,
-  plan: Plan = Plan.ESSENCIAL
+  plan: Plan = Plan.GRATIS  // default agora é GRATIS — novos cadastros entram travados até pagar
 ): Promise<void> {
   if (!campaignId) return;
 

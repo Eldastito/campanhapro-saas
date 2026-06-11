@@ -1,4 +1,5 @@
 export enum Plan {
+  GRATIS = 'Gratis',
   ESSENCIAL = 'Essencial',
   ESTRATEGICO = 'Estrategico',
   TOTAL = 'Total',
