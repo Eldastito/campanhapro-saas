@@ -18,6 +18,8 @@ import { logSubmissionGeo } from '../utils/geoTracking';
 import { Brain, Loader2 } from 'lucide-react';
 import CsvImportModal from '../components/crm/CsvImportModal';
 import WhatsAppBlastModal from '../components/crm/WhatsAppBlastModal';
+import { usePlanStatus, isAiLocked } from '../hooks/usePlanStatus';
+import UpgradeModal, { LockBadge } from '../components/plan/UpgradeModal';
 
 interface ClassifyContactsButtonProps {
   campaignId: string | undefined;
@@ -26,8 +28,13 @@ interface ClassifyContactsButtonProps {
 
 const ClassifyContactsButton: React.FC<ClassifyContactsButtonProps> = ({ campaignId, onDone }) => {
   const [running, setRunning] = React.useState(false);
+  const [showUpgrade, setShowUpgrade] = React.useState(false);
+  const { status } = usePlanStatus();
+  const locked = isAiLocked(status);
+
   const run = async () => {
     if (!campaignId) return;
+    if (locked) { setShowUpgrade(true); return; }
     setRunning(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -37,7 +44,11 @@ const ClassifyContactsButton: React.FC<ClassifyContactsButtonProps> = ({ campaig
         body: JSON.stringify({ campaignId, limit: 30 }),
       });
       const json = await r.json();
-      if (!r.ok) throw new Error(json.error || `HTTP ${r.status}`);
+      if (!r.ok) {
+        // Backend pode devolver PLAN_BLOCKED — mostra o modal em vez de alert.
+        if (json.code === 'PLAN_BLOCKED' || json.upgradeMessage) { setShowUpgrade(true); return; }
+        throw new Error(json.error || `HTTP ${r.status}`);
+      }
       alert(`✅ ${json.classified}/${json.total} contatos classificados pela IA.\nCusto: $${(json.cost_cents_usd/100).toFixed(4)}`);
       onDone?.();
     } catch (err: any) {
@@ -47,15 +58,22 @@ const ClassifyContactsButton: React.FC<ClassifyContactsButtonProps> = ({ campaig
     }
   };
   return (
-    <button
-      onClick={run}
-      disabled={running || !campaignId}
-      className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-purple-600/20 transition-all text-sm"
-      title="IA analisa os contatos sem classificação confiável e atribui Indeciso/Apoiador/Multiplicador"
-    >
-      {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
-      Classificar com IA
-    </button>
+    <>
+      <button
+        onClick={run}
+        disabled={running || !campaignId}
+        className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg transition-all text-sm ${
+          locked
+            ? 'bg-purple-600/30 hover:bg-purple-600/40 text-purple-200 border border-purple-400/30'
+            : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/20'
+        } disabled:opacity-50`}
+        title={locked ? 'Recurso do Plano Pro — clique para ver' : 'IA classifica os contatos em Apoiador/Indeciso/Opositor'}
+      >
+        {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
+        Classificar com IA {locked && <LockBadge />}
+      </button>
+      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} feature="ai_calls" />
+    </>
   );
 };
 
@@ -71,6 +89,9 @@ const CRMPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [aiInsight, setAiInsight] = useState<string | null>(null);
   const [generatingInsight, setGeneratingInsight] = useState(false);
+  const [upgradeFor, setUpgradeFor] = useState<string | null>(null);
+  const { status: planStatus } = usePlanStatus();
+  const aiLocked = isAiLocked(planStatus);
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
   const [filterPauta, setFilterPauta] = useState<string | null>(null);
   const [selectedContact, setSelectedContact] = useState<any | null>(null);
@@ -171,12 +192,15 @@ const CRMPage: React.FC = () => {
   };
 
   const generateAIRecommendation = async () => {
+    if (aiLocked) { setUpgradeFor('ai_calls'); return; }
     setGeneratingInsight(true);
     try {
       const prompt = `Analise minha base de contatos com ${contacts.length} registros e me dê um insight estratégico rápido sobre quem focar hoje ou tendências detectadas.`;
       const response = await askCrmSpecialist(prompt, user?.campaignId);
       setAiInsight(typeof response === 'string' ? response : (response?.text || response?.content || JSON.stringify(response)));
-    } catch (err) {
+    } catch (err: any) {
+      // Backend pode devolver PLAN_BLOCKED
+      if (err?.code === 'PLAN_BLOCKED' || err?.message?.includes?.('Plano')) { setUpgradeFor('ai_calls'); return; }
       setAiInsight("Não foi possível gerar um insight no momento.");
     } finally {
       setGeneratingInsight(false);
@@ -259,13 +283,23 @@ const CRMPage: React.FC = () => {
             </button>
           </div>
           <ClassifyContactsButton campaignId={user?.campaignId} onDone={fetchContacts} />
-          <button
-            onClick={() => setIsBlastOpen(true)}
-            className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-emerald-700/20 transition-all text-sm"
-            title="Disparar mensagem em massa via WhatsApp"
-          >
-            <Zap className="w-4 h-4" /> Disparar WA
-          </button>
+          {(() => {
+            const limit = planStatus?.limits.whatsapp_per_day ?? planStatus?.limits.whatsappPerDay ?? 999999;
+            const used = planStatus?.usage?.whatsappToday ?? 0;
+            const remaining = Math.max(0, limit - used);
+            const showCounter = limit < 999999;
+            const exhausted = showCounter && remaining === 0;
+            return (
+              <button
+                onClick={() => exhausted ? setUpgradeFor('whatsapp_blast') : setIsBlastOpen(true)}
+                className="bg-emerald-700 hover:bg-emerald-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-emerald-700/20 transition-all text-sm"
+                title={showCounter ? `Você tem ${remaining} de ${limit} disparos hoje` : 'Disparar mensagem em massa via WhatsApp'}
+              >
+                <Zap className="w-4 h-4" /> Disparar WA
+                {showCounter && <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${exhausted ? 'bg-rose-500/30 text-rose-100' : 'bg-emerald-900/40 text-emerald-200'}`}>{used}/{limit}</span>}
+              </button>
+            );
+          })()}
           <button
             onClick={() => setIsCsvImportOpen(true)}
             className="bg-indigo-700 hover:bg-indigo-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-indigo-700/20 transition-all text-sm"
@@ -322,19 +356,21 @@ const CRMPage: React.FC = () => {
         <div className="bg-gradient-to-br from-blue-600/10 to-indigo-600/10 p-6 rounded-3xl border border-blue-500/20 relative flex flex-col justify-between">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-bold text-xs flex items-center gap-2 text-blue-300 uppercase tracking-widest">
-              <Sparkles className="w-4 h-4" /> IA CRM Insight
+              <Sparkles className="w-4 h-4" /> IA CRM Insight {aiLocked && <LockBadge />}
             </h3>
             <button
               onClick={generateAIRecommendation}
               disabled={generatingInsight}
               className="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-full border border-white/10"
             >
-              {generatingInsight ? '...' : 'Atualizar'}
+              {generatingInsight ? '...' : aiLocked ? 'Desbloquear' : 'Atualizar'}
             </button>
           </div>
           <div className="bg-black/20 rounded-xl p-3 border border-white/5 min-h-[60px]">
             <p className="text-[11px] text-gray-400 leading-tight italic">
-              {aiInsight ? `"${aiInsight.substring(0, 80)}..."` : "Clique em atualizar para novas recomendações."}
+              {aiLocked
+                ? '🔒 Insights de IA estão no Plano Pro. Veja o que você está perdendo →'
+                : aiInsight ? `"${aiInsight.substring(0, 80)}..."` : "Clique em atualizar para novas recomendações."}
             </p>
           </div>
         </div>
@@ -916,6 +952,9 @@ const CRMPage: React.FC = () => {
           onClose={() => setIsBlastOpen(false)}
         />
       )}
+
+      {/* Modal de upgrade — Opção C (confronto + medo de perder) */}
+      <UpgradeModal open={!!upgradeFor} onClose={() => setUpgradeFor(null)} feature={upgradeFor || 'default'} />
     </div>
   );
 };
