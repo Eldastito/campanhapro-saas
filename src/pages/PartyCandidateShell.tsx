@@ -9,10 +9,11 @@
  * A barreira já foi quebrada (eles estão logados) — aqui oferecemos a degustação.
  */
 import * as React from 'react';
-import { ArrowLeft, Sparkles } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import PartyCandidatePage from './PartyCandidatePage';
 import CampaignWebApp from '../CampaignWebApp';
-import { DataProvider } from '../contexts/DataContext';
+// CampaignWebApp já tem seu próprio DataProvider — não duplicar (causa double-subscribe
+// em postgres_changes do Supabase Realtime e quebra o app inteiro).
 
 const STORAGE_KEY = 'partyView';
 type View = 'party' | 'platform';
@@ -35,7 +36,7 @@ const PartyCandidateShell: React.FC = () => {
 
   if (view === 'platform') {
     return (
-      <DataProvider>
+      <>
         {/* Botão flutuante de voltar pra prestação de contas (obrigação primária) */}
         <button
           onClick={() => setPartyView('party')}
@@ -45,7 +46,7 @@ const PartyCandidateShell: React.FC = () => {
           <ArrowLeft className="w-3.5 h-3.5" /> Comprovação
         </button>
         <CampaignWebApp />
-      </DataProvider>
+      </>
     );
   }
   return <PartyCandidatePage />;
