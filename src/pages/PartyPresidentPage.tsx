@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned, ShieldCheck,
-  Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle,
+  Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle, Search, Pencil, Trash2,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -105,6 +105,29 @@ const PartyPresidentPage: React.FC = () => {
   const [proofLoading, setProofLoading] = React.useState(false);
   const [lightbox, setLightbox] = React.useState<string | null>(null);
   const [valveBusy, setValveBusy] = React.useState<string | null>(null);
+  const [search, setSearch] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState<'all' | 'green' | 'yellow' | 'red' | 'pending'>('all');
+  const [editFor, setEditFor] = React.useState<Candidate | null>(null);
+  const [editForm, setEditForm] = React.useState({ displayName: '', cargo: '', regiao: '', phone: '' });
+  const [editing, setEditing] = React.useState(false);
+
+  const openEdit = (c: Candidate) => { setEditFor(c); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', phone: c.phone || '' }); };
+  const saveEdit = async () => {
+    if (!editFor || !editForm.displayName.trim()) return;
+    setEditing(true);
+    try {
+      const r = await authedFetch(`/api/v1/party/candidates/${editFor.id}`, { method: 'PATCH', body: JSON.stringify(editForm) });
+      if (r.ok) { setEditFor(null); await load(); }
+    } catch { /* */ }
+    finally { setEditing(false); }
+  };
+  const deleteCandidate = async (c: Candidate) => {
+    if (!window.confirm(`Excluir "${c.displayName}"? Isso remove o candidato e todos os dados dele (comitê, check-ins, repasses).${c.status === 'active' ? ' A conta de acesso dele também será apagada.' : ''}`)) return;
+    try {
+      const r = await authedFetch(`/api/v1/party/candidates/${c.id}`, { method: 'DELETE' });
+      if (r.ok) { setCandidates((prev) => prev.filter((x) => x.id !== c.id)); }
+    } catch { /* */ }
+  };
 
   // Válvula de repasse — funciona tanto no modal de prova quanto inline (aba Repasses).
   const setValve = async (decision: 'liberado' | 'retido' | 'cortado', cand?: Candidate) => {
@@ -287,9 +310,35 @@ const PartyPresidentPage: React.FC = () => {
             <Users className="w-10 h-10 text-slate-600 mx-auto mb-2" />
             <p className="text-slate-400">Nenhum candidato ainda. Clique em <b>"Novo candidato"</b> para começar — ou, em breve, importe sua planilha.</p>
           </div>
-        ) : (
+        ) : (() => {
+          const q = search.trim().toLowerCase();
+          const filtered = candidates.filter((c) => {
+            if (q && !`${c.displayName} ${c.cargo || ''} ${c.regiao || ''}`.toLowerCase().includes(q)) return false;
+            if (statusFilter === 'pending') return c.status === 'pending';
+            if (statusFilter === 'green' || statusFilter === 'yellow' || statusFilter === 'red') return c.score?.level === statusFilter;
+            return true;
+          });
+          const FILTERS: { k: typeof statusFilter; label: string }[] = [
+            { k: 'all', label: 'Todos' }, { k: 'green', label: '🟢' }, { k: 'yellow', label: '🟡' }, { k: 'red', label: '🔴' }, { k: 'pending', label: 'Pendentes' },
+          ];
+          return (
           <div className="space-y-2">
-            {candidates.map((c) => (
+            {/* Busca + filtro */}
+            <div className="flex flex-col sm:flex-row gap-2 mb-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar candidato (nome, cargo, cidade)…"
+                  className="w-full bg-[#1c2128] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-white text-sm" />
+              </div>
+              <div className="flex gap-1 overflow-x-auto no-scrollbar">
+                {FILTERS.map((f) => (
+                  <button key={f.k} onClick={() => setStatusFilter(f.k)}
+                    className={`text-xs font-bold px-3 py-2 rounded-xl whitespace-nowrap shrink-0 border ${statusFilter === f.k ? 'bg-indigo-600 border-transparent text-white' : 'bg-[#1c2128] border-white/10 text-slate-400'}`}>{f.label}</button>
+                ))}
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mb-1">{filtered.length} de {candidates.length} candidato(s)</p>
+            {filtered.map((c) => (
               <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="min-w-0">
                   <p className="font-bold text-white truncate">{c.displayName}</p>
@@ -318,13 +367,16 @@ const PartyPresidentPage: React.FC = () => {
                     className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300" title="Registrar repasse">
                     <Wallet className="w-3.5 h-3.5" /> Repasse
                   </button>
-                  <span className="text-sm text-slate-300 w-24 text-right">{brl(Number(c.valorRecebido) || 0)}</span>
+                  <span className="text-sm text-slate-300 text-right">{brl(Number(c.valorRecebido) || 0)}</span>
                   <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${STATUS_BADGE[c.status] || STATUS_BADGE.pending}`}>{STATUS_LABEL[c.status] || c.status}</span>
+                  <button onClick={() => openEdit(c)} title="Editar" className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => deleteCandidate(c)} title="Excluir" className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               </div>
             ))}
           </div>
-        )
+          );
+        })()
       )}
 
       {tab === 'Ranking' && (
@@ -526,6 +578,29 @@ const PartyPresidentPage: React.FC = () => {
             </div>
             <button onClick={addCandidate} disabled={adding || !form.displayName.trim()} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: editar candidato */}
+      {editFor && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !editing && setEditFor(null)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-bold text-white">Editar candidato</h4>
+              <button onClick={() => setEditFor(null)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-2">
+              <input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              <div className="grid grid-cols-2 gap-2">
+                <input value={editForm.cargo} onChange={(e) => setEditForm({ ...editForm, cargo: e.target.value })} placeholder="Cargo" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <input value={editForm.regiao} onChange={(e) => setEditForm({ ...editForm, regiao: e.target.value })} placeholder="Cidade/Região" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              </div>
+              <input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+            </div>
+            <button onClick={saveEdit} disabled={editing || !editForm.displayName.trim()} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+              {editing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
             </button>
           </div>
         </div>

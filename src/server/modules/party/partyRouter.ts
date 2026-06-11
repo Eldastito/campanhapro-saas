@@ -217,6 +217,43 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     return data ? party : null;
   }
 
+  // Editar um candidato (nome/cargo/região/telefone).
+  router.patch('/candidates/:id', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await candidateOfPresident(userId, req.params.id))) return res.status(404).json({ error: 'not_found' });
+    const { displayName, cargo, regiao, phone } = req.body || {};
+    const patch: any = { updatedAt: new Date().toISOString() };
+    if (typeof displayName === 'string' && displayName.trim()) patch.displayName = displayName.trim().slice(0, 160);
+    if (cargo !== undefined) patch.cargo = cargo?.toString().trim() || null;
+    if (regiao !== undefined) patch.regiao = regiao?.toString().trim() || null;
+    if (phone !== undefined) patch.phone = phone?.toString().trim() || null;
+    const { data, error } = await supabase.from('party_candidates').update(patch).eq('id', req.params.id).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ candidate: data });
+  });
+
+  // Excluir um candidato. Remove os dados do partido; se já tinha conta (ativo),
+  // remove também o usuário/campanha (limpeza completa).
+  router.delete('/candidates/:id', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await candidateOfPresident(userId, req.params.id))) return res.status(404).json({ error: 'not_found' });
+    const { data: cand } = await supabase.from('party_candidates').select('userId, campaignId').eq('id', req.params.id).maybeSingle();
+    const id = req.params.id;
+    await supabase.from('party_checkins').delete().eq('candidateId', id);
+    await supabase.from('party_committees').delete().eq('candidateId', id);
+    await supabase.from('party_repasses').delete().eq('candidateId', id);
+    await supabase.from('party_valve_log').delete().eq('candidateId', id);
+    const { error } = await supabase.from('party_candidates').delete().eq('id', id);
+    if (error) return res.status(500).json({ error: error.message });
+    // candidato ativo: limpa conta + campanha
+    const uid = (cand as any)?.userId; const cid = (cand as any)?.campaignId;
+    if (uid) { try { await (supabase as any).auth.admin.deleteUser(uid); } catch { /* */ } }
+    if (cid) { await supabase.from('campaigns').delete().eq('id', cid).then(() => {}, () => {}); }
+    return res.json({ ok: true });
+  });
+
   // Repasses de um candidato.
   router.get('/candidates/:id/repasses', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
