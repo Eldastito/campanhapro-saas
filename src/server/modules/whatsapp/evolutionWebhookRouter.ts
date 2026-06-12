@@ -180,33 +180,41 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           .select('"voterBotEnabled", name, "electionRole"').eq('id', campaignId).maybeSingle();
         const botEnabled = !!(camp as any)?.voterBotEnabled && !!(inst as any).apiKey;
         for (const m of msgs) {
-          const key = m?.key ?? m?.Key ?? {};
-          const msgObj = m?.message ?? m?.Message ?? {};
-          const fromMe = key.fromMe ?? key.FromMe ?? m?.fromMe ?? m?.FromMe ?? false;
+          // Evolution GO (whatsmeow) usa data.Info (Sender/Chat/IsFromMe/PushName)
+          // + data.Message. Evolution API/Node usa data.key + data.message.
+          // Este parser tolera os DOIS — antes só olhava 'Key' e descartava TODAS
+          // as mensagens do GO (Info), por isso nada chegava na Caixa de Entrada.
+          const info = m?.Info ?? m?.info ?? m?.key ?? m?.Key ?? {};
+          const msgObj = m?.Message ?? m?.message ?? {};
+          const fromMe = info.IsFromMe ?? info.isFromMe ?? info.fromMe ?? info.FromMe ?? m?.fromMe ?? m?.FromMe ?? false;
           const direction: 'inbound' | 'outbound' = fromMe ? 'outbound' : 'inbound';
           const remoteJid = String(
-            key.remoteJid ?? key.RemoteJid ?? m?.remoteJid ?? m?.RemoteJid ?? m?.from ?? m?.From ?? '',
+            info.Sender ?? info.sender ?? info.Chat ?? info.chat ??
+            info.RemoteJid ?? info.remoteJid ??
+            m?.remoteJid ?? m?.RemoteJid ?? m?.from ?? m?.From ?? '',
           );
           const isGroup = remoteJid.includes('@g.us');
           const externalId = jidToPhone(remoteJid);
           if (!externalId) continue;
           const text =
             msgObj.conversation ?? msgObj.Conversation ??
-            msgObj.extendedTextMessage?.text ?? msgObj.ExtendedTextMessage?.Text ??
+            msgObj.extendedTextMessage?.text ?? msgObj.ExtendedTextMessage?.text ?? msgObj.ExtendedTextMessage?.Text ??
+            msgObj.imageMessage?.caption ?? msgObj.ImageMessage?.caption ??
+            msgObj.videoMessage?.caption ?? msgObj.documentMessage?.caption ??
+            msgObj.buttonsResponseMessage?.selectedDisplayText ?? msgObj.listResponseMessage?.title ??
             m?.body ?? m?.Body ?? m?.text ?? m?.Text ??
-            m?.conversation ?? m?.Conversation ??
             '[mídia ou mensagem não-texto]';
           const providerMessageId = String(
-            key.id ?? key.Id ?? key.ID ?? m?.id ?? m?.Id ?? crypto.randomBytes(8).toString('hex'),
+            info.Id ?? info.ID ?? info.id ?? m?.key?.id ?? m?.id ?? m?.Id ?? crypto.randomBytes(8).toString('hex'),
           );
-          const tsRaw = Number(m?.messageTimestamp ?? m?.MessageTimestamp ?? m?.timestamp ?? m?.Timestamp ?? 0);
+          const tsRaw = Number(info.Timestamp ?? info.timestamp ?? m?.messageTimestamp ?? m?.MessageTimestamp ?? m?.timestamp ?? 0);
           const receivedAt = tsRaw > 0
             ? new Date(tsRaw < 1e12 ? tsRaw * 1000 : tsRaw).toISOString()
             : new Date().toISOString();
           // pushName is the contact's WhatsApp profile name. Only meaningful
           // for inbound messages — on outbound it'd be our own profile name.
           const rawPushName = direction === 'inbound'
-            ? String(m?.pushName ?? m?.PushName ?? m?.notifyName ?? m?.NotifyName ?? '').trim()
+            ? String(info.PushName ?? info.pushName ?? m?.pushName ?? m?.PushName ?? '').trim()
             : '';
           const pushName = rawPushName.length > 0 && rawPushName.length <= 80
             ? rawPushName
