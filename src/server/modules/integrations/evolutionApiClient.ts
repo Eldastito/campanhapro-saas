@@ -317,6 +317,10 @@ export async function sendText(
  */
 export async function setWebhook(instanceName: string, apiKey: string): Promise<void> {
   if (!EVOLUTION_WEBHOOK_URL) throw new Error('evolution_webhook_url_not_configured');
+  // Chave global do ambiente é a fonte da verdade (esquema do exaforge): a
+  // instância é identificada pelo header `instance`, então o token salvo no
+  // banco pode estar defasado sem quebrar o registro do webhook.
+  const token = EVOLUTION_GLOBAL_API_KEY || apiKey;
   await call(
     'POST',
     '/instance/connect',
@@ -324,7 +328,7 @@ export async function setWebhook(instanceName: string, apiKey: string): Promise<
       webhookUrl: buildWebhookUrl(instanceName),
       subscribe: SUBSCRIBED_EVENTS,
     },
-    apiKey,
+    token,
     instanceName,
   );
 }
