@@ -134,6 +134,66 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // POST /instances/manual — registra uma instância CRIADA À MÃO no painel do
+  // Evolution GO (esquema do exaforgeStudio: 1 instância manual por celular —
+  // mais confiável que a criação automática). Verifica o status, re-registra o
+  // webhook e salva. Body: { instanceName, apiKey?, displayName? }
+  router.post('/instances/manual', async (req: Request, res: Response) => {
+    try {
+      const cid = campaignIdOf(req);
+      if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
+      if (!isEvolutionConfigured()) return res.status(503).json({ error: 'evolution_api_not_configured' });
+
+      const { instanceName, apiKey, displayName } = req.body as { instanceName?: string; apiKey?: string; displayName?: string };
+      const name = (instanceName || '').trim();
+      if (!name) return res.status(400).json({ error: 'instanceName obrigatório (o nome criado no painel do Evolution)' });
+
+      const token = (apiKey || '').trim() || process.env.EVOLUTION_GLOBAL_API_KEY || '';
+      if (!token) return res.status(400).json({ error: 'apiKey obrigatória (ou configure EVOLUTION_GLOBAL_API_KEY)' });
+
+      // 1) Confere se a instância existe/responde no Evolution.
+      const status = await getStatus(name, token);
+
+      // 2) Descobre o UUID interno (necessário pra deletar depois) — best-effort.
+      const instanceId = await findInstanceIdByName(name).catch(() => null);
+
+      // 3) Re-registra o webhook pra recebermos as mensagens — best-effort.
+      await setWebhook(name, token).catch((e: any) =>
+        console.warn('[WhatsApp] manual: setWebhook falhou (siga):', e?.message));
+
+      // 4) Upsert (se já registrada nesta campanha, atualiza key/status).
+      const { data: existing } = await supabaseAdmin.from('whatsapp_instances')
+        .select('id').eq('campaignId', cid).eq('instanceName', name).maybeSingle();
+      let row;
+      if (existing?.id) {
+        const { data, error } = await supabaseAdmin.from('whatsapp_instances')
+          .update({ apiKey: token, status, instanceId: instanceId ?? undefined })
+          .eq('id', existing.id)
+          .select('id, campaignId, instanceName, displayName, phoneNumber, status, createdAt').single();
+        if (error) throw error; row = data;
+      } else {
+        const { data, error } = await supabaseAdmin.from('whatsapp_instances')
+          .insert({
+            campaignId: cid, instanceName: name, instanceId: instanceId ?? null,
+            displayName: (displayName || name).trim(), status, apiKey: token,
+          })
+          .select('id, campaignId, instanceName, displayName, phoneNumber, status, createdAt').single();
+        if (error) throw error; row = data;
+      }
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'whatsapp.instance_registered_manual',
+        resourceType: 'whatsapp_instance', resourceId: row.id, severity: 'info',
+        metadata: { instanceName: name, status },
+      });
+
+      return res.status(201).json({ instance: row, status });
+    } catch (err: any) {
+      console.error('[WhatsApp] manual register:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /instances/:id/qrcode — refresh QR code for pairing
   router.get('/instances/:id/qrcode', async (req: Request, res: Response) => {
     try {

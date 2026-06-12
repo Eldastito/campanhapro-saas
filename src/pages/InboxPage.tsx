@@ -77,6 +77,7 @@ const InboxPage: React.FC = () => {
     const [ccBusy, setCcBusy] = React.useState(false);
     const [ccInvites, setCcInvites] = React.useState<any[]>([]);
     const [ccCopied, setCcCopied] = React.useState<string | null>(null);
+    const [ccError, setCcError] = React.useState<string | null>(null);
 
     const loadCcInvites = React.useCallback(async () => {
         try { const r = await authedFetch('/api/v1/callcenter/invites'); if (r.ok) { const j = await r.json(); setCcInvites(j.invites || []); } } catch { /* */ }
@@ -84,13 +85,20 @@ const InboxPage: React.FC = () => {
     React.useEffect(() => { if (ccOpen) loadCcInvites(); }, [ccOpen, loadCcInvites]);
 
     const createCcInvite = async () => {
-        setCcBusy(true);
+        setCcBusy(true); setCcError(null);
         try {
             const r = await authedFetch('/api/v1/callcenter/invites', {
                 method: 'POST', body: JSON.stringify({ displayName: ccName.trim(), role: ccRole }),
             });
             if (r.ok) { setCcName(''); await loadCcInvites(); }
-        } catch { /* */ } finally { setCcBusy(false); }
+            else {
+                const j = await r.json().catch(() => ({} as any));
+                setCcError(j.error === 'feature_not_in_plan'
+                    ? 'Seu plano não inclui o módulo Call Center. Fale com o suporte.'
+                    : `Erro ao gerar convite: ${j.detail || j.error || `HTTP ${r.status}`}`);
+            }
+        } catch { setCcError('Sem resposta do servidor — tente de novo em instantes (pode haver deploy em andamento).'); }
+        finally { setCcBusy(false); }
     };
     const copyCcLink = (token: string) => {
         navigator.clipboard?.writeText(`${window.location.origin}/cadastro/callcenter/${token}`)
@@ -259,6 +267,7 @@ const InboxPage: React.FC = () => {
                             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold text-sm mb-3">
                             {ccBusy ? 'Gerando…' : 'Gerar link de convite'}
                         </button>
+                        {ccError && <p className="text-xs text-rose-400 mb-3">{ccError}</p>}
                         <div className="space-y-1.5 max-h-48 overflow-y-auto">
                             {ccInvites.map((i: any) => (
                                 <div key={i.id} className="flex items-center justify-between gap-2 text-sm bg-slate-950/60 rounded-xl px-3 py-2">

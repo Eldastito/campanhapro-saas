@@ -59,6 +59,7 @@ async function call<T = unknown>(
   path: string,
   body: unknown | undefined,
   apiKey: string,
+  instanceName?: string,
 ): Promise<T> {
   if (!EVOLUTION_API_URL) {
     throw new Error('evolution_not_configured');
@@ -67,14 +68,20 @@ async function call<T = unknown>(
   // a requisição inteira (ex.: o delete nunca completava e o número não sumia).
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15_000);
+  // Headers no formato do exaforgeStudio (comprovado em produção): o token vai
+  // em apikey + token + Authorization, e a INSTÂNCIA vai no header `instance`.
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    apikey: apiKey,
+    token: apiKey,
+    Authorization: `Bearer ${apiKey}`,
+  };
+  if (instanceName) headers.instance = instanceName;
   let res: Response;
   try {
     res = await fetch(`${EVOLUTION_API_URL}${path}`, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: apiKey,
-      },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
@@ -247,11 +254,12 @@ export async function getQRCode(
  * — we tolerate both top-level and { data: {...} } wrapping.
  */
 export async function getStatus(
-  _instanceName: string,
+  instanceName: string,
   apiKey: string,
 ): Promise<EvolutionStatus> {
   try {
-    const result = await call<any>('GET', '/instance/status', undefined, apiKey);
+    const token = EVOLUTION_GLOBAL_API_KEY || apiKey;
+    const result = await call<any>('GET', '/instance/status', undefined, token, instanceName);
     const d = result?.data ?? result ?? {};
     // Evolution GO devolve PascalCase: { Connected: bool, LoggedIn: bool, Name }.
     // Toleramos também minúsculas/state de outras versões.
@@ -271,20 +279,24 @@ export async function getStatus(
 
 /**
  * Send a text message via this instance.
- * Evolution GO: POST /send/text with body { to, text } — instance via apikey.
- * `to` should be E.164 without '+'.
+ * Evolution GO (formato do exaforgeStudio, comprovado): POST /send/text com
+ * body { number, text, delay } e a instância no header `instance`.
+ * Prioriza a GLOBAL key do ambiente (fonte da verdade no deploy) sobre a key
+ * salva no banco — evita um token antigo/errado vencer.
  */
 export async function sendText(
-  _instanceName: string,
+  instanceName: string,
   apiKey: string,
   to: string,
   text: string,
 ): Promise<EvolutionSendResult> {
+  const token = EVOLUTION_GLOBAL_API_KEY || apiKey;
   const result = await call<any>(
     'POST',
     '/send/text',
-    { to, text },
-    apiKey,
+    { number: to, text, delay: 1200 },
+    token,
+    instanceName,
   );
   const messageId =
     result?.data?.id ??

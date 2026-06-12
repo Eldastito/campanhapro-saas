@@ -36,6 +36,12 @@ export const WhatsAppInstancesPanel: React.FC = () => {
   const [loading, setLoading] = React.useState(true);
   const [adding, setAdding] = React.useState(false);
   const [newName, setNewName] = React.useState('');
+  // conexão manual (instância criada no painel do Evolution GO)
+  const [manualOpen, setManualOpen] = React.useState(false);
+  const [manualName, setManualName] = React.useState('');
+  const [manualKey, setManualKey] = React.useState('');
+  const [manualBusy, setManualBusy] = React.useState(false);
+  const [manualMsg, setManualMsg] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [qrModal, setQrModal] = React.useState<{ instanceId: string; qrCode: string | null } | null>(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
@@ -118,6 +124,28 @@ export const WhatsAppInstancesPanel: React.FC = () => {
     }, 3000);
     return () => clearInterval(iv);
   }, [qrModal]);
+
+  // Conexão MANUAL — instância criada à mão no painel do Evolution GO (esquema
+  // do exaforgeStudio: mais confiável que a criação automática).
+  const connectManual = async () => {
+    setManualBusy(true); setManualMsg(null);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    try {
+      const res = await authedFetch('/api/v1/whatsapp/instances/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName: manualName.trim(), apiKey: manualKey.trim() || undefined }),
+        signal: ctrl.signal,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Falha ao conectar');
+      setManualMsg(`✅ Conectada! Status: ${json.status}. ${json.status === 'connected' ? 'Pronta pra enviar e receber.' : 'Abra o QR no painel do Evolution pra parear.'}`);
+      await load();
+    } catch (err: any) {
+      setManualMsg(err?.name === 'AbortError' ? 'Demorou demais — confira se o Evolution está no ar.' : `Erro: ${err.message}`);
+    } finally { clearTimeout(timer); setManualBusy(false); }
+  };
 
   const createInstance = async () => {
     if (newName.trim().length < 2) return;
@@ -217,6 +245,13 @@ export const WhatsAppInstancesPanel: React.FC = () => {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button
+            onClick={() => setManualOpen(true)}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/30 transition-colors"
+            title="Registrar uma instância criada à mão no painel do Evolution (mais confiável)"
+          >
+            🔌 Conectar manual
+          </button>
+          <button
             onClick={() => setAdding(true)}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
           >
@@ -225,6 +260,30 @@ export const WhatsAppInstancesPanel: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Modal: conectar instância MANUAL (criada no painel do Evolution GO) */}
+      {manualOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !manualBusy && setManualOpen(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <h4 className="font-bold text-white mb-1">Conectar instância manual</h4>
+            <p className="text-xs text-slate-400 mb-3">
+              Crie a instância <b>no painel do Evolution GO</b> (1 por celular) e informe o <b>nome exato</b> dela aqui.
+              Nós verificamos o status e registramos o webhook automaticamente.
+            </p>
+            <div className="space-y-2 mb-3">
+              <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nome da instância (igual ao painel) *"
+                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" />
+              <input value={manualKey} onChange={(e) => setManualKey(e.target.value)} placeholder="Token da instância (vazio = usa a chave global)"
+                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" />
+            </div>
+            {manualMsg && <p className={`text-xs mb-3 ${manualMsg.startsWith('✅') ? 'text-emerald-400' : 'text-rose-400'}`}>{manualMsg}</p>}
+            <button onClick={connectManual} disabled={!manualName.trim() || manualBusy}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold text-sm">
+              {manualBusy ? 'Verificando…' : 'Verificar e conectar'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <p className="text-xs text-slate-500 mb-3">
         Cada número aparece automaticamente na Caixa de Entrada Omnichannel após pareamento.
