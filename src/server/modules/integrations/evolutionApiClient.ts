@@ -230,6 +230,7 @@ export async function getQRCode(
     '/instance/connect',
     { webhookUrl: webhookUrl ?? '', subscribe: SUBSCRIBED_EVENTS },
     apiKey,
+    instanceName,
   );
 
   // O path do QR varia entre versões do GO: /instance/qr (por header) e
@@ -238,7 +239,7 @@ export async function getQRCode(
   let qrCode: string | null = null;
   for (const path of ['/instance/qr', `/instance/${encodeURIComponent(instanceName)}/qrcode`]) {
     try {
-      const qr = await call<any>('GET', path, undefined, apiKey);
+      const qr = await call<any>('GET', path, undefined, apiKey, instanceName);
       qrCode = extractQrImage(qr);
       if (qrCode) break;
     } catch {
@@ -324,6 +325,7 @@ export async function setWebhook(instanceName: string, apiKey: string): Promise<
       subscribe: SUBSCRIBED_EVENTS,
     },
     apiKey,
+    instanceName,
   );
 }
 
