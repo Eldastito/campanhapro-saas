@@ -15,7 +15,7 @@ interface Conversation {
     lastMessageAt: string | null;
     lastInboundAt: string | null;
     isOpen: boolean;
-    stage: 'novo_lead' | 'em_atendimento' | 'proposta' | 'fechado';
+    stage: string; // pipeline do call center + estágios legados
     priority: 'alta' | 'media' | 'baixa';
 }
 
@@ -27,11 +27,14 @@ interface Message {
     createdAt: string;
 }
 
-const STAGES: { id: Conversation['stage']; title: string; headerColor: string }[] = [
-    { id: 'novo_lead',      title: 'Novo Lead',      headerColor: 'border-blue-500/40' },
-    { id: 'em_atendimento', title: 'Em Atendimento', headerColor: 'border-amber-500/40' },
-    { id: 'proposta',       title: 'Proposta',        headerColor: 'border-purple-500/40' },
-    { id: 'fechado',        title: 'Fechado',         headerColor: 'border-emerald-500/40' },
+// Pipeline do CALL CENTER. `match` absorve estágios legados (em_atendimento/proposta)
+// pra nenhuma conversa antiga sumir do quadro do coordenador.
+const STAGES: { id: string; match: string[]; title: string; headerColor: string }[] = [
+    { id: 'novo_lead',             match: ['novo_lead'],                                      title: 'Novo Lead',       headerColor: 'border-blue-500/40' },
+    { id: 'ia_atendendo',          match: ['ia_atendendo'],                                   title: '🤖 IA Atendendo', headerColor: 'border-indigo-500/40' },
+    { id: 'aguardando_humano',     match: ['aguardando_humano'],                              title: '⏳ Fila Humana',  headerColor: 'border-amber-500/40' },
+    { id: 'em_atendimento_humano', match: ['em_atendimento_humano', 'em_atendimento', 'proposta'], title: '🧑 Com Operador', headerColor: 'border-purple-500/40' },
+    { id: 'fechado',               match: ['fechado'],                                        title: 'Fechado',         headerColor: 'border-emerald-500/40' },
 ];
 
 const PRIORITY_BADGE: Record<Conversation['priority'], string> = {
@@ -67,6 +70,32 @@ const InboxPage: React.FC = () => {
     const [summary, setSummary] = React.useState<string | null>(null);
     const [loading, setLoading] = React.useState(true);
     const scrollRef = React.useRef<HTMLDivElement>(null);
+    // Convites do call center (coordenador convida líder; líder convida operadores)
+    const [ccOpen, setCcOpen] = React.useState(false);
+    const [ccName, setCcName] = React.useState('');
+    const [ccRole, setCcRole] = React.useState('Líder Call Center');
+    const [ccBusy, setCcBusy] = React.useState(false);
+    const [ccInvites, setCcInvites] = React.useState<any[]>([]);
+    const [ccCopied, setCcCopied] = React.useState<string | null>(null);
+
+    const loadCcInvites = React.useCallback(async () => {
+        try { const r = await authedFetch('/api/v1/callcenter/invites'); if (r.ok) { const j = await r.json(); setCcInvites(j.invites || []); } } catch { /* */ }
+    }, []);
+    React.useEffect(() => { if (ccOpen) loadCcInvites(); }, [ccOpen, loadCcInvites]);
+
+    const createCcInvite = async () => {
+        setCcBusy(true);
+        try {
+            const r = await authedFetch('/api/v1/callcenter/invites', {
+                method: 'POST', body: JSON.stringify({ displayName: ccName.trim(), role: ccRole }),
+            });
+            if (r.ok) { setCcName(''); await loadCcInvites(); }
+        } catch { /* */ } finally { setCcBusy(false); }
+    };
+    const copyCcLink = (token: string) => {
+        navigator.clipboard?.writeText(`${window.location.origin}/cadastro/callcenter/${token}`)
+            .then(() => { setCcCopied(token); setTimeout(() => setCcCopied(null), 1500); }, () => {});
+    };
 
     const selectedConvo = conversations.find(c => c.id === selectedId) ?? null;
 
@@ -196,12 +225,57 @@ const InboxPage: React.FC = () => {
                     <InboxIcon className="w-6 h-6 text-sky-400" />
                     Caixa de Entrada Omnichannel
                 </h2>
-                <button onClick={fetchConversations} disabled={loading}
-                    className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 disabled:opacity-50 transition-colors">
-                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                    Atualizar
-                </button>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setCcOpen(true)}
+                        className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/25 transition-colors">
+                        <User className="w-4 h-4" /> Equipe de Atendimento
+                    </button>
+                    <button onClick={fetchConversations} disabled={loading}
+                        className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 disabled:opacity-50 transition-colors">
+                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        Atualizar
+                    </button>
+                </div>
             </div>
+
+            {/* Modal: convidar Líder/Operador do Call Center */}
+            {ccOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setCcOpen(false)}>
+                    <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-bold text-white">Equipe de Atendimento (Call Center)</h4>
+                            <button onClick={() => setCcOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+                        </div>
+                        <p className="text-xs text-slate-400 mb-3">Convide o <b>líder do call center</b> — ele cadastra os operadores pelo painel dele. O link já vem com o nome travado.</p>
+                        <div className="flex gap-2 mb-3">
+                            <input value={ccName} onChange={(e) => setCcName(e.target.value)} placeholder="Nome do líder"
+                                className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" />
+                            <select value={ccRole} onChange={(e) => setCcRole(e.target.value)} className="bg-slate-950 border border-white/10 rounded-xl px-2 py-2 text-white text-sm">
+                                <option value="Líder Call Center">Líder</option>
+                                <option value="Operador Call Center">Operador</option>
+                            </select>
+                        </div>
+                        <button onClick={createCcInvite} disabled={!ccName.trim() || ccBusy}
+                            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold text-sm mb-3">
+                            {ccBusy ? 'Gerando…' : 'Gerar link de convite'}
+                        </button>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                            {ccInvites.map((i: any) => (
+                                <div key={i.id} className="flex items-center justify-between gap-2 text-sm bg-slate-950/60 rounded-xl px-3 py-2">
+                                    <span className="truncate">{i.displayName} <span className="text-[11px] text-slate-500">· {i.role === 'Líder Call Center' ? 'Líder' : 'Operador'} · {i.status === 'used' ? '✅' : i.status === 'revoked' ? 'revogado' : 'pendente'}</span></span>
+                                    {i.status === 'pending' && (
+                                        <button onClick={() => copyCcLink(i.token)}
+                                            className="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 shrink-0">
+                                            {ccCopied === i.token ? '✅ Copiado' : '🔗 Copiar link'}
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                            {ccInvites.length === 0 && <p className="text-xs text-slate-500">Nenhum convite ainda.</p>}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="flex flex-1 gap-4 overflow-hidden">
 
@@ -211,7 +285,7 @@ const InboxPage: React.FC = () => {
                         <div className="flex h-full items-start gap-4 pb-4 min-w-max">
                             {STAGES.map(stage => {
                                 const stageConvos = conversations
-                                    .filter(c => (c.stage ?? 'novo_lead') === stage.id)
+                                    .filter(c => stage.match.includes(c.stage ?? 'novo_lead'))
                                     .sort((a, b) =>
                                         new Date(b.lastMessageAt ?? 0).getTime() -
                                         new Date(a.lastMessageAt ?? 0).getTime());

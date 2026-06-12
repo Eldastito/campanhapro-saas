@@ -37,6 +37,8 @@ import {
 } from './src/server/middleware/perCampaignRateLimit';
 import { createBillingRouter } from './src/server/modules/billing/billingRouter';
 import { createPlanStatusRouter } from './src/server/modules/billing/planStatusRouter';
+import { createCallCenterRouter } from './src/server/modules/callcenter/callCenterRouter';
+import { createCallCenterPublicRouter } from './src/server/modules/callcenter/callCenterPublicRouter';
 import { createPaymentWebhookRouter } from './src/server/modules/billing/paymentWebhookRouter';
 import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
 import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
@@ -275,6 +277,8 @@ async function startServer() {
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));
+    app.use('/api/v1/callcenter', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'call_center'), createCallCenterRouter(supabaseAdmin));
+    app.use('/api/public/callcenter', webhookLimiter, createCallCenterPublicRouter(supabaseAdmin));
     app.use('/api/v1/content', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'content_studio'), requireAiBudget(supabaseAdmin), createContentRouter(supabaseAdmin));
     // Observability: split — /health is public, /compliance|/audit|/webhooks require auth
     const obsRouter = createObservabilityRouter(supabaseAdmin);

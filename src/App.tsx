@@ -11,6 +11,7 @@ import LeaderDashboardPage from './pages/LeaderDashboardPage';
 import FiscalPage from './pages/FiscalPage';
 import PartyPresidentPage from './pages/PartyPresidentPage';
 import PartyCandidateShell from './pages/PartyCandidateShell';
+import CallCenterPage from './pages/CallCenterPage';
 import SupremeAdminPage from './pages/SupremeAdminPage';
 import BlockedPage from './pages/BlockedPage';
 import LoadingScreen from './components/ui/LoadingScreen';
@@ -92,6 +93,12 @@ const App: React.FC = () => {
             // 1. Tela enxuta de comprovação (default, obrigação ao partido).
             // 2. Plataforma CampanhaPro em modo cortesia (degustação).
             return <PartyCandidateShell />;
+
+        case 'Líder Call Center':
+        case 'Operador Call Center':
+            // CALL CENTER — estação de atendimento dedicada (fila + chat + handoff).
+            // Não usa DataProvider: busca a própria fila via /api/v1/callcenter.
+            return <CallCenterPage />;
 
         default:
             // 'Apoiador', 'Colaborador', 'Suporte', 'Manutenção'

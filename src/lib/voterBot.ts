@@ -36,6 +36,34 @@ export async function handleInboundForBot(supabaseAdmin: SupabaseClient, p: Vote
     const text = (p.text || '').trim();
     if (!text || text.startsWith('[mídia')) return; // só responde texto
 
+    // ---- CALL CENTER: estado da conversa + plano ----
+    const { data: convo } = await supabaseAdmin.from('channel_conversations')
+      .select('id, "aiPaused", stage')
+      .eq('campaignId', p.campaignId).eq('channel', 'whatsapp').eq('externalId', p.phone)
+      .maybeSingle();
+
+    // Humano assumiu (aiPaused) → IA NÃO responde; só avisa o painel do operador.
+    if ((convo as any)?.aiPaused) {
+      const { broadcastCallCenter } = await import('../server/modules/callcenter/callCenterRouter');
+      broadcastCallCenter(p.campaignId, 'new_message', { conversationId: (convo as any).id });
+      return;
+    }
+
+    // Plano: IA-atendente é exclusiva do Total ('completo'). No Estratégico, a
+    // mensagem vai DIRETO pra fila humana (estratégia de upgrade) — sem resposta automática.
+    const { data: cfg } = await supabaseAdmin.from('campaign_configs')
+      .select('"planTier"').eq('id', p.campaignId).maybeSingle();
+    if ((cfg as any)?.planTier !== 'completo') {
+      if ((convo as any)?.id) {
+        await supabaseAdmin.from('channel_conversations').update({
+          stage: 'aguardando_humano', updatedAt: new Date().toISOString(),
+        }).eq('id', (convo as any).id).in('stage', ['novo_lead', 'ia_atendendo']);
+        const { broadcastCallCenter } = await import('../server/modules/callcenter/callCenterRouter');
+        broadcastCallCenter(p.campaignId, 'queue_changed', { conversationId: (convo as any).id });
+      }
+      return;
+    }
+
     const decision = await evaluateInbound(supabaseAdmin, p.campaignId, p.phone, text);
 
     let reply = '';
@@ -48,6 +76,18 @@ export async function handleInboundForBot(supabaseAdmin: SupabaseClient, p: Vote
         campaignId: p.campaignId, sourceAgent: 'voter_bot', category: 'Oportunidade', priority: 'Alta',
         insightText: `Atendimento ao eleitor (${p.phone}) precisa de humano: "${text.slice(0, 140)}"`,
       }).then(() => {}, () => {});
+      // TRANSIÇÃO INVISÍVEL: pausa a IA, manda pra fila e deixa o resumo pronto
+      // pro operador que assumir (eleitor não repete a história).
+      if ((convo as any)?.id) {
+        const { summaryFromConversation, saveSummary } = await import('../server/modules/callcenter/handoffSummary');
+        const { broadcastCallCenter } = await import('../server/modules/callcenter/callCenterRouter');
+        await supabaseAdmin.from('channel_conversations').update({
+          aiPaused: true, stage: 'aguardando_humano', updatedAt: new Date().toISOString(),
+        }).eq('id', (convo as any).id);
+        const summary = await summaryFromConversation(supabaseAdmin, p.campaignId, (convo as any).id);
+        await saveSummary(supabaseAdmin, p.campaignId, (convo as any).id, summary, `Escalado pela IA: "${text.slice(0, 120)}"`);
+        broadcastCallCenter(p.campaignId, 'queue_changed', { conversationId: (convo as any).id });
+      }
     } else {
       // proceed → resposta ancorada no Argumentário (RAG).
       const ctx = await retrieveContext(supabaseAdmin, p.campaignId, text, 6);
@@ -81,6 +121,9 @@ async function recordOutbound(supabase: SupabaseClient, p: VoterBotParams, body:
       providerMessageId, body, createdAt: now,
     });
     await supabase.from('channel_conversations').update({ lastMessageAt: now, updatedAt: now }).eq('id', convo.id);
+    // Bot respondendo → estágio 'ia_atendendo' (sai do novo_lead, entra no funil do call center).
+    await supabase.from('channel_conversations').update({ stage: 'ia_atendendo' })
+      .eq('id', convo.id).eq('stage', 'novo_lead').then(() => {}, () => {});
   } catch (e: any) {
     console.error('[voterBot] recordOutbound:', e?.message || e);
   }
