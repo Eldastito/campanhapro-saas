@@ -257,7 +257,7 @@ export async function getQRCode(
 export async function getStatus(
   instanceName: string,
   apiKey: string,
-): Promise<EvolutionStatus> {
+): Promise<EvolutionStatus | 'unknown'> {
   try {
     const token = EVOLUTION_GLOBAL_API_KEY || apiKey;
     const result = await call<any>('GET', '/instance/status', undefined, token, instanceName);
@@ -274,7 +274,11 @@ export async function getStatus(
     if (state === 'connecting' || d.qrcode || d.Qrcode) return 'qrcode';
     return 'disconnected';
   } catch {
-    return 'disconnected';
+    // Falha de transporte (ex.: o GO não expõe /instance/status, ou 401 por
+    // token defasado). NÃO é prova de desconexão — devolvemos 'unknown' para
+    // que o poller NÃO rebaixe um número comprovadamente conectado (o webhook
+    // de mensagem/conexão é a fonte de verdade nesse caso).
+    return 'unknown';
   }
 }
 

@@ -55,7 +55,7 @@ export async function search(
 
   const { data, error } = await supabase.rpc('match_knowledge_chunks', {
     query_embedding: vector,
-    campaignId: campaignId,
+    campaign_id: campaignId, // a função SQL usa snake_case; camelCase dava 404 no PostgREST
     match_count: limit,
   });
 

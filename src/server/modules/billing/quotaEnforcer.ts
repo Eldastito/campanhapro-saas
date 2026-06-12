@@ -86,7 +86,7 @@ export async function checkWhatsAppQuota(
   if (!cfg) return { ok: false, reason: 'no_config', upgradeMessage: 'Configuração não encontrada.' };
 
   const limit = Number(cfg?.limits?.whatsapp_per_day ?? cfg?.limits?.whatsappPerDay ?? 999999);
-  if (limit >= 999999) return { ok: true, planTier: cfg.planTier, limit };
+  if (limit < 0 || limit >= 999999) return { ok: true, planTier: cfg.planTier, limit }; // -1 = ilimitado
 
   const used = await countWhatsappToday(supabase, campaignId);
   if (used + requestedCount > limit) {
@@ -108,7 +108,7 @@ export async function checkFormsQuota(
   if (!cfg) return { ok: false, reason: 'no_config' };
 
   const limit = Number(cfg?.limits?.forms ?? 999999);
-  if (limit >= 999999) return { ok: true, planTier: cfg.planTier, limit };
+  if (limit < 0 || limit >= 999999) return { ok: true, planTier: cfg.planTier, limit }; // -1 = ilimitado
 
   const used = await countActiveForms(supabase, campaignId);
   if (used >= limit) {
@@ -139,7 +139,7 @@ export async function checkAiQuota(
 
   // Pagantes: cota mensal
   if (tier !== 'gratis') {
-    if (monthlyLimit >= 999999) return { ok: true, planTier: tier };
+    if (monthlyLimit < 0 || monthlyLimit >= 999999) return { ok: true, planTier: tier }; // -1 = ilimitado
     const used = await countAiCallsThisMonth(supabase, campaignId);
     if (used >= monthlyLimit) {
       return { ok: false, reason: 'quota_exceeded', feature: 'ai_calls',

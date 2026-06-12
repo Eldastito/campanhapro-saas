@@ -175,6 +175,15 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           : Array.isArray(data?.messages) ? data.messages
           : Array.isArray(data?.Messages) ? data.Messages
           : [data];
+        // Uma mensagem só trafega se a instância está pareada — então a chegada
+        // de QUALQUER mensagem é prova de conexão. Cura o status se estiver
+        // defasado (ex.: o poll marcou 'disconnected' por falha de sondagem).
+        if (inst.status !== 'connected') {
+          await supabaseAdmin.from('whatsapp_instances')
+            .update({ status: 'connected', lastConnectedAt: new Date().toISOString(), lastQRCode: null, updatedAt: new Date().toISOString() })
+            .eq('id', inst.id);
+        }
+
         // Bot ao vivo: só dispara se a campanha tiver habilitado (trava de segurança).
         const { data: camp } = await supabaseAdmin.from('campaigns')
           .select('"voterBotEnabled", name, "electionRole"').eq('id', campaignId).maybeSingle();

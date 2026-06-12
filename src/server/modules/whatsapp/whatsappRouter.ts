@@ -195,7 +195,10 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
             new Promise<null>((r) => setTimeout(() => r(null), 8000)),
           ]);
           await supabaseAdmin.from('whatsapp_instances').update({
-            status, ...(instanceId ? { instanceId } : {}),
+            // 'unknown' = sondagem inconclusiva → não persiste (mantém 'pending'
+            // até o webhook confirmar). Só grava um estado real do GO.
+            ...(status !== 'unknown' ? { status } : {}),
+            ...(instanceId ? { instanceId } : {}),
           }).eq('id', row.id);
           // Registra o webhook (best-effort, com seu próprio timeout interno).
           await setWebhook(name, token).catch((e: any) =>
@@ -317,6 +320,14 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       if (!inst.apiKey) return res.json({ status: inst.status, phoneNumber: inst.phoneNumber });
 
       const remoteStatus = await getStatus(inst.instanceName, inst.apiKey);
+
+      // Não conseguimos sondar o GO (endpoint ausente / token defasado) →
+      // 'unknown'. NÃO rebaixa: mantém o que o webhook já registrou (uma
+      // mensagem recebida prova que está conectado). Sem isto, o poll de 4s
+      // sobrescrevia 'connected' por 'disconnected' a cada batida.
+      if (remoteStatus === 'unknown') {
+        return res.json({ status: inst.status, phoneNumber: inst.phoneNumber });
+      }
 
       // Auto-recuperação: se a instância ESTAVA conectada e o GO agora reporta
       // desconectado, tenta reabrir o socket sem re-escanear (best-effort).
