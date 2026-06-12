@@ -126,11 +126,12 @@ export const WhatsAppInstancesPanel: React.FC = () => {
   }, [qrModal]);
 
   // Conexão MANUAL — instância criada à mão no painel do Evolution GO (esquema
-  // do exaforgeStudio: mais confiável que a criação automática).
+  // do exaforgeStudio: mais confiável que a criação automática). O backend
+  // responde rápido (não espera o Evolution) — depois fazemos poll de status.
   const connectManual = async () => {
-    setManualBusy(true); setManualMsg(null);
+    setManualBusy(true); setManualMsg('Registrando…');
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     try {
       const res = await authedFetch('/api/v1/whatsapp/instances/manual', {
         method: 'POST',
@@ -138,13 +139,40 @@ export const WhatsAppInstancesPanel: React.FC = () => {
         body: JSON.stringify({ instanceName: manualName.trim(), apiKey: manualKey.trim() || undefined }),
         signal: ctrl.signal,
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Falha ao conectar');
-      setManualMsg(`✅ Conectada! Status: ${json.status}. ${json.status === 'connected' ? 'Pronta pra enviar e receber.' : 'Abra o QR no painel do Evolution pra parear.'}`);
+      clearTimeout(timer);
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      const newId = json.instance?.id as string | undefined;
+      setManualMsg('✅ Instância registrada — verificando a conexão no Evolution…');
       await load();
+      // Poll de status: o background do servidor descobre o estado real em
+      // até ~10s. Atualizamos a UI quando o status mudar de 'pending'.
+      if (newId) {
+        let tries = 0;
+        const iv = setInterval(async () => {
+          tries += 1;
+          if (tries > 10) { clearInterval(iv); setManualMsg('⚠️ Demorou pra confirmar — feche, atualize a lista e veja o card.'); return; }
+          try {
+            const r2 = await authedFetch(`/api/v1/whatsapp/instances/${newId}/qrcode?poll=1`);
+            const j2 = await r2.json().catch(() => ({} as any));
+            if (j2.status === 'connected') {
+              clearInterval(iv);
+              setManualMsg('✅ Conectada! Já pode receber e enviar mensagens.');
+              await load();
+            } else if (j2.status === 'qrcode' || j2.status === 'disconnected') {
+              clearInterval(iv);
+              setManualMsg(`⚠️ Status: ${j2.status}. Volte ao painel do Evolution e escaneie o QR Code com o celular.`);
+              await load();
+            }
+          } catch { /* segue tentando */ }
+        }, 2000);
+      }
     } catch (err: any) {
-      setManualMsg(err?.name === 'AbortError' ? 'Demorou demais — confira se o Evolution está no ar.' : `Erro: ${err.message}`);
-    } finally { clearTimeout(timer); setManualBusy(false); }
+      clearTimeout(timer);
+      setManualMsg(err?.name === 'AbortError'
+        ? '❌ Sem resposta do servidor em 15s — tente de novo em instantes (pode haver deploy em andamento).'
+        : `❌ Erro: ${err.message}`);
+    } finally { setManualBusy(false); }
   };
 
   const createInstance = async () => {

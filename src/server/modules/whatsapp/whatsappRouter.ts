@@ -151,43 +151,66 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       const token = (apiKey || '').trim() || process.env.EVOLUTION_GLOBAL_API_KEY || '';
       if (!token) return res.status(400).json({ error: 'apiKey obrigatória (ou configure EVOLUTION_GLOBAL_API_KEY)' });
 
-      // 1) Confere se a instância existe/responde no Evolution.
-      const status = await getStatus(name, token);
-
-      // 2) Descobre o UUID interno (necessário pra deletar depois) — best-effort.
-      const instanceId = await findInstanceIdByName(name).catch(() => null);
-
-      // 3) Re-registra o webhook pra recebermos as mensagens — best-effort.
-      await setWebhook(name, token).catch((e: any) =>
-        console.warn('[WhatsApp] manual: setWebhook falhou (siga):', e?.message));
-
-      // 4) Upsert (se já registrada nesta campanha, atualiza key/status).
+      // RESPONDE RÁPIDO: salva primeiro, descobre status em background. Assim
+      // o frontend nunca trava esperando o Evolution responder.
       const { data: existing } = await supabaseAdmin.from('whatsapp_instances')
         .select('id').eq('campaignId', cid).eq('instanceName', name).maybeSingle();
       let row;
+      const baseFields = {
+        apiKey: token,
+        status: 'pending' as const,
+        displayName: (displayName || name).trim(),
+      };
       if (existing?.id) {
         const { data, error } = await supabaseAdmin.from('whatsapp_instances')
-          .update({ apiKey: token, status, instanceId: instanceId ?? undefined })
+          .update({ apiKey: baseFields.apiKey })
           .eq('id', existing.id)
           .select('id, campaignId, instanceName, displayName, phoneNumber, status, createdAt').single();
         if (error) throw error; row = data;
       } else {
         const { data, error } = await supabaseAdmin.from('whatsapp_instances')
-          .insert({
-            campaignId: cid, instanceName: name, instanceId: instanceId ?? null,
-            displayName: (displayName || name).trim(), status, apiKey: token,
-          })
+          .insert({ campaignId: cid, instanceName: name, ...baseFields })
           .select('id, campaignId, instanceName, displayName, phoneNumber, status, createdAt').single();
         if (error) throw error; row = data;
       }
 
-      await audit(supabaseAdmin, {
+      // Auditoria síncrona (leve).
+      audit(supabaseAdmin, {
         ...actorFromRequest(req), action: 'whatsapp.instance_registered_manual',
         resourceType: 'whatsapp_instance', resourceId: row.id, severity: 'info',
-        metadata: { instanceName: name, status },
-      });
+        metadata: { instanceName: name },
+      }).catch(() => {});
 
-      return res.status(201).json({ instance: row, status });
+      // Background: descobre status real + UUID + registra webhook. Nada disso
+      // trava a resposta — o frontend já recebeu o "ok" e pode chamar
+      // /instances/:id/qrcode pra acompanhar.
+      void (async () => {
+        try {
+          const status = await Promise.race([
+            getStatus(name, token),
+            new Promise<'pending'>((r) => setTimeout(() => r('pending'), 8000)),
+          ]);
+          const instanceId = await Promise.race([
+            findInstanceIdByName(name),
+            new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+          ]);
+          await supabaseAdmin.from('whatsapp_instances').update({
+            status, ...(instanceId ? { instanceId } : {}),
+          }).eq('id', row.id);
+          // Registra o webhook (best-effort, com seu próprio timeout interno).
+          await setWebhook(name, token).catch((e: any) =>
+            console.warn('[WhatsApp] manual: setWebhook falhou (siga):', e?.message));
+        } catch (e: any) {
+          console.warn('[WhatsApp] manual bg:', e?.message);
+        }
+      })();
+
+      // Mensagem útil pro usuário com base no estado atual da row.
+      return res.status(201).json({
+        instance: row,
+        status: 'pending',
+        message: 'Instância registrada. Verificando conexão no Evolution em background.',
+      });
     } catch (err: any) {
       console.error('[WhatsApp] manual register:', err);
       return res.status(500).json({ error: err.message });
