@@ -559,6 +559,20 @@ export async function callAgent(
                 const text = raw.text || '';
                 const shouldPersist = !opts.noRagPersist && text.trim().length >= 60 && opts.campaignId && supabaseAdmin;
                 if (shouldPersist) {
+                    // SALVAGUARDA ANTI-ALUCINAÇÃO: extrai fontes primárias do
+                    // texto (URLs + padrões "Fonte: X") + citations vindas do
+                    // web_search. Próxima vez que a IA usar este chunk via RAG,
+                    // ela sabe distinguir "isto veio da fonte X" de "isto é
+                    // inferência minha". Sem isso, respostas geradas podem virar
+                    // "fato" na próxima consulta.
+                    const urls = Array.from(text.matchAll(/https?:\/\/[^\s)\]]+/g)).map((m) => m[0]).slice(0, 20);
+                    const fontesInline = Array.from(text.matchAll(/Fonte:\s*([^\n.]+)/gi)).map((m) => m[1].trim().slice(0, 200)).slice(0, 20);
+                    const primarySources = [
+                        ...(raw.citations || []).map((c) => ({ url: c.url, title: c.title, kind: 'web_search' as const })),
+                        ...urls.map((u) => ({ url: u, title: '', kind: 'inline_url' as const })),
+                        ...fontesInline.map((s) => ({ url: '', title: s, kind: 'inline_label' as const })),
+                    ];
+
                     void import('../server/modules/rag/knowledgeIngest').then(({ ingestArtifact }) =>
                         ingestArtifact(supabaseAdmin, {
                             campaignId: opts.campaignId,
@@ -570,6 +584,10 @@ export async function callAgent(
                                 promptExcerpt: prompt.slice(0, 300),
                                 tokensOut: raw.tokensOut, costCentsUsd: costCents,
                                 webSearches: raw.webSearches ?? 0,
+                                /** Fontes primárias citadas — IA consulta isto pra
+                                 *  saber se a info tem ancoragem ou é inferência. */
+                                primarySources,
+                                hasPrimarySources: primarySources.length > 0,
                             },
                         }).catch(() => { /* swallowed: knowledgeIngest já tolera erros */ })
                     ).catch(() => { /* import falhou: segue */ });

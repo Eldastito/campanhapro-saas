@@ -68,8 +68,24 @@ export async function retrieveContext(
       new Promise<never>((_, rej) => setTimeout(() => rej(new Error('rag_timeout')), 8000)),
     ]);
     if (!results.length) return '';
+    // Marca cada chunk com o ORIGEM real pra IA não confundir memória vs fonte:
+    //   • Chunk com source não-agent (formulário, settings, doc carregado) → "FONTE"
+    //   • Chunk com source=agent:* + hasPrimarySources → "MEMÓRIA ANCORADA"
+    //   • Chunk com source=agent:* sem fontes → "MEMÓRIA NÃO-ANCORADA"
+    //     (a IA deve tratar essas como INFERÊNCIA anterior, não como fato.)
     return results
-      .map((r, i) => `[${i + 1}] (${r.source}, relevância ${(r.similarity * 100).toFixed(0)}%)\n${r.content.slice(0, 600)}`)
+      .map((r, i) => {
+        const meta: any = r.metadata || {};
+        const isAgent = r.source.startsWith('agent:');
+        const hasSources = isAgent && meta.hasPrimarySources;
+        const tag = !isAgent ? 'FONTE'
+          : hasSources ? 'MEMÓRIA ANCORADA'
+          : 'MEMÓRIA NÃO-ANCORADA — trate como inferência, não como fato verificado';
+        const sourcesLine = hasSources && Array.isArray(meta.primarySources) && meta.primarySources.length
+          ? `\nFontes citadas: ${meta.primarySources.slice(0, 3).map((s: any) => s.url || s.title).filter(Boolean).join(' | ')}`
+          : '';
+        return `[${i + 1}] ${tag} (${r.source}, relevância ${(r.similarity * 100).toFixed(0)}%)${sourcesLine}\n${r.content.slice(0, 600)}`;
+      })
       .join('\n\n');
   } catch (e: any) {
     console.warn('[rag] retrieveContext falhou:', e?.message);
