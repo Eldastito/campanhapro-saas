@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
+import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
 
 /**
  * Centro de Comando do Presidente de Partido (produto PARTIDO).
@@ -293,6 +294,9 @@ const PartyPresidentPage: React.FC = () => {
         <Stat icon={Wallet} label="Total repassado" value={brl(totalRepassado)} from="from-amber-600/20" to="to-orange-600/10" />
         <Stat icon={Target} label="Metas cumpridas" value={`${metasDoneTotal}/${metasTotalTotal || 0}`} from="from-purple-600/20" to="to-fuchsia-600/10" />
       </div>
+
+      {/* Digest Semanal IA (#85) — sumário automático que o presidente vê sem abrir aba */}
+      {candidates.length > 0 && <WeeklyDigestCard />}
 
       {/* Tabs (isoladas — presidente só vê o que é dele) */}
       <div className="flex gap-1 sm:gap-2 mb-6 border-b border-white/5 overflow-x-auto no-scrollbar">

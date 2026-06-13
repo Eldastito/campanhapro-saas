@@ -419,6 +419,109 @@ Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
     }
   });
 
+  /**
+   * Digest Semanal IA (#85). Sumário curto pro presidente com destaques
+   * da semana: movimentos do score, alertas de antifraude, sugestões. Tudo
+   * num único output JSON estruturado pra cards no painel.
+   *
+   * Pra simplificar: snapshot atual + comparativo com 7 dias atrás (via
+   * valveUpdatedAt). NÃO é histórico real — apenas usa o que está no banco
+   * hoje. Funciona bem porque o presidente vai gerar 1× por semana e ver os
+   * movimentos desde a última vez que ele aprovou/segurou repasses.
+   */
+  router.post('/digest-weekly', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: party } = await supabase.from('parties').select('id, name').eq('presidentId', userId).maybeSingle();
+    if (!party) return res.status(403).json({ error: 'not_president' });
+
+    try {
+      const { data: candidates, error } = await supabase
+        .from('party_candidates')
+        .select('id, displayName, cargo, regiao, status, "valorRecebido", "valorAlocado", "repasseStatus", "valveNote", "valveUpdatedAt"')
+        .eq('partyId', (party as any).id);
+      if (error) throw error;
+      if (!candidates || candidates.length === 0) {
+        return res.json({ party: party.name, summary: 'Ainda sem candidatos pra resumir.', highlights: [], actions: [] });
+      }
+
+      const now = Date.now();
+      const sevenDaysAgo = now - 7 * 86400000;
+
+      // Snapshot rule-based de cada candidato
+      const snap = candidates.map((c: any) => {
+        const score = computeScore({
+          status: c.status || 'pending',
+          committee: null, checkinCount: 0, lastCheckinAt: null,
+          coordCount: 0, leaderCount: 0,
+          valorRecebido: Number(c.valorRecebido || 0),
+          valorAlocado: Number(c.valorAlocado || 0),
+        }, now);
+        const valveMexidaEstaSemana = c.valveUpdatedAt && new Date(c.valveUpdatedAt).getTime() > sevenDaysAgo;
+        return {
+          id: c.id, nome: c.displayName, cargo: c.cargo, regiao: c.regiao,
+          status: c.status, score: score.score, level: score.level,
+          recebido: Number(c.valorRecebido || 0), alocado: Number(c.valorAlocado || 0),
+          repasse: c.repasseStatus || 'liberado',
+          valveSemanal: valveMexidaEstaSemana,
+        };
+      });
+
+      // Estatísticas pra contexto da IA (não joga snapshot bruto)
+      const totalReceived = snap.reduce((s, c) => s + c.recebido, 0);
+      const totalAllocated = snap.reduce((s, c) => s + c.alocado, 0);
+      const greens = snap.filter((c) => c.level === 'green').length;
+      const reds = snap.filter((c) => c.level === 'red').length;
+      const retidos = snap.filter((c) => c.repasse === 'retido').length;
+      const cortados = snap.filter((c) => c.repasse === 'cortado').length;
+
+      const linhas = snap.map((c, i) =>
+        `${i+1}. ${c.nome} (${c.cargo || '?'} | ${c.regiao || '?'}) | score=${c.score}/${c.level} | recebido=R$${c.recebido.toFixed(0)} | alocado=R$${c.alocado.toFixed(0)} | repasse=${c.repasse}${c.valveSemanal ? ' [decidido esta semana]' : ''}`
+      ).join('\n');
+
+      const system = `Você é o Estrategista do Partido. Faça um DIGEST SEMANAL CURTO pro presidente.
+
+CONTEXTO DA SEMANA:
+- ${snap.length} candidatos · ${greens} 🟢 · ${reds} 🔴 · ${retidos} retidos · ${cortados} cortados
+- R$ recebido total: R$${totalReceived.toFixed(0)} · alocado: R$${totalAllocated.toFixed(0)}
+
+REGRAS:
+- summary: 2-3 frases. Tom executivo, direto. Diga o que mudou e o que importa.
+- highlights: 3-6 cards de destaque (positivo OU negativo). Verbo no início, ≤140 chars. Tipos:
+  * 'subiu': candidato com score positivo notável
+  * 'caiu': candidato com problema (score vermelho, retido recente)
+  * 'risco': padrão de fraude potencial (recebeu muito, alocou pouco)
+  * 'destaque': multiplicador, marco superado, etc.
+- actions: 2-4 ações concretas pro presidente FAZER essa semana. Verbo + objeto, ≤140 chars.
+
+Saída JSON estrito (sem markdown):
+{"summary":"...","highlights":[{"type":"subiu|caiu|risco|destaque","candidateId":"uuid","title":"≤80","body":"≤140"}],"actions":["..."]}`;
+
+      const ai = await callAgent(supabase, 'strategist', `Candidatos do partido "${party.name}" (snapshot atual):\n\n${linhas}\n\nFaça o digest semanal.`, {
+        campaignId: 'party:' + (party as any).id,
+        systemInstruction: system, complexity: 'balanced', maxTokens: 2000,
+      });
+
+      let cleaned = ai.text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const sIdx = cleaned.indexOf('{'); const eIdx = cleaned.lastIndexOf('}');
+      if (sIdx >= 0 && eIdx > sIdx) cleaned = cleaned.slice(sIdx, eIdx + 1);
+      const parsed = JSON.parse(cleaned);
+
+      return res.json({
+        party: party.name,
+        analyzedAt: new Date().toISOString(),
+        stats: { total: snap.length, greens, reds, retidos, cortados,
+                 totalReceived, totalAllocated },
+        summary: typeof parsed?.summary === 'string' ? parsed.summary.slice(0, 500) : '',
+        highlights: Array.isArray(parsed?.highlights) ? parsed.highlights.slice(0, 6) : [],
+        actions: Array.isArray(parsed?.actions) ? parsed.actions.slice(0, 4) : [],
+      });
+    } catch (err: any) {
+      console.error('[party] digest-weekly:', err);
+      return res.status(500).json({ error: err?.message || 'ai_failed' });
+    }
+  });
+
   // ---- Lado do CANDIDATO de partido (comprovação) ----
   async function myCandidate(userId: string) {
     const { data } = await supabase.from('party_candidates').select('*').eq('userId', userId).maybeSingle();
