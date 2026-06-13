@@ -633,5 +633,68 @@ Saída JSON estrito (sem markdown):
     return res.json({ checkin: data });
   });
 
+  // ---- Lado do COORDENADOR / LÍDER (ferramentas leves de campo, #83) ----
+  // O membro vê o candidato que ele serve, registra visita/reunião com GPS+foto.
+  // O check-in vai pra mesma tabela e engorda o checkinCount → score do candidato.
+  async function myCandidateAsMember(userId: string): Promise<{ cand: any; user: any } | null> {
+    const { data: u } = await supabase.from('users').select('id, name, type, "campaignId"').eq('id', userId).maybeSingle();
+    if (!u || !(u as any).campaignId) return null;
+    if (!['Coordenador', 'Líder', 'Lider'].includes((u as any).type)) return null;
+    const { data: cand } = await supabase.from('party_candidates').select('*').eq('campaignId', (u as any).campaignId).maybeSingle();
+    if (!cand) return null;
+    return { cand, user: u };
+  }
+
+  router.get('/member/me', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const ctx = await myCandidateAsMember(userId);
+    if (!ctx) return res.status(404).json({ error: 'not_member' });
+    const { cand, user } = ctx;
+    const { data: party } = await supabase.from('parties').select('name').eq('id', cand.partyId).maybeSingle();
+    const { data: minhas } = await supabase.from('party_checkins')
+      .select('id, tipo, lat, lng, nota, "createdAt"')
+      .eq('candidateId', cand.id).eq('userId', userId)
+      .order('createdAt', { ascending: false }).limit(10);
+    return res.json({
+      role: (user as any).type,
+      candidate: { id: cand.id, name: cand.displayName, cargo: cand.cargo || null, regiao: cand.regiao || null },
+      party: { id: cand.partyId, name: (party as any)?.name || '' },
+      mine: minhas || [],
+      mineCount: (minhas || []).length,
+    });
+  });
+
+  router.post('/member/checkin', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const ctx = await myCandidateAsMember(userId);
+    if (!ctx) return res.status(403).json({ error: 'not_member' });
+    const { cand } = ctx;
+    const { tipo, lat, lng, photo, nota } = req.body || {};
+    // Membros usam só visita/reunião — comitê/evento é do candidato (impede confusão).
+    const t = ['visita', 'reuniao'].includes(tipo) ? tipo : 'visita';
+    // Cota anti-abuso reaproveitada (compartilhada com candidato — defende disco).
+    if (typeof photo === 'string' && photo.startsWith('data:')) {
+      const used = await countCandidatePhotos(cand.id);
+      if (used >= PHOTO_QUOTA_PER_CANDIDATE) {
+        return res.status(409).json({ error: 'cota_fotos_atingida', detail: `Limite de ${PHOTO_QUOTA_PER_CANDIDATE} fotos por candidato atingido.` });
+      }
+    }
+    const photoPath = (typeof photo === 'string' && photo.startsWith('data:'))
+      ? await uploadPhoto(`party/${cand.partyId}/checkin/${cand.id}-${randomBytes(6).toString('hex')}.jpg`, photo)
+      : null;
+    const { data, error } = await supabase.from('party_checkins').insert({
+      candidateId: cand.id, partyId: cand.partyId, userId,
+      tipo: t,
+      lat: Number(lat) || null, lng: Number(lng) || null,
+      photo: photoPath,
+      nota: nota ? String(nota).slice(0, 300) : null,
+    }).select('id, tipo, "createdAt"').single();
+    if (error) return res.status(500).json({ error: error.message });
+    broadcastTelao(cand.partyId);
+    return res.json({ checkin: data });
+  });
+
   return router;
 }

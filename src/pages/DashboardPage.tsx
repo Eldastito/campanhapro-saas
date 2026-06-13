@@ -26,6 +26,7 @@ import { askAdvisor } from '../services/agentsClientService';
 import AgendaPanel from '../components/agenda/AgendaPanel';
 import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
 import FieldFocusCard from '../components/dashboard/FieldFocusCard';
+import PartyFieldQuickCard from '../components/party/PartyFieldQuickCard';
 
 const DashboardPage = () => {
   const { user, userType } = useAuth();
@@ -109,6 +110,9 @@ const DashboardPage = () => {
       <div className="print-page-title hidden print:block">Relatório de Desempenho - {new Date().toLocaleDateString('pt-BR')}</div>
 
       {idealScenario && <DailyGoal dailyGoal={dailyGoal} />}
+
+      {/* Ferramentas leves de campo do Coord/Líder de Partido (#83) — autoesconde se não for membro */}
+      <PartyFieldQuickCard />
 
       <AgendaPanel voiceSlot={<VoiceCommandButton campaignId={user?.campaignId} />} />
 
