@@ -67,11 +67,13 @@ async function countActiveForms(supabase: SupabaseClient, campaignId: string): P
 /** Conta chamadas de IA do mês atual (para cota mensal de pagantes). */
 async function countAiCallsThisMonth(supabase: SupabaseClient, campaignId: string): Promise<number> {
   const start = new Date(); start.setUTCDate(1); start.setUTCHours(0, 0, 0, 0);
+  // Coluna é 'timestamp' em ai_usage (não 'created_at'). Bug anterior fazia
+  // a query falhar silenciosamente → count=null → 0 → considerava "sem uso".
   const { count } = await supabase
     .from('ai_usage')
     .select('id', { count: 'exact', head: true })
     .eq('campaignId', campaignId)
-    .gte('created_at', start.toISOString());
+    .gte('timestamp', start.toISOString());
   return count || 0;
 }
 
@@ -152,7 +154,12 @@ export async function checkAiQuota(
   const cfg = await loadCampaignConfig(supabase, campaignId);
   if (!cfg) return { ok: false, reason: 'no_config' };
 
-  const monthlyLimit = Number(cfg?.limits?.ai_calls ?? cfg?.limits?.aiCalls ?? 0);
+  // Lê o limite com fallback defensivo: ai_calls (preferido) → aiCalls (legacy)
+  // → ai_budget_cents (semântica diferente mas pelo menos consistente com -1 =
+  // ilimitado, 0 = travado). Sem o fallback, configs antigas sem ai_calls
+  // caíam pra default 0 e bloqueavam TUDO mesmo no Total. Bug visto em prod.
+  const rawLimit = cfg?.limits?.ai_calls ?? cfg?.limits?.aiCalls ?? cfg?.limits?.ai_budget_cents;
+  const monthlyLimit = rawLimit == null ? -1 : Number(rawLimit);
   const tier = cfg.planTier;
 
   // Pagantes: cota mensal
