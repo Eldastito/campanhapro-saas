@@ -254,35 +254,6 @@ const ElectionReportsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-[#161b22] p-6 rounded-2xl border border-white/5">
-                <h4 className="font-bold mb-4 flex items-center gap-2 uppercase text-xs tracking-widest text-gray-500">
-                  Resumo da Exportação
-                </h4>
-                <div className="flex justify-between items-end">
-                  <div>
-                    <div className="text-4xl font-black text-white">{reports.length}</div>
-                    <p className="text-xs text-gray-500">Relatórios disponíveis nesta campanha</p>
-                  </div>
-                  <div className="h-2 w-32 bg-white/5 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 w-full"></div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#161b22] p-6 rounded-2xl border border-white/5">
-                <h4 className="font-bold mb-4 flex items-center gap-2 uppercase text-xs tracking-widest text-gray-500">
-                  Dados em Tempo Real
-                </h4>
-                <div className="flex justify-between items-end">
-                  <div>
-                    <div className="text-4xl font-black text-white">Live</div>
-                    <p className="text-xs text-gray-500">Todos os relatórios usam dados ao vivo do Supabase</p>
-                  </div>
-                  <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>

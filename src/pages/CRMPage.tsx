@@ -141,12 +141,6 @@ const CRMPage: React.FC = () => {
     })).sort((a, b) => b.contatos - a.contatos);
   }, [contacts]);
 
-  const topMobilizadores = [
-    { nome: 'Ricardo Silva', contatos: 45, foto: 'R' },
-    { nome: 'Maria Oliveira', contatos: 38, foto: 'M' },
-    { nome: 'Carlos Souza', contatos: 22, foto: 'C' },
-  ];
-
 
   useEffect(() => {
     fetchContacts();
@@ -325,16 +319,10 @@ const CRMPage: React.FC = () => {
           <div className="relative z-10">
             <div className="flex justify-between items-start mb-4">
               <Target className="text-blue-400 w-8 h-8" />
-              <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-1 rounded-full font-bold">META: 5.000</span>
             </div>
             <h3 className="text-gray-400 text-xs font-bold uppercase tracking-widest">Base de Votos Úteis</h3>
-            <div className="flex items-baseline gap-2 mt-1">
-              <p className="text-3xl font-black">{contacts.length}</p>
-              <p className="text-xs text-emerald-400 font-bold">+12% este mês</p>
-            </div>
-            <div className="w-full bg-white/5 h-1.5 rounded-full mt-4 overflow-hidden">
-              <div className="bg-blue-500 h-full rounded-full transition-all duration-1000" style={{ width: `${Math.min((contacts.length / 5000) * 100, 100)}%` }}></div>
-            </div>
+            <p className="text-3xl font-black mt-1">{contacts.length}</p>
+            <p className="text-[10px] text-gray-500 mt-2 italic">Contatos cadastrados</p>
           </div>
         </div>
 
@@ -480,35 +468,6 @@ const CRMPage: React.FC = () => {
             </div>
 
 
-            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Award className="w-3 h-3 text-yellow-500" /> Top Mobilizadores
-            </h4>
-            <div className="space-y-3">
-              {topMobilizadores.map((mob) => (
-                <div key={mob.nome} className="flex items-center justify-between bg-black/20 p-2 rounded-xl border border-white/5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold">
-                      {mob.foto}
-                    </div>
-                    <span className="text-[11px] text-gray-300">{mob.nome}</span>
-                  </div>
-                  <span className="text-[10px] font-black text-blue-400">{mob.contatos}</span>
-                </div>
-              ))}
-            </div>
-
-            <hr className="my-6 border-white/5" />
-
-            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Engajamento</h4>
-            <div className="flex flex-col gap-3">
-              <div className="bg-white/5 p-3 rounded-xl border border-white/5 flex items-center gap-3">
-                <TrendingUp className="w-5 h-5 text-emerald-400" />
-                <div>
-                  <p className="text-[10px] text-gray-500 uppercase font-bold">Score Médio</p>
-                  <p className="text-lg font-black">64%</p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 

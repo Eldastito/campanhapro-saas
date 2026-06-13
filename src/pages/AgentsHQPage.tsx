@@ -336,26 +336,13 @@ const AgentsHQPage: React.FC = () => {
                     onGeneratePost={(content) => handleProductionHandoff('field', 'social', content)}
                     onPublish={(content, media) => handlePublishToSocial(content, media)}
                 />;
-            case 'field':
-                return <AgentRoom 
-                    key="field"
-                    title="O Comandante de Campo" 
-                    description="Logística de Rua. Usa reportes imediatos para logística, roteirização e inteligência de panfletagem."
-                    examples={[
-                        "Com base nos reports de hoje, qual bairro deve receber nossa caminhada amanhã?",
-                        "Onde estão os maiores focos de reclamação sobre iluminação pública nesta semana?",
-                        "Trace uma rota de panfletagem focando na localidade onde as respostas apontam que as pessoas votariam em outros candidatos."
-                    ]}
-                    agentId="field"
-                    campaignId={user?.campaignId || 'default'}
-                    agentCall={(p) => handleAgentCallGen(p, askFieldCommander, 'field')}
-                    placeholder="Ex: Onde focar panfletagem para mitigar críticas de asfalto detectadas na pesquisa?"
-                    onGeneratePost={(content) => handleProductionHandoff('field', 'social', content)}
-                />;
+            // 'field' (Comandante de Campo) removido — FieldFocusCard no Dashboard
+            // entrega resposta estruturada (recomendações/avoidance) em 1 clique,
+            // melhor que chat livre. Backend POST /intelligence/field-focus preservado.
             case 'connections':
                 return <SocialConnectionsHub />;
-            case 'backup':
-                return <BackupAgentRoom campaignId={user?.campaignId || ''} user={user} />;
+            // 'backup' (Guardião de Dados) removido — Ferramentas → Backup é o
+            // lugar canônico; chat IA pra backup era teatro sem ação concreta.
             case 'fraud':
                 return <AgentRoom
                     key="fraud"
@@ -483,12 +470,6 @@ const AgentsHQPage: React.FC = () => {
                 </button>
                 <button onClick={() => setActiveTab('creative')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'creative' ? 'bg-yellow-500/20 text-yellow-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'}`}>
                     <SparklesIcon className="w-4 h-4" /> Produtor Criativo
-                </button>
-                <button onClick={() => setActiveTab('field')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'field' ? 'bg-orange-500/20 text-orange-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'}`}>
-                    <Map className="w-4 h-4" /> Comandante de Campo
-                </button>
-                <button onClick={() => setActiveTab('backup')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'backup' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'}`}>
-                    <Shield className="w-4 h-4" /> Guardião de Dados (Backup)
                 </button>
                 <button onClick={() => setActiveTab('fraud')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'fraud' ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'}`}>
                     <ShieldCheck className="w-4 h-4" /> Auditor de Fraudes
