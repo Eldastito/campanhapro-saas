@@ -67,7 +67,7 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
 
       const { data, error } = await supabaseAdmin
         .from('whatsapp_instances')
-        .select('id, campaignId, instanceName, displayName, phoneNumber, status, lastConnectedAt, createdAt, updatedAt')
+        .select('id, campaignId, instanceName, displayName, phoneNumber, status, lastConnectedAt, "lastReconnectAt", "reconnectAttempts", "reconnectGiveUpAt", createdAt, updatedAt')
         .eq('campaignId', cid)
         .neq('status', 'deleted')
         .order('createdAt', { ascending: false });

@@ -23,6 +23,7 @@ import crypto from 'crypto';
 import { audit } from '../observability/auditLogger';
 import { handleInboundForBot } from '../../../lib/voterBot';
 import { broadcastCallCenter } from '../callcenter/callCenterRouter';
+import { reconnectInstance } from '../integrations/evolutionApiClient';
 
 interface RawRequest extends Request {
   rawBody?: Buffer;
@@ -38,6 +39,62 @@ const EVOLUTION_WEBHOOK_SECRET = process.env.EVOLUTION_WEBHOOK_SECRET;
  */
 function jidToPhone(jid: unknown): string {
   return String(jid || '').split('@')[0].split(':')[0].replace(/\D+/g, '');
+}
+
+/**
+ * Auto-reconnect anti-burn (#72). Quando o webhook reporta DISCONNECTED,
+ * tentamos reabrir o socket SEM novo QR — preserva o pareamento existente
+ * e evita queimar slot de dispositivo do WhatsApp (~5 max por número).
+ *
+ * Anti-loop:
+ *  - 5min de cooldown entre tentativas (lastReconnectAt)
+ *  - 3 falhas em 30min → desiste e marca giveup_at → exige QR manual
+ *  - 10s de delay inicial pra dar tempo do Evolution estabilizar
+ */
+const RECONNECT_DELAY_MS = 10_000;
+const RECONNECT_COOLDOWN_MS = 5 * 60_000;
+const RECONNECT_MAX_ATTEMPTS = 3;
+const RECONNECT_ATTEMPT_WINDOW_MS = 30 * 60_000;
+
+async function tryAutoReconnect(
+  supabaseAdmin: SupabaseClient,
+  inst: { id: string; apiKey: string | null; instanceName: string },
+) {
+  if (!inst.apiKey) return;
+  const { data: current } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .select('"lastReconnectAt", "reconnectAttempts", "reconnectGiveUpAt"')
+    .eq('id', inst.id).maybeSingle();
+  const c = current as any | null;
+  if (!c) return;
+  if (c.reconnectGiveUpAt) return; // já desistimos — exige QR manual
+
+  const now = Date.now();
+  const lastAt = c.lastReconnectAt ? new Date(c.lastReconnectAt).getTime() : 0;
+  if (now - lastAt < RECONNECT_COOLDOWN_MS) return; // cooldown ativo
+
+  // Janela de 30min: se passou, zera o contador.
+  const inWindow = lastAt && (now - lastAt < RECONNECT_ATTEMPT_WINDOW_MS);
+  const attempts = inWindow ? (Number(c.reconnectAttempts) || 0) : 0;
+
+  // Marca tentativa ANTES do delay pra outras webhooks não dispararem em paralelo.
+  await supabaseAdmin.from('whatsapp_instances').update({
+    lastReconnectAt: new Date().toISOString(),
+    reconnectAttempts: attempts + 1,
+    reconnectGiveUpAt: attempts + 1 >= RECONNECT_MAX_ATTEMPTS ? new Date().toISOString() : null,
+    updatedAt: new Date().toISOString(),
+  }).eq('id', inst.id);
+
+  if (attempts + 1 > RECONNECT_MAX_ATTEMPTS) return; // desistiu
+
+  setTimeout(async () => {
+    try {
+      await reconnectInstance(inst.apiKey!);
+      console.log(`[whatsapp] auto-reconnect attempted: instance=${inst.instanceName} attempt=${attempts + 1}`);
+    } catch (err: any) {
+      console.warn(`[whatsapp] auto-reconnect failed: ${inst.instanceName}: ${err?.message || err}`);
+    }
+  }, RECONNECT_DELAY_MS);
 }
 
 export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
@@ -153,6 +210,9 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           updates.status = 'connected';
           updates.lastConnectedAt = new Date().toISOString();
           updates.lastQRCode = null;
+          // Reconnect deu certo (ou usuário pareou) — zera contadores anti-burn.
+          updates.reconnectAttempts = 0;
+          updates.reconnectGiveUpAt = null;
           const wuid = d.wuid ?? d.number ?? d.Jid ?? d.jid ?? d.Number ?? d.Wuid;
           const phone = jidToPhone(wuid);
           if (phone) updates.phoneNumber = phone;
@@ -162,6 +222,16 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           updates.status = 'qrcode';
         }
         await supabaseAdmin.from('whatsapp_instances').update(updates).eq('id', inst.id);
+
+        // Auto-reconnect (#72): se acabou de cair, agenda tentativa silenciosa.
+        // Não bloqueia o webhook — fire-and-forget, com cooldown e cap interno.
+        if (looksClosed) {
+          void tryAutoReconnect(supabaseAdmin, {
+            id: inst.id,
+            apiKey: (inst as any).apiKey || null,
+            instanceName: (inst as any).instanceName || instanceName,
+          });
+        }
       } else if (
         event === 'MESSAGE' ||
         event === 'SENDMESSAGE' ||         // SEND_MESSAGE

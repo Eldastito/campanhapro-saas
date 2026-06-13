@@ -10,6 +10,10 @@ interface WhatsAppInstance {
   phoneNumber: string | null;
   status: 'pending' | 'qrcode' | 'connected' | 'disconnected' | 'deleted';
   lastConnectedAt: string | null;
+  // Auto-reconnect anti-burn (#72)
+  lastReconnectAt?: string | null;
+  reconnectAttempts?: number;
+  reconnectGiveUpAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -360,14 +364,30 @@ export const WhatsAppInstancesPanel: React.FC = () => {
           {instances.map(inst => (
             <div key={inst.id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-slate-100 truncate">{inst.displayName}</span>
                   <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${STATUS_COLOR[inst.status]}`}>
                     {STATUS_LABEL[inst.status]}
                   </span>
+                  {/* Auto-reconnect (#72): mostra estado do anti-burn */}
+                  {inst.status === 'disconnected' && !inst.reconnectGiveUpAt && (inst.reconnectAttempts ?? 0) > 0 && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border border-sky-500/40 bg-sky-500/10 text-sky-300 flex items-center gap-1">
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" /> tentando reconectar ({inst.reconnectAttempts}/3)
+                    </span>
+                  )}
+                  {inst.reconnectGiveUpAt && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-300">
+                      ⚠️ escaneie o QR de novo
+                    </span>
+                  )}
                 </div>
                 {inst.phoneNumber && (
                   <p className="text-xs text-slate-500 mt-0.5">+{inst.phoneNumber}</p>
+                )}
+                {inst.reconnectGiveUpAt && (
+                  <p className="text-[11px] text-rose-300/80 mt-1 leading-snug">
+                    A reconexão automática falhou 3 vezes. Toque em <b>QR</b> ao lado pra parear de novo (sem queimar slot extra do seu WhatsApp).
+                  </p>
                 )}
               </div>
               <div className="flex items-center gap-1">
