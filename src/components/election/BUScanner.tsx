@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { X, Camera, CheckCircle2, ClipboardPaste, ShieldCheck, Loader2, RefreshCcw } from 'lucide-react';
+import { X, Camera, CheckCircle2, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldX, Loader2, RefreshCcw } from 'lucide-react';
 import { parseBU, qrIndex, votosDoCandidato, CARGO_NOMES, BUParsed } from '../../lib/buParser';
+import { checkBUSignature, BUSignatureResult } from '../../lib/buSignatureVerifier';
+import { supabase } from '../../lib/supabaseClient';
 
 /**
  * Leitor de QR Code do Boletim de Urna (padrão TSE 2026). O BU pode ter de 1 a 4
@@ -28,6 +30,38 @@ const BUScanner: React.FC<Props> = ({ open, onClose, candidateNumber, cargoCodig
   const [saving, setSaving] = React.useState(false);
   const qrRef = React.useRef<any>(null);
   const collectedRef = React.useRef<Record<number, string>>({});
+
+  // Verificação Ed25519 da assinatura digital do BU.
+  // Chaves vivem em public.tse_signing_keys (RLS público de leitura). Quando o
+  // TSE divulga, o admin cadastra pelo Supreme (uma chave por UF/ano).
+  const [signatureCheck, setSignatureCheck] = React.useState<BUSignatureResult | null>(null);
+  const pubKeysRef = React.useRef<Record<string, string>>({});
+
+  // Carrega as chaves uma vez quando o modal abre (poucos KB; reutiliza entre BUs).
+  React.useEffect(() => {
+    if (!open) return;
+    (async () => {
+      const { data } = await supabase.from('tse_signing_keys').select('uf, year, public_key_hex');
+      const now = new Date().getFullYear();
+      const byUF: Record<string, string> = {};
+      for (const r of (data ?? []) as Array<{ uf: string; year: number; public_key_hex: string }>) {
+        // Prefere a do ano corrente; se não houver, fica com a mais recente.
+        if (!byUF[r.uf] || r.year === now) byUF[r.uf] = r.public_key_hex;
+      }
+      pubKeysRef.current = byUF;
+    })();
+  }, [open]);
+
+  // Quando o parsed muda, dispara a verificação.
+  React.useEffect(() => {
+    if (!parsed) { setSignatureCheck(null); return; }
+    let cancelled = false;
+    (async () => {
+      const result = await checkBUSignature(parsed, pubKeysRef.current);
+      if (!cancelled) setSignatureCheck(result);
+    })();
+    return () => { cancelled = true; };
+  }, [parsed]);
 
   const stopCamera = React.useCallback(async () => {
     try { if (qrRef.current?.isScanning) await qrRef.current.stop(); } catch { /* ignore */ }
@@ -146,7 +180,28 @@ const BUScanner: React.FC<Props> = ({ open, onClose, candidateNumber, cargoCodig
               ))}
             </div>
 
-            <p className="text-[10px] text-slate-500 flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> {parsed.assinatura ? 'Assinatura digital presente no BU.' : 'Sem assinatura (verifique se leu o último QR).'}</p>
+            {(() => {
+              // Banner do status criptográfico — cor + ícone variam por status.
+              const c = signatureCheck;
+              const cls = !c ? 'border-slate-700 bg-slate-900/60 text-slate-400'
+                : c.status === 'valid' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                : c.status === 'invalid' ? 'border-rose-500/50 bg-rose-500/15 text-rose-300'
+                : c.status === 'no_key' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                : 'border-slate-700 bg-slate-900/60 text-slate-400';
+              const Icon = !c ? Loader2
+                : c.status === 'valid' ? ShieldCheck
+                : c.status === 'invalid' ? ShieldX
+                : ShieldAlert;
+              return (
+                <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${cls}`}>
+                  <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${!c ? 'animate-spin' : ''}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold">{c?.message ?? 'Verificando assinatura…'}</p>
+                    {c?.detail && <p className="text-[10px] opacity-75 mt-0.5">{c.detail}</p>}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="flex gap-2">
               <button onClick={reset} className="flex-1 py-2.5 rounded-xl border border-white/10 text-slate-300 text-sm flex items-center justify-center gap-2"><RefreshCcw className="w-4 h-4" /> Ler outro</button>

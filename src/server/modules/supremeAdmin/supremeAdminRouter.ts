@@ -1088,6 +1088,57 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ---------- CHAVES TSE ED25519 (verificação do BU no Dia D) ----------
+  // Cadastra/edita/remove chaves públicas Ed25519 publicadas pelo TSE após a
+  // Cerimônia de Lacração. Validação de tamanho (64 chars hex = 32 bytes) +
+  // UF normalizada uppercase. Frontend lê direto da tabela via RLS pública.
+  router.get('/tse-keys', async (_req: Request, res: Response) => {
+    const { data, error } = await supabaseAdmin
+      .from('tse_signing_keys').select('uf, year, public_key_hex, notes, updated_at')
+      .order('year', { ascending: false }).order('uf');
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ keys: data ?? [] });
+  });
+
+  router.post('/tse-keys', async (req: Request, res: Response) => {
+    try {
+      const { uf, year, public_key_hex, notes } = req.body ?? {};
+      const ufNorm = String(uf || '').trim().toUpperCase();
+      const yearNum = Number(year);
+      const keyHex = String(public_key_hex || '').trim().toLowerCase().replace(/[^0-9a-f]/g, '');
+      if (!/^[A-Z]{2}$/.test(ufNorm)) return res.status(400).json({ error: 'uf_invalid', expected: 'AA (2 letras)' });
+      if (!Number.isFinite(yearNum) || yearNum < 2024 || yearNum > 2100) return res.status(400).json({ error: 'year_invalid' });
+      if (keyHex.length !== 64) return res.status(400).json({ error: 'public_key_hex_invalid', expected: '64 chars hex (32 bytes Ed25519)', got: keyHex.length });
+
+      const { data, error } = await supabaseAdmin.from('tse_signing_keys').upsert({
+        uf: ufNorm, year: yearNum, public_key_hex: keyHex,
+        notes: notes?.toString().slice(0, 280) || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'uf,year' }).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.tse_key.upsert', severity: 'warn',
+        resourceType: 'tse_signing_key', resourceId: `${ufNorm}/${yearNum}`,
+      }).catch(() => {});
+      return res.json({ key: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.delete('/tse-keys/:uf/:year', async (req: Request, res: Response) => {
+    const uf = req.params.uf.toUpperCase();
+    const year = Number(req.params.year);
+    const { error } = await supabaseAdmin.from('tse_signing_keys').delete().eq('uf', uf).eq('year', year);
+    if (error) return res.status(500).json({ error: error.message });
+    await audit(supabaseAdmin, {
+      ...actorFromRequest(req), action: 'supreme.tse_key.delete', severity: 'warn',
+      resourceType: 'tse_signing_key', resourceId: `${uf}/${year}`,
+    }).catch(() => {});
+    return res.json({ ok: true });
+  });
+
   // ---------- DEFINIR PLANO DA CAMPANHA (libera Grátis 1-clique e troca tier) ----------
   // Lê plans WHERE id=:planId, mapeia para planTier interno e regrava
   // campaign_configs com features/limits vindos do banco (source of truth

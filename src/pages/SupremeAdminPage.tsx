@@ -14,6 +14,7 @@ import PublicFormsPanel from '../components/supreme/PublicFormsPanel';
 import PlatformFormsCatalog from '../components/supreme/PlatformFormsCatalog';
 import BusinessKpis from '../components/supreme/BusinessKpis';
 import PartiesTab from '../components/supreme/PartiesTab';
+import TseKeysPanel from '../components/supreme/TseKeysPanel';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -1785,6 +1786,8 @@ const SupremeAdminPage: React.FC = () => {
                                 </div>
                                 <p className="text-[10px] text-slate-600">Preços e módulos vêm da tabela <code>plans</code> (fonte de verdade do faturamento). Cada plano superior inclui os módulos dos inferiores.</p>
                             </Card>
+
+                            <TseKeysPanel />
                         </motion.div>
                     )}
                 </AnimatePresence>
