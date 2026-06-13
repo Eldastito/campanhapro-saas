@@ -1,5 +1,8 @@
 # Claude Code internal (worktrees, output, cache)
-.claude/
+# — mas /skills e /CLAUDE.md são parte do projeto, vão versionados (regra do time).
+.claude/*
+!.claude/skills/
+!.claude/CLAUDE.md
 
 # Dependencies
 node_modules/
