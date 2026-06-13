@@ -36,23 +36,12 @@ export const useDashboardMetrics = ({
   React.useEffect(() => {
     if (!user?.campaignId) return;
     const fetchEngagement = async () => {
-      console.log("[DashboardMetrics] Buscando métricas de engajamento para:", user.campaignId);
       const stats = await getLeaderConversionStats(user.campaignId!);
-      console.log("[DashboardMetrics] Stats de Líderes:", stats.length);
       setLeaderRanking(stats);
       setEngagementLoading(false);
     };
     fetchEngagement();
   }, [user?.campaignId]);
-
-  React.useEffect(() => {
-    if (pesquisas.length > 0) {
-        console.log("[DashboardMetrics] Pesquisas carregadas:", pesquisas.length);
-    }
-    if (engagementActions.length > 0) {
-        console.log("[DashboardMetrics] Ações de Engajamento carregadas:", engagementActions.length);
-    }
-  }, [pesquisas, engagementActions]);
 
   const { visibleVisits, visibleEngagements, allApoiadores, allMunicipios, allBairros, allLeaders } = React.useMemo(() => {
     let filteredVisits = visits;

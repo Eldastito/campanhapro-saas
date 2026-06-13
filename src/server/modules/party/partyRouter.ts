@@ -649,7 +649,9 @@ Saída JSON estrito (sem markdown):
     const userId = (req as any).user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const ctx = await myCandidateAsMember(userId);
-    if (!ctx) return res.status(404).json({ error: 'not_member' });
+    // Não-membro de partido NÃO é erro — Admin/Coord de campanha normal recebe
+    // 200 com isMember:false, pra não encher o console com 404 (#10).
+    if (!ctx) return res.json({ isMember: false });
     const { cand, user } = ctx;
     const { data: party } = await supabase.from('parties').select('name').eq('id', cand.partyId).maybeSingle();
     const { data: minhas } = await supabase.from('party_checkins')
@@ -657,6 +659,7 @@ Saída JSON estrito (sem markdown):
       .eq('candidateId', cand.id).eq('userId', userId)
       .order('createdAt', { ascending: false }).limit(10);
     return res.json({
+      isMember: true,
       role: (user as any).type,
       candidate: { id: cand.id, name: cand.displayName, cargo: cand.cargo || null, regiao: cand.regiao || null },
       party: { id: cand.partyId, name: (party as any)?.name || '' },

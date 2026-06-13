@@ -41,10 +41,8 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
                 teamQuery = teamQuery.eq('email', user.email);
             }
 
-            console.log("[TeamContext] Buscando membros para campanha:", user.campaignId, "Tipo usuário:", user.type);
             const { data: teamData, error: teamError } = await teamQuery;
-            console.log("[TeamContext] Membros encontrados:", teamData?.length || 0);
-            
+
             if (teamError) {
                 console.error("[TeamContext] Erro ao buscar membros:", teamError);
                 handleSupabaseError(teamError, OperationType.GET, 'team_members');

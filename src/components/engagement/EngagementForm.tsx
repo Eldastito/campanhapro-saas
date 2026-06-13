@@ -23,20 +23,17 @@ const EngagementForm = ({ onSave, onCancel, initialData }: EngagementFormProps) 
     const [formData, setFormData] = React.useState(initialData);
 
     const supporters = React.useMemo(() => {
-        console.log("[EngagementForm] Calculando apoiadores. Membros na equipe:", teamMembers.length);
-        const fromTeam = teamMembers.filter(m => 
-            m.role?.toLowerCase() === 'apoiador' || 
+        const fromTeam = teamMembers.filter(m =>
+            m.role?.toLowerCase() === 'apoiador' ||
             m.role?.toLowerCase() === 'colaborador'
         ).map(m => m.name);
         const fromVisits = visits.map(v => v.apoiador).filter(Boolean) as string[];
         let combined = [...new Set([...fromTeam, ...fromVisits])].sort();
-        
+
         // Fallback para o usuário logado se a lista estiver vazia
         if (combined.length === 0 && user?.name) {
             combined = [user.name];
         }
-        
-        console.log("[EngagementForm] Apoiadores encontrados:", combined.length);
         return combined;
     }, [teamMembers, visits, user?.name]);
 

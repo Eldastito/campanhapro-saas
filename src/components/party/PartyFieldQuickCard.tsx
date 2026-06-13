@@ -40,9 +40,11 @@ const PartyFieldQuickCard: React.FC = () => {
     (async () => {
       try {
         const r = await authedFetch('/api/v1/party/member/me');
-        if (r.status === 404 || r.status === 403) { setDenied(true); return; }
         if (!r.ok) { setDenied(true); return; }
         const j = await r.json();
+        // Backend agora retorna 200 c/ isMember:false pra Admin/Coord de campanha
+        // normal — assim não polui o console com 404 (#10).
+        if (j?.isMember === false) { setDenied(true); return; }
         setCtx(j);
       } catch { setDenied(true); }
     })();
