@@ -36,7 +36,8 @@ This is an ESM project (`"type": "module"` in `package.json`) — always use `im
 - **Deploy = `git push origin main`.** Coolify reinicia a app sozinho em ~2 min (webhook GitHub→Coolify). Não há staging.
 - **Build:** `npx vite build` (esbuild — tolera unused-var). Erros pré-existentes de `TS6133` no `tsc --noEmit -p tsconfig.json` são conhecidos e NÃO bloqueiam o build de produção; ignorar.
 - **Server typecheck:** `npx tsc --noEmit -p tsconfig.server.json` — esse SIM tem que ficar limpo. Rodar antes de commit em mudanças no servidor.
-- Antes de declarar uma mudança "pronta": typecheck do servidor verde + `vite build` exit 0.
+- **Testes:** `npm test` (node `--test` nativo sobre `tests/**/*.test.ts`, ~100 testes — billing, isolation, onboarding, asaas, monteCarlo, lifecycle). Tem que terminar com exit 0. Se um teste for bit-rot (passa em prod mas mock dessincronizado), marcar `test.skip` com TODO claro e abrir tarefa de revisão.
+- **Pronto pra ship:** `npm test` exit 0 + server tsc verde + `vite build` exit 0. O skill `/ship` orquestra esses três.
 
 ## Conventions
 

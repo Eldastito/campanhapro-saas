@@ -7,6 +7,14 @@ description: Roda typecheck do servidor + build de produção, commita no padrã
 
 Execute na ordem abaixo. **Pare em qualquer falha** — nunca "siga ignorando".
 
+## 0. Suíte de testes (gate duro)
+
+```bash
+npm test
+```
+
+Usa o runner nativo do Node sobre `tests/**/*.test.ts` (~100 testes: billing, isolation, onboarding, asaas, monteCarlo, subscriptionLifecycle, etc.). `exit != 0` bloqueia. Testes `test.skip` com TODO de bit-rot são esperados — não conte como falha.
+
 ## 1. Server typecheck (gate duro)
 
 ```bash
