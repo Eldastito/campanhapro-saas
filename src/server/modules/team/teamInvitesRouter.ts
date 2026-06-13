@@ -307,6 +307,85 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
     return res.status(201).json({ ok: true, userId: created.user.id });
   });
 
+  // POST /members/:teamMemberId/invite — gera link de convite para um membro
+  // ÓRFÃO da team_members (linha existe mas userId é NULL). Reutiliza a infra
+  // de team_invites: cria um token, envia e-mail e devolve a URL pro admin
+  // copiar/enviar pelo WhatsApp. A amarração final (team_members.userId) acontece
+  // no /accept abaixo, procurando team_members pelo e-mail+campanha.
+  router.post('/members/:teamMemberId/invite', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    const userType = (req as any).user?.userType;
+    const userId = (req as any).user?.id;
+    if (!campaignId || !userId) return res.status(401).json({ error: 'Unauthorized' });
+    const isLeader = userType === 'Líder';
+    if (userType !== 'Admin' && userType !== 'Coordenador' && !isLeader) {
+      return res.status(403).json({ error: 'admin_required' });
+    }
+
+    // 1. Lê o team_member
+    const { data: member } = await supabase.from('team_members')
+      .select('id, name, email, role, "campaignId", "userId", "assignedLeaderId"')
+      .eq('id', req.params.teamMemberId).maybeSingle();
+    if (!member || (member as any).campaignId !== campaignId) {
+      return res.status(404).json({ error: 'member_not_found' });
+    }
+    if ((member as any).userId) return res.status(409).json({ error: 'already_has_access' });
+
+    const memberEmail = String((member as any).email ?? '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(memberEmail)) {
+      return res.status(400).json({ error: 'member_email_missing_or_invalid' });
+    }
+    const role = (member as any).role as UserRole;
+    if (!INVITABLE_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'role_not_invitable', actual: role, allowed: INVITABLE_ROLES });
+    }
+    if (isLeader && (member as any).assignedLeaderId !== userId) {
+      return res.status(403).json({ error: 'leader_can_only_invite_own_members' });
+    }
+
+    // 2. Reusa infra de team_invites
+    const [{ data: inviter }, { data: campaign }] = await Promise.all([
+      supabase.from('users').select('name').eq('id', userId).maybeSingle(),
+      supabase.from('campaigns').select('name').eq('id', campaignId).maybeSingle(),
+    ]);
+    const token = generateToken();
+    const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const inviterName = inviter?.name ?? 'Admin da campanha';
+    const campaignName = campaign?.name ?? 'Campanha';
+
+    const { data: created, error } = await supabase.from('team_invites').insert({
+      campaignId, email: memberEmail, role, token, status: 'pending',
+      invitedBy: userId, invitedByName: inviterName, expiresAt,
+    }).select('id, email, role, "expiresAt", status, "createdAt", token').single();
+    if (error) {
+      if (String(error.message).includes('uq_team_invites_pending')) {
+        // Já existe convite pendente — devolve o token existente pra reusar.
+        const { data: existing } = await supabase.from('team_invites')
+          .select('id, email, role, "expiresAt", status, "createdAt", token')
+          .eq('campaignId', campaignId).eq('email', memberEmail).eq('status', 'pending').maybeSingle();
+        if (existing) {
+          const url = `${process.env.APP_URL ?? 'http://localhost:3000'}/invite/${(existing as any).token}`;
+          return res.status(200).json({ invite: existing, inviteUrl: url, reused: true });
+        }
+      }
+      return res.status(500).json({ error: error.message });
+    }
+    const inviteUrl = `${process.env.APP_URL ?? 'http://localhost:3000'}/invite/${token}`;
+
+    // 3. E-mail (fire-and-forget)
+    sendTeamInviteEmail(supabase, {
+      campaignId, email: memberEmail, inviterName, campaignName, role, inviteUrl, inviteId: created.id,
+    }).catch((err) => console.warn('[team] grant-access email failed:', err.message));
+
+    await audit(supabase, {
+      ...actorFromRequest(req), action: 'team.member.grant_access',
+      resourceType: 'team_member', resourceId: (member as any).id, severity: 'info',
+      metadata: { email: memberEmail, role, inviteId: created.id },
+    }).catch(() => {});
+
+    return res.status(201).json({ invite: created, inviteUrl });
+  });
+
   // Autorização p/ gerenciar um membro-alvo: Admin/Coordenador, ou o Líder dono dele.
   async function authorizeManage(req: Request, targetUserId: string) {
     const campaignId = (req as any).user?.campaignId;
@@ -458,6 +537,15 @@ export function createTeamInvitesPublicRouter(supabase: SupabaseClient): Router 
       .maybeSingle();
 
     if (inviteErr || !updated) return res.status(409).json({ error: 'invite_already_consumed' });
+
+    // GERAR ACESSO: se este convite foi disparado pra um team_member órfão,
+    // amarra agora — o que estava em team_members ganha userId e o membro
+    // entra no app já dentro da equipe (não precisa cadastrar de novo).
+    await supabase.from('team_members')
+      .update({ userId, updatedAt: new Date().toISOString() })
+      .eq('campaignId', invite.campaignId)
+      .eq('email', invite.email)
+      .is('userId', null);
 
     await audit(supabase, {
       campaignId: invite.campaignId,

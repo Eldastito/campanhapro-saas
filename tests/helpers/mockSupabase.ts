@@ -138,6 +138,15 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       };
     },
     eq: (col: string, val: any) => { state.filters.push(r => r[col] === val); return chain; },
+    // .is('col', null) / .is('col', true) — emula o operador IS do PostgREST.
+    // Diferente de .eq, casa NULL/undefined com null.
+    is: (col: string, val: any) => {
+      state.filters.push(r => {
+        if (val === null) return r[col] === null || r[col] === undefined;
+        return r[col] === val;
+      });
+      return chain;
+    },
     in: (col: string, vals: any[]) => { state.filters.push(r => vals.includes(r[col])); return chain; },
     gte: (col: string, val: any) => { state.filters.push(r => r[col] >= val); return chain; },
     gt: (col: string, val: any) => { state.filters.push(r => r[col] > val); return chain; },

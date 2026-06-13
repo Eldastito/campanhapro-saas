@@ -26,6 +26,9 @@ export interface TeamMember {
     pixKey?: string;
     createdAt?: string;
     updatedAt?: string;
+    /** ID do auth.users vinculado. null = membro órfão (cadastrado mas sem login).
+     *  Quando órfão, o card mostra "Gerar acesso" no TeamManager. */
+    userId?: string | null;
 }
 
 export interface Location {

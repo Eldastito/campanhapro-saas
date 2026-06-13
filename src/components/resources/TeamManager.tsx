@@ -7,8 +7,9 @@ import { useTeam } from '../../contexts/TeamContext';
 import { TeamMember, TeamMemberRole } from '../../types/teams';
 import { EditIcon, TrashIcon } from '../icons';
 import Input from '../ui/Input';
-import { RefreshCw, Ban, CheckCircle, Lock } from 'lucide-react';
+import { RefreshCw, Ban, CheckCircle, Lock, KeyRound, Copy, Check } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { authedFetch } from '../../lib/authedFetch';
 
 const emptyMember: Omit<TeamMember, 'id'> = {
     name: '', email: '', phone: '', role: 'Apoiador', password: '', cost: 0,
@@ -104,6 +105,35 @@ const TeamManager: React.FC = () => {
     const [isModalOpen, setIsModalOpen] = React.useState(false);
     const [editingMember, setEditingMember] = React.useState<TeamMember | null>(null);
     const [isActing, setIsActing] = React.useState<string | null>(null);
+    // "Gerar acesso" — modal mostra o link de convite p/ copiar e mandar pro membro
+    const [grantInfo, setGrantInfo] = React.useState<{ memberName: string; url: string; reused?: boolean } | null>(null);
+    const [copied, setCopied] = React.useState(false);
+
+    const handleGrantAccess = async (member: TeamMember) => {
+        setIsActing(`grant-${member.id}`);
+        try {
+            const r = await authedFetch(`/api/v1/team/members/${member.id}/invite`, { method: 'POST' });
+            const j = await r.json().catch(() => ({} as any));
+            if (r.ok) {
+                setGrantInfo({ memberName: member.name, url: j.inviteUrl, reused: !!j.reused });
+            } else {
+                const detail = j.error || `HTTP ${r.status}`;
+                const msg = detail === 'member_email_missing_or_invalid'
+                    ? 'O membro precisa ter um e-mail válido cadastrado antes.'
+                    : detail === 'already_has_access'
+                    ? 'Este membro já tem acesso ao app.'
+                    : `Erro: ${detail}`;
+                alert(msg);
+            }
+        } catch {
+            alert('Erro de conexão. Tente novamente.');
+        } finally { setIsActing(null); }
+    };
+    const copyGrantLink = () => {
+        if (!grantInfo) return;
+        navigator.clipboard?.writeText(grantInfo.url)
+            .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => {});
+    };
 
     const handleResetPassword = async (email: string) => {
         setIsActing(email);
@@ -212,20 +242,34 @@ const TeamManager: React.FC = () => {
                             <td className="px-4 py-3">{member.phone}</td>
                             <td className="px-4 py-3 text-center">
                                 <div className="flex justify-center gap-2">
-                                    <button 
-                                        onClick={() => handleSetPassword(member.email)} 
+                                    {/* Órfão (sem login)? Mostra "Gerar acesso" em destaque e esconde os botões
+                                        de senha (não fazem sentido sem conta no Auth ainda). */}
+                                    {!member.userId ? (
+                                        <button
+                                            onClick={() => handleGrantAccess(member)}
+                                            title="Gerar link de acesso (membro sem login)"
+                                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors ${isActing === `grant-${member.id}` ? 'text-slate-500' : 'text-amber-300 bg-amber-500/10 hover:bg-amber-500/20'}`}
+                                        >
+                                            <KeyRound className="w-3.5 h-3.5" /> Gerar acesso
+                                        </button>
+                                    ) : (
+                                    <button
+                                        onClick={() => handleSetPassword(member.email)}
                                         title="Definir Senha Manual"
                                         className={`transition-colors ${isActing === member.email ? 'text-slate-500 animate-spin' : 'text-indigo-400 hover:text-indigo-300'}`}
                                     >
                                         <Lock className="w-4 h-4" />
                                     </button>
-                                    <button 
-                                        onClick={() => handleResetPassword(member.email)} 
+                                    )}
+                                    {member.userId && (
+                                    <button
+                                        onClick={() => handleResetPassword(member.email)}
                                         title="Enviar Link de Reset"
                                         className={`transition-colors ${isActing === member.email ? 'text-slate-500 animate-spin' : 'text-emerald-400 hover:text-emerald-300'}`}
                                     >
                                         <RefreshCw className="w-4 h-4" />
                                     </button>
+                                    )}
                                     <button 
                                         onClick={() => handleToggleBlock(member)} 
                                         title={member.role === 'blocked' ? 'Desbloquear' : 'Bloquear'}
@@ -247,6 +291,29 @@ const TeamManager: React.FC = () => {
         {isModalOpen && (
             <Modal isOpen={isModalOpen} onClose={closeModal} title={editingMember ? "Editar Membro" : "Adicionar Membro"}>
                 <TeamMemberForm onSave={handleSave} onCancel={closeModal} initialData={editingMember} />
+            </Modal>
+        )}
+
+        {/* Modal "Gerar acesso" — link p/ copiar + mandar pro membro por WhatsApp/email */}
+        {grantInfo && (
+            <Modal isOpen={!!grantInfo} onClose={() => { setGrantInfo(null); setCopied(false); }} title="🔐 Link de acesso gerado">
+                <div className="space-y-3">
+                    <p className="text-sm text-slate-300">
+                        {grantInfo.reused ? 'Já havia um convite pendente — ' : 'Pronto! '}
+                        Mande este link para <b>{grantInfo.memberName}</b>. Ao abrir e fazer login (ou se cadastrar), ele entra direto no app com a função dele e amarra ao membro existente — sem cadastro duplicado.
+                    </p>
+                    <div className="flex gap-2 items-center">
+                        <input readOnly value={grantInfo.url}
+                            className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-white" />
+                        <button onClick={copyGrantLink}
+                            className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg px-3 py-2 text-sm font-bold">
+                            {copied ? <><Check className="w-4 h-4" /> Copiado</> : <><Copy className="w-4 h-4" /> Copiar</>}
+                        </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                        O link também foi enviado por e-mail (se configurado). Válido por 7 dias.
+                    </p>
+                </div>
             </Modal>
         )}
     </Card>
