@@ -1766,7 +1766,7 @@ const SupremeAdminPage: React.FC = () => {
                                                 <span>IA: <strong className="text-slate-200">{
                                                     p.limits?.ai_budget_cents === -1 ? 'Ilimitada'
                                                     : p.limits?.ai_budget_cents === 0 ? 'Zero'
-                                                    : `R$ ${(p.limits.ai_budget_cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 0 })}/mês`
+                                                    : 'Limitada'
                                                 }</strong></span>
                                                 <span>WhatsApp: <strong className="text-slate-200">{
                                                     p.limits?.messages_per_month === -1 ? '∞ msgs/mês'
