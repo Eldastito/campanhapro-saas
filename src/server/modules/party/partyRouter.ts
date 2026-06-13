@@ -12,6 +12,7 @@ import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
 import { computeScore } from './score';
+import { callAgent } from '../../../lib/aiCallAgent';
 
 const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
@@ -338,6 +339,84 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       partyId: (party as any).id, candidateId: req.params.id, decision, note, createdBy: userId,
     });
     return res.json({ ok: true, repasseStatus: decision });
+  });
+
+  /**
+   * IA-Antifraude do Partido (#57). Cruza repasse + atividade + score de
+   * TODOS os candidatos do partido pra detectar padrões suspeitos:
+   *   • absorvendo recurso sem entregar (recebeu muito, score baixo, sem comitê)
+   *   • disparidade de produtividade (R$ / visita)
+   *   • inatividade prolongada apesar de repasses recentes
+   * Saída: lista de alertas priorizada (alta/média/baixa) com justificativa
+   * e ação sugerida ao presidente (segurar, reduzir, manter).
+   */
+  router.post('/antifraud-analysis', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    // Só presidente do partido pode rodar
+    const { data: party } = await supabase.from('parties').select('id, name').eq('presidentId', userId).maybeSingle();
+    if (!party) return res.status(403).json({ error: 'not_president' });
+
+    // Snapshot de cada candidato (dados QUE JÁ EXISTEM — sem precisar acumular)
+    const { data: candidates, error } = await supabase
+      .from('party_candidates')
+      .select('id, displayName, cargo, regiao, status, "valorRecebido", "valorAlocado", "repasseStatus", "valveNote"')
+      .eq('partyId', (party as any).id);
+    if (error) return res.status(500).json({ error: error.message });
+    if (!candidates || candidates.length === 0) {
+      return res.json({ party: party.name, alerts: [], note: 'Sem candidatos pra analisar.' });
+    }
+
+    // Score rule-based atual de cada um (sem novas chamadas SQL — usa o
+    // mesmo computeScore que o painel já mostra).
+    const now = Date.now();
+    const enriched = candidates.map((c: any) => {
+      const score = computeScore({
+        status: c.status || 'pending',
+        committee: null, // signals de comitê não trafegados aqui — TODO
+        checkinCount: 0, lastCheckinAt: null,
+        coordCount: 0, leaderCount: 0,
+        valorRecebido: Number(c.valorRecebido || 0),
+        valorAlocado: Number(c.valorAlocado || 0),
+      }, now);
+      return { ...c, score: score.score, scoreLevel: score.level, scoreReasons: score.reasons };
+    });
+
+    const linhas = enriched.map((c, i) =>
+      `${i+1}. ${c.displayName} | cargo=${c.cargo || '?'} | regiao=${c.regiao || '?'} | recebido=R$${Number(c.valorRecebido||0).toFixed(0)} | alocado=R$${Number(c.valorAlocado||0).toFixed(0)} | score=${c.score} (${c.scoreLevel}) | status=${c.status} | valve=${c.repasseStatus||'liberado'}`
+    ).join('\n');
+
+    const system = `Você é o Auditor Antifraude do Partido. Analise a lista de candidatos e detecte padrões SUSPEITOS:
+- "absorção": recebeu R$ mas score baixo / sem comitê / sem alocação clara
+- "disparidade": R$/atividade muito acima dos pares no mesmo cargo
+- "inatividade": último sinal há muito tempo apesar de repasses
+
+NÃO acuse sem evidência. Use a regra: se score é vermelho E valorRecebido > 0 E valorAlocado < 30% recebido, é forte sinal.
+
+Retorne JSON estrito (sem markdown):
+{"alerts":[{"candidateId":"uuid","priority":"alta|media|baixa","pattern":"absorção|disparidade|inatividade|ok","justification":"≤200 chars com NÚMEROS","suggested_action":"segurar|reduzir|manter|investigar + frase ≤120 chars"}]}
+
+Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
+
+    try {
+      const ai = await callAgent(supabase, 'crm', `Audite estes ${enriched.length} candidatos do partido "${party.name}":\n\n${linhas}`, {
+        campaignId: 'party:' + party.id, // namespace pra agent_runs
+        systemInstruction: system, complexity: 'balanced', maxTokens: 2000,
+      });
+      let cleaned = ai.text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}');
+      if (start >= 0 && end > start) cleaned = cleaned.slice(start, end + 1);
+      const parsed = JSON.parse(cleaned);
+      return res.json({
+        party: party.name,
+        analyzedAt: new Date().toISOString(),
+        candidatesAnalyzed: enriched.length,
+        alerts: Array.isArray(parsed?.alerts) ? parsed.alerts : [],
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || 'ai_failed' });
+    }
   });
 
   // ---- Lado do CANDIDATO de partido (comprovação) ----

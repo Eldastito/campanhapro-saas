@@ -382,7 +382,9 @@ const PartyPresidentPage: React.FC = () => {
       {tab === 'Ranking' && (
         candidates.length === 0 ? (
           <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para ver o ranking.</div>
-        ) : (() => {
+        ) : (<>
+          <AntifraudButton />
+          {(() => {
           const ranked = [...candidates].sort((a, b) => (b.score?.score || 0) - (a.score?.score || 0));
           const greens = candidates.filter((c) => c.score?.level === 'green').length;
           const yellows = candidates.filter((c) => c.score?.level === 'yellow').length;
@@ -446,7 +448,8 @@ const PartyPresidentPage: React.FC = () => {
               </div>
             </div>
           );
-        })()
+        })()}
+        </>)
       )}
 
       {tab === 'Repasses' && (
@@ -805,6 +808,77 @@ const PartyPresidentPage: React.FC = () => {
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] p-4" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="foto" className="max-w-full max-h-full object-contain rounded-xl" />
           <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 text-white/80 hover:text-white"><X className="w-6 h-6" /></button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Botão "🕵️ Análise Antifraude IA" — chama o callAgent no servidor pra
+ * detectar candidatos absorvendo recurso sem entregar. Mostra os alertas
+ * em um painel inline expansível. Custo escondido (regra #111).
+ */
+const AntifraudButton: React.FC = () => {
+  const [loading, setLoading] = React.useState(false);
+  const [result, setResult] = React.useState<{ analyzedAt: string; alerts: any[]; candidatesAnalyzed: number } | null>(null);
+  const [open, setOpen] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const run = async () => {
+    setLoading(true); setError(null);
+    try {
+      const r = await authedFetch('/api/v1/party/antifraud-analysis', { method: 'POST' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || 'Falha na análise');
+      setResult(j); setOpen(true);
+    } catch (e: any) { setError(e?.message || 'Erro'); }
+    finally { setLoading(false); }
+  };
+
+  const priorityCls = (p: string) =>
+    p === 'alta' ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+    : p === 'media' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+    : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
+
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <p className="text-xs uppercase tracking-wider text-slate-500">Auditoria assistida</p>
+          <p className="text-sm text-slate-300">Análise antifraude cruza repasse × atividade × score.</p>
+        </div>
+        <button onClick={run} disabled={loading}
+          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-sm font-bold px-4 py-2 rounded-xl flex items-center gap-2">
+          {loading ? '🔄 Analisando…' : '🕵️ Análise Antifraude IA'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
+      {result && open && (
+        <div className="mt-3 bg-slate-900/60 border border-white/10 rounded-2xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              {result.candidatesAnalyzed} candidatos · {new Date(result.analyzedAt).toLocaleString('pt-BR')}
+            </p>
+            <button onClick={() => setOpen(false)} className="text-slate-500 hover:text-white text-xs">Fechar</button>
+          </div>
+          {result.alerts.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">Sem alertas — partido em ordem.</p>
+          ) : result.alerts.map((a, i) => (
+            <div key={i} className={`border rounded-xl p-3 ${priorityCls(a.priority)}`}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-black uppercase tracking-wider">
+                  {a.priority} · {a.pattern}
+                </p>
+                <p className="text-[10px] font-mono opacity-70">{a.candidateId?.slice(0, 8)}…</p>
+              </div>
+              <p className="text-xs mt-1.5">{a.justification}</p>
+              <p className="text-[11px] mt-1.5 font-bold">→ {a.suggested_action}</p>
+            </div>
+          ))}
+          <p className="text-[10px] text-slate-600 pt-2 border-t border-white/5">
+            Sugestões são da IA. Decisão final é sua — use a válvula no card do candidato para liberar/segurar/cortar repasse.
+          </p>
         </div>
       )}
     </div>
