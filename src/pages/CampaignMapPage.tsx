@@ -30,9 +30,16 @@ const CampaignMapPage: React.FC = () => {
 
   const [coords, setCoords] = React.useState<Record<string, LatLng>>({});
   const [geocoding, setGeocoding] = React.useState(false);
-  const [layers, setLayers] = React.useState({ equipe: true, visitas: true, live: true, votos: false, reunioes: true });
+  const [layers, setLayers] = React.useState({ equipe: true, visitas: true, live: true, votos: false, reunioes: true, sentimento: true });
   const [live, setLive] = React.useState<LiveLoc[]>([]);
   const [meetings, setMeetings] = React.useState<any[]>([]);
+  // Heat de sentimento por bairro (#52) — vem da rota /intelligence/neighborhood-heat
+  const [sentiment, setSentiment] = React.useState<Array<{
+    bairro: string; municipio: string; total: number; score: number;
+    level: 'green' | 'yellow' | 'red' | 'unknown';
+    apoiadores: number; multiplicadores: number; simpatizantes: number;
+    indecisos: number; rejeitadores: number; desconhecidos: number;
+  }>>([]);
 
   // Filtros (cascata município→bairro, igual ao formulário, + por líder)
   const [fMunicipio, setFMunicipio] = React.useState('');
@@ -111,6 +118,11 @@ const CampaignMapPage: React.FC = () => {
     equipeGroups.forEach((g) => targets.add(g.key));
     visitaGroups.forEach((g) => targets.add(g.key));
     meetingGroups.forEach((g) => targets.add(g.key));
+    // Sentimento usa mesma chave municipio|bairro
+    sentiment.forEach((b) => {
+      const key = `${norm(b.municipio)}|${norm(b.bairro)}`;
+      if (key !== '|') targets.add(key);
+    });
     const todo = Array.from(targets).filter((q) => !doneRef.current.has(q));
     if (!todo.length) return;
     todo.forEach((q) => doneRef.current.add(q));
@@ -118,7 +130,7 @@ const CampaignMapPage: React.FC = () => {
     setGeocoding(true);
     geocodeMany(todo).then((res) => { if (!cancelled) { setCoords((prev) => ({ ...prev, ...res })); setGeocoding(false); } });
     return () => { cancelled = true; };
-  }, [equipeGroups, visitaGroups]);
+  }, [equipeGroups, visitaGroups, meetingGroups, sentiment]);
 
   // ── Ao vivo (GPS) ──────────────────────────────────────────────────
   React.useEffect(() => {
@@ -141,6 +153,21 @@ const CampaignMapPage: React.FC = () => {
       .then(({ data }) => setMeetings(data ?? []), () => {});
   }, [user?.campaignId]);
 
+  // ── Heat de sentimento por bairro ─────────────────────────────────
+  React.useEffect(() => {
+    if (!user?.campaignId) return;
+    (async () => {
+      try {
+        const { authedFetch } = await import('../lib/authedFetch');
+        const r = await authedFetch('/api/v1/intelligence/neighborhood-heat');
+        if (r.ok) {
+          const j = await r.json();
+          setSentiment(j.heat ?? []);
+        }
+      } catch { /* silencia: sentimento é layer opcional */ }
+    })();
+  }, [user?.campaignId]);
+
   // ── Mapa (init uma vez) ────────────────────────────────────────────
   React.useEffect(() => {
     const L = (window as any).L;
@@ -152,6 +179,7 @@ const CampaignMapPage: React.FC = () => {
     lgRef.current.votos = L.layerGroup().addTo(map);
     lgRef.current.reunioes = L.layerGroup().addTo(map);
     lgRef.current.live = L.layerGroup().addTo(map);
+    lgRef.current.sentimento = L.layerGroup().addTo(map);
     mapRef.current = map;
   }, []);
 
@@ -205,6 +233,37 @@ const CampaignMapPage: React.FC = () => {
       mk.addTo(lgRef.current.reunioes); pts.push([c.lat, c.lng]);
     });
 
+    // Sentimento por bairro (#52) — heat dos contatos classificados.
+    // Verde=apoio>rejeição; amarelo=neutro; vermelho=rejeição>apoio; cinza=poucos dados.
+    lgRef.current.sentimento?.clearLayers();
+    if (layers.sentimento) sentiment.forEach((b) => {
+      if (!matchFilters(b.municipio, b.bairro, null)) return;
+      const c = coords[`${norm(b.municipio)}|${norm(b.bairro)}`]; if (!c) return;
+      const color = b.level === 'green' ? '#10b981'
+        : b.level === 'yellow' ? '#eab308'
+        : b.level === 'red' ? '#dc2626'
+        : '#475569'; // unknown
+      // Raio cresce com sqrt(total) pra não dominar visualmente bairros grandes
+      const radius = Math.min(8 + Math.sqrt(b.total) * 3, 36);
+      const mk = L.circleMarker([c.lat, c.lng], { radius, fillColor: color, color: '#fff', weight: 1.5, fillOpacity: 0.55 });
+      mk.bindPopup(
+        `<div style="min-width:200px">
+          <b>${esc(b.bairro)}</b>${b.municipio ? ` — ${esc(b.municipio)}` : ''}<br/>
+          <span style="color:${color};font-weight:bold">Score: ${b.score >= 0 ? '+' : ''}${b.score}</span>
+          <span style="color:#94a3b8"> · ${b.total} contato(s)</span>
+          <table style="margin-top:6px;font-size:11px;color:#cbd5e1;border-collapse:collapse">
+            <tr><td>🥇 Multiplicadores</td><td style="text-align:right;padding-left:8px">${b.multiplicadores}</td></tr>
+            <tr><td>✅ Apoiadores</td><td style="text-align:right">${b.apoiadores}</td></tr>
+            <tr><td>👍 Simpatizantes</td><td style="text-align:right">${b.simpatizantes}</td></tr>
+            <tr><td>🤔 Indecisos</td><td style="text-align:right">${b.indecisos}</td></tr>
+            <tr><td>❌ Rejeitadores</td><td style="text-align:right">${b.rejeitadores}</td></tr>
+            <tr><td style="color:#64748b">— Desconhecidos</td><td style="text-align:right;color:#64748b">${b.desconhecidos}</td></tr>
+          </table>
+        </div>`
+      );
+      mk.addTo(lgRef.current.sentimento); pts.push([c.lat, c.lng]);
+    });
+
     // Ao vivo
     lgRef.current.live?.clearLayers();
     if (layers.live) live.forEach((loc) => {
@@ -218,7 +277,7 @@ const CampaignMapPage: React.FC = () => {
 
     if (pts.length) { try { map.fitBounds(pts, { padding: [50, 50], maxZoom: 13 }); } catch { /* ignore */ } }
     setTimeout(() => { try { map.invalidateSize(); } catch { /* ignore */ } }, 120);
-  }, [coords, layers, equipeGroups, visitaGroups, meetingGroups, live]);
+  }, [coords, layers, equipeGroups, visitaGroups, meetingGroups, live, sentiment]);
 
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
   const goFullscreen = () => { try { wrapRef.current?.requestFullscreen?.(); } catch { /* ignore */ } };
@@ -292,6 +351,10 @@ const CampaignMapPage: React.FC = () => {
           <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300">
             <input type="checkbox" checked={layers.live} onChange={() => toggle('live')} className="accent-cyan-500" />
             <span className="flex items-center gap-1"><Radio className="w-4 h-4 text-cyan-400" /> Ao vivo (GPS)</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer text-slate-300" title="Heat de sentimento por bairro — soma apoiadores/rejeitadores dos contatos do CRM classificados pela IA.">
+            <input type="checkbox" checked={layers.sentimento} onChange={() => toggle('sentimento')} className="accent-rose-500" />
+            <span className="flex items-center gap-1">🌡️ Sentimento <span className="text-[10px] text-slate-500">({sentiment.length})</span></span>
           </label>
           {geocoding && <span className="flex items-center gap-1 text-xs text-slate-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> localizando pontos…</span>}
         </div>

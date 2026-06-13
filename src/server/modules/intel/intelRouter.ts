@@ -401,5 +401,89 @@ Responda APENAS um objeto JSON válido (sem markdown, sem preâmbulo).`;
     return res.json({ ok: true });
   });
 
+  /**
+   * GET /neighborhood-heat — heat de sentimento por bairro (#52).
+   *
+   * Agrega contatos (supportLevel) por bairro+município e calcula um score
+   * -100..100 onde:
+   *   +100 = só apoiadores/multiplicadores
+   *      0 = neutro
+   *   -100 = só rejeitadores
+   *
+   * É 100% rule-based / SQL — NÃO chama IA. Roda em milissegundos.
+   * Frontend usa pra plotar marcadores coloridos no mapa.
+   */
+  router.get('/neighborhood-heat', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const filterMun = (req.query.municipio as string) || undefined;
+
+    try {
+      let q = supabase.from('contacts')
+        .select('neighborhood, city, "supportLevel", "supportScore", "voteIntention"')
+        .eq('campaignId', campaignId)
+        .not('neighborhood', 'is', null);
+      if (filterMun) q = q.eq('city', filterMun);
+      const { data: contacts, error } = await q.limit(20000);
+      if (error) throw error;
+
+      // Agrega em memória — bairro:municipio é a chave
+      const buckets = new Map<string, {
+        municipio: string; bairro: string;
+        apoiadores: number; multiplicadores: number; simpatizantes: number;
+        indecisos: number; rejeitadores: number; desconhecidos: number;
+        total: number; topObjection?: string;
+      }>();
+
+      for (const c of (contacts ?? [])) {
+        const bairro = String((c as any).neighborhood || '').trim();
+        if (!bairro) continue;
+        const municipio = String((c as any).city || '').trim();
+        const key = `${bairro}::${municipio}`;
+        let b = buckets.get(key);
+        if (!b) {
+          b = { municipio, bairro, apoiadores: 0, multiplicadores: 0, simpatizantes: 0,
+                indecisos: 0, rejeitadores: 0, desconhecidos: 0, total: 0 };
+          buckets.set(key, b);
+        }
+        const level = (c as any).supportLevel;
+        switch (level) {
+          case 'apoiador': b.apoiadores++; break;
+          case 'multiplicador': b.multiplicadores++; break;
+          case 'simpatizante': b.simpatizantes++; break;
+          case 'indeciso': b.indecisos++; break;
+          case 'rejeitador': b.rejeitadores++; break;
+          default: b.desconhecidos++;
+        }
+        b.total++;
+      }
+
+      // Score: positivos (apoiador+multi+simpatizante*0.5) menos negativos (rejeitador)
+      // dividido pelos CLASSIFICADOS (exclui desconhecidos do denominador) * 100.
+      // Se não tem nenhum classificado, score=0.
+      const heat = Array.from(buckets.values()).map((b) => {
+        const classificados = b.total - b.desconhecidos;
+        const positivos = b.apoiadores + b.multiplicadores + b.simpatizantes * 0.5;
+        const score = classificados > 0
+          ? Math.round(((positivos - b.rejeitadores) / classificados) * 100)
+          : 0;
+        const level: 'green' | 'yellow' | 'red' | 'unknown' =
+          classificados === 0 ? 'unknown'
+          : score >= 30 ? 'green'
+          : score >= -10 ? 'yellow'
+          : 'red';
+        return { ...b, score, level };
+      })
+      // Ordena por total de contatos (bairros com mais base têm mais peso visual)
+      .sort((a, b) => b.total - a.total);
+
+      res.json({ heat, totalBuckets: heat.length, totalContacts: contacts?.length ?? 0 });
+    } catch (err: any) {
+      console.error('[intel] neighborhood-heat:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
