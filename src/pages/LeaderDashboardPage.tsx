@@ -548,7 +548,7 @@ const LeaderDashboardPage: React.FC = () => {
                                     <option value="Apoiador">Apoiador</option>
                                     <option value="Colaborador">Colaborador</option>
                                     <option value="Pesquisador">Pesquisador</option>
-                                    <option value="Fiscal">Fiscal de Zona</option>
+                                    <option value="Fiscal">Fiscal de Urna</option>
                                 </select>
                             </div>
                         </div>

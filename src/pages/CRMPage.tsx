@@ -18,6 +18,7 @@ import { logSubmissionGeo } from '../utils/geoTracking';
 import { Brain, Loader2 } from 'lucide-react';
 import CsvImportModal from '../components/crm/CsvImportModal';
 import WhatsAppBlastModal from '../components/crm/WhatsAppBlastModal';
+import { authedFetch } from '../lib/authedFetch';
 import { usePlanStatus, isAiLocked } from '../hooks/usePlanStatus';
 import UpgradeModal, { LockBadge } from '../components/plan/UpgradeModal';
 import AiTrialCard from '../components/plan/AiTrialCard';
@@ -704,19 +705,7 @@ const CRMPage: React.FC = () => {
                 { titulo: 'Pauta: Saúde e Bem-estar', texto: `Oi ${selectedContact.name}, vimos que você se interessa por Saúde. O candidato acabou de lançar uma proposta sobre o novo hospital regional...` },
                 { titulo: 'Convite para Reunião', texto: `Tudo bem, ${selectedContact.name}? Teremos uma reunião estratégica com multiplicadores nesta quinta. Contamos com sua presença!` }
               ].map((script, idx) => (
-                <div key={idx} className="bg-black/40 border border-white/5 p-4 rounded-2xl group hover:border-emerald-500/30 transition-all">
-                  <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-2">{script.titulo}</h4>
-                  <p className="text-sm text-gray-300 italic mb-4">"{script.texto}"</p>
-                  <button
-                    onClick={() => {
-                      const url = `https://wa.me/${selectedContact.phone?.replace(/\D/g, '')}?text=${encodeURIComponent(script.texto)}`;
-                      window.open(url, '_blank');
-                    }}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all"
-                  >
-                    <Send className="w-3 h-3" /> Enviar via WhatsApp
-                  </button>
-                </div>
+                <ScriptSendCard key={idx} script={script} contact={selectedContact} />
               ))}
             </div>
           </div>
@@ -959,6 +948,73 @@ const CRMPage: React.FC = () => {
 
       {/* Modal de upgrade — Opção C (confronto + medo de perder) */}
       <UpgradeModal open={!!upgradeFor} onClose={() => setUpgradeFor(null)} feature={upgradeFor || 'default'} />
+    </div>
+  );
+};
+
+/**
+ * Card de envio de script via Evolution API (mesmo padrão do Telemarketing
+ * Ativo do Call Center). Substituiu o `window.open('https://wa.me/…')` antigo
+ * — agora a mensagem vai pela instância da campanha, aparece na Caixa de
+ * Entrada como outbound e participa do funil do call center.
+ */
+const ScriptSendCard: React.FC<{
+  script: { titulo: string; texto: string };
+  contact: { id?: string; name?: string; phone?: string | null };
+}> = ({ script, contact }) => {
+  const [status, setStatus] = React.useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [errMsg, setErrMsg] = React.useState<string>('');
+
+  const send = async () => {
+    if (!contact.phone) { setStatus('error'); setErrMsg('Contato sem telefone.'); return; }
+    setStatus('sending'); setErrMsg('');
+    try {
+      const r = await authedFetch('/api/v1/channels/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          channel: 'whatsapp',
+          to: contact.phone.replace(/\D/g, ''),
+          text: script.texto,
+          contactId: contact.id,
+        }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({} as any));
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+      setStatus('sent');
+      setTimeout(() => setStatus('idle'), 2500);
+    } catch (e: any) {
+      setStatus('error');
+      setErrMsg(e?.message ?? 'Falha ao enviar.');
+    }
+  };
+
+  const label = status === 'sending' ? 'Enviando…'
+    : status === 'sent' ? '✅ Enviado'
+    : status === 'error' ? 'Tentar de novo'
+    : 'Enviar via WhatsApp';
+  const colorCls = status === 'sent' ? 'bg-emerald-700 hover:bg-emerald-700'
+    : status === 'error' ? 'bg-rose-600 hover:bg-rose-500'
+    : 'bg-emerald-600 hover:bg-emerald-500';
+
+  return (
+    <div className="bg-black/40 border border-white/5 p-4 rounded-2xl group hover:border-emerald-500/30 transition-all">
+      <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-2">{script.titulo}</h4>
+      <p className="text-sm text-gray-300 italic mb-4">"{script.texto}"</p>
+      <button
+        onClick={send}
+        disabled={status === 'sending' || status === 'sent'}
+        className={`w-full ${colorCls} disabled:opacity-70 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all`}
+      >
+        {status === 'sending' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />} {label}
+      </button>
+      {status === 'error' && errMsg && (
+        <p className="text-[10px] text-rose-400 mt-1.5">{errMsg}{/^no_/.test(errMsg) || /conect/i.test(errMsg) ? ' Verifique a conexão do WhatsApp em Recursos.' : ''}</p>
+      )}
+      {status === 'sent' && (
+        <p className="text-[10px] text-emerald-400 mt-1.5">Mensagem entrou na Caixa de Entrada como outbound.</p>
+      )}
     </div>
   );
 };

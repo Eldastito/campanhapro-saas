@@ -50,6 +50,10 @@ export const DEFAULT_PERMISSIONS: ProfilePermissions = {
     'Apoiador':    ['Dashboard', 'Visitas', 'Engajamento', 'Ajuda'],
     'Colaborador': ['Dashboard', 'Visitas', 'Ajuda'],
     'Pesquisador': ['Dashboard', 'Visitas', 'Ajuda'],
+    // 'Fiscal' = Fiscal de Urna (label visível em todo lugar). Identificador
+    // interno mantido pra evitar migration nos users existentes. Página dedicada
+    // é o FiscalPage.tsx (não usa essas abas — mas o mapa serve pra Permissions
+    // UI mostrar coerência).
     'Fiscal':      ['Dashboard', 'Dia das Eleições', 'Ajuda'],
     'Suporte':     ['Dashboard', 'Visitas', 'Ajuda'],
     'Manutenção':  ['Dashboard', 'Visitas', 'Ajuda'],
