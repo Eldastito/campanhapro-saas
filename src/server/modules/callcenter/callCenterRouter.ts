@@ -361,5 +361,61 @@ export function createCallCenterRouter(supabase: SupabaseClient): Router {
     return res.json({ target: data });
   });
 
+  // ---------- SUPERVISÃO + RELATÓRIOS (F5 — coordenador/candidato/líder) ----------
+  router.get('/reports', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await canManageAreas(userId))) return res.status(403).json({ error: 'sem_permissao' });
+
+    // Nomes da equipe (pra atribuir produtividade por operador).
+    const { data: team } = await supabase.from('users')
+      .select('id, name, type').eq('campaignId', campaignId).in('type', [CC_LEADER, CC_OPERATOR]);
+    const nameOf = (id: string | null) => (team || []).find((u: any) => u.id === id)?.name || 'Operador';
+
+    // ----- RECEPTIVO: conversas por estágio -----
+    const { data: convos } = await supabase.from('channel_conversations')
+      .select('stage, "isOpen"').eq('campaignId', campaignId).limit(8000);
+    const byStage: Record<string, number> = {};
+    let openCount = 0;
+    for (const c of (convos || []) as any[]) {
+      const s = c.stage || 'novo_lead';
+      byStage[s] = (byStage[s] || 0) + 1;
+      if (c.isOpen) openCount++;
+    }
+
+    // ----- ATIVO: campanhas + alvos (status, disposição, operador) -----
+    const { data: acts } = await supabase.from('active_campaigns')
+      .select('id, name, status').eq('campaignId', campaignId).order('createdAt', { ascending: false });
+    const campaigns = await Promise.all((acts || []).map(async (c: any) => ({
+      id: c.id, name: c.name, status: c.status, counts: await targetCounts(c.id),
+    })));
+
+    const { data: targets } = await supabase.from('active_campaign_targets')
+      .select('status, disposition, "assignedUserId"').eq('campaignId', campaignId).limit(20000);
+    const byDisposition: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    const opAgg: Record<string, { worked: number; interested: number }> = {};
+    const INTEREST = new Set(['Interessado', 'Vai votar']);
+    for (const t of (targets || []) as any[]) {
+      byStatus[t.status] = (byStatus[t.status] || 0) + 1;
+      if (t.disposition) byDisposition[t.disposition] = (byDisposition[t.disposition] || 0) + 1;
+      const worked = t.status === 'concluido' || t.status === 'sem_resposta';
+      if (worked && t.assignedUserId) {
+        const a = (opAgg[t.assignedUserId] ||= { worked: 0, interested: 0 });
+        a.worked++;
+        if (t.disposition && INTEREST.has(t.disposition)) a.interested++;
+      }
+    }
+    const operators = Object.entries(opAgg)
+      .map(([id, v]) => ({ userId: id, name: nameOf(id), ...v }))
+      .sort((a, b) => b.worked - a.worked);
+
+    return res.json({
+      receptivo: { total: (convos || []).length, open: openCount, byStage },
+      ativo: { byStatus, byDisposition, operators, campaigns },
+      teamSize: (team || []).length,
+    });
+  });
+
   return router;
 }

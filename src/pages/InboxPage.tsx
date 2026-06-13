@@ -3,9 +3,10 @@ import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea
 import { authedFetch } from '../lib/authedFetch';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
+import CallCenterReports from '../components/callcenter/CallCenterReports';
 import {
     Inbox as InboxIcon, RefreshCw, User, Clock,
-    MessageCircle, Send, Sparkles, BrainCircuit, X,
+    MessageCircle, Send, Sparkles, BrainCircuit, X, BarChart3,
 } from 'lucide-react';
 
 interface Conversation {
@@ -78,6 +79,7 @@ const InboxPage: React.FC = () => {
     const scrollRef = React.useRef<HTMLDivElement>(null);
     // Convites do call center (coordenador convida líder; líder convida operadores)
     const [ccOpen, setCcOpen] = React.useState(false);
+    const [reportsOpen, setReportsOpen] = React.useState(false);
     const [ccName, setCcName] = React.useState('');
     const [ccRole, setCcRole] = React.useState('Líder Call Center');
     const [ccBusy, setCcBusy] = React.useState(false);
@@ -293,6 +295,10 @@ const InboxPage: React.FC = () => {
                     Caixa de Entrada Omnichannel
                 </h2>
                 <div className="flex items-center gap-2">
+                    <button onClick={() => setReportsOpen(true)}
+                        className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg bg-emerald-600/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-600/25 transition-colors">
+                        <BarChart3 className="w-4 h-4" /> Relatórios
+                    </button>
                     <button onClick={() => setCcOpen(true)}
                         className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/25 transition-colors">
                         <User className="w-4 h-4" /> Equipe de Atendimento
@@ -382,6 +388,19 @@ const InboxPage: React.FC = () => {
                                 {areas.length === 0 && <p className="text-xs text-slate-500">Nenhuma área — atendimento único (sem menu).</p>}
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: Relatórios do Call Center */}
+            {reportsOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setReportsOpen(false)}>
+                    <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-2xl w-full p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-bold text-white flex items-center gap-2"><BarChart3 className="w-4 h-4 text-emerald-300" /> Relatórios do Atendimento</h4>
+                            <button onClick={() => setReportsOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+                        </div>
+                        <CallCenterReports />
                     </div>
                 </div>
             )}

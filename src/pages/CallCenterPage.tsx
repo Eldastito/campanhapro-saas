@@ -6,6 +6,7 @@ import {
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import CallCenterReports from '../components/callcenter/CallCenterReports';
 
 /**
  * Estação de trabalho do CALL CENTER (Líder + Operador de telemarketing).
@@ -40,7 +41,7 @@ const waitTime = (iso?: string | null) => {
 const CallCenterPage: React.FC = () => {
   const { user, logout } = useAuth();
   const isLeader = user?.type === 'Líder Call Center';
-  const [mode, setMode] = React.useState<'receptivo' | 'ativo'>('receptivo');
+  const [mode, setMode] = React.useState<'receptivo' | 'ativo' | 'relatorios'>('receptivo');
   const [waiting, setWaiting] = React.useState<Convo[]>([]);
   const [mine, setMine] = React.useState<Convo[]>([]);
   const [selected, setSelected] = React.useState<Convo | null>(null);
@@ -173,6 +174,7 @@ const CallCenterPage: React.FC = () => {
           <div className="flex rounded-xl bg-white/5 p-0.5">
             <button onClick={() => setMode('receptivo')} className={`px-3 py-1.5 rounded-lg text-sm font-bold ${mode === 'receptivo' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Receptivo</button>
             <button onClick={() => setMode('ativo')} className={`px-3 py-1.5 rounded-lg text-sm font-bold ${mode === 'ativo' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>📞 Ativo</button>
+            {isLeader && <button onClick={() => setMode('relatorios')} className={`px-3 py-1.5 rounded-lg text-sm font-bold ${mode === 'relatorios' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>📊 Relatórios</button>}
           </div>
           {isLeader && mode === 'receptivo' && (
             <button onClick={() => setTeamOpen(!teamOpen)} className={`px-3 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${teamOpen ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-300'}`}>
@@ -210,6 +212,12 @@ const CallCenterPage: React.FC = () => {
       )}
 
       {mode === 'ativo' && <ActiveTelemarketingPanel isLeader={isLeader} flash={flash} />}
+
+      {mode === 'relatorios' && (
+        <div className="bg-[#1c2128] border border-white/5 rounded-3xl p-4 sm:p-6 max-w-3xl mx-auto">
+          <CallCenterReports />
+        </div>
+      )}
 
       {mode === 'receptivo' && (
       <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
