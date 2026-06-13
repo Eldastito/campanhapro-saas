@@ -243,10 +243,11 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       const start = new Date();
       start.setDate(1); start.setHours(0, 0, 0, 0);
 
+      // Coluna em agent_runs é "createdAt" (não "timestamp" — só ai_usage tem).
       const { data: runs, error } = await supabaseAdmin
         .from('agent_runs')
         .select('"agentId", "campaignId", "costCentsUsd", error, "tokensIn", "tokensOut"')
-        .gte('timestamp', start.toISOString())
+        .gte('createdAt', start.toISOString())
         .limit(50000);
       if (error) return res.status(500).json({ error: 'ai_health_failed', detail: error.message });
 

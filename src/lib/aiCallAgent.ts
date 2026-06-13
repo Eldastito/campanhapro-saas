@@ -110,9 +110,9 @@ const MAX_RETRIES_PER_PROVIDER = 3;
 const DEFAULT_MODELS: Record<Provider, string> = {
     openai: 'gpt-4o-mini',
     anthropic: 'claude-haiku-4-5',
-    // gemini-1.5-flash foi descontinuado pelo Google (404 em chaves novas).
-    // gemini-2.0-flash é o substituto barato e estável.
-    gemini: 'gemini-2.0-flash',
+    // gemini-1.5-flash foi descontinuado, e gemini-2.0-flash voltou 404 (200+ erros
+    // observados em jun/2026, agent crm/voter bot). gemini-2.5-flash é o estável.
+    gemini: 'gemini-2.5-flash',
 };
 
 /** Tabela de preços (USD por 1M tokens). Atualizar quando mudar. */

@@ -272,16 +272,16 @@ export function createRagRouter(supabaseAdmin: SupabaseClient) {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data: recent } = await supabaseAdmin
         .from('agent_runs')
-        .select('id, timestamp')
+        .select('id, "createdAt"')
         .eq('campaignId', campaignId)
-        .gte('timestamp', since)
+        .gte('createdAt', since)
         .like('promptExcerpt', '[rag-refresh]%')
         .limit(1);
       if (recent && recent.length > 0) {
         return res.status(429).json({
           error: 'throttled',
           detail: 'Memória externa já foi atualizada nas últimas 24h. Tente amanhã.',
-          nextAvailableAt: new Date(new Date((recent[0] as any).timestamp).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+          nextAvailableAt: new Date(new Date((recent[0] as any).createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
         });
       }
 
@@ -373,13 +373,13 @@ export function createRagRouter(supabaseAdmin: SupabaseClient) {
 
       const { data: last } = await supabaseAdmin
         .from('agent_runs')
-        .select('timestamp')
+        .select('"createdAt"')
         .eq('campaignId', campaignId)
         .like('promptExcerpt', '[rag-refresh]%')
-        .order('timestamp', { ascending: false })
+        .order('createdAt', { ascending: false })
         .limit(1);
 
-      const lastAt = last && last.length ? (last[0] as any).timestamp : null;
+      const lastAt = last && last.length ? (last[0] as any).createdAt : null;
       const nextAt = lastAt ? new Date(new Date(lastAt).getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
       const canRefresh = !nextAt || new Date(nextAt) <= new Date();
       return res.json({ lastRefreshAt: lastAt, nextAvailableAt: nextAt, canRefresh });
