@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { ingestChunks, search } from './vectorStore';
+import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 
 /** Split text into ~chunkSize-word segments with overlap. */
 function chunkText(text: string, chunkSize = 400, overlap = 40): string[] {
@@ -244,6 +245,146 @@ export function createRagRouter(supabaseAdmin: SupabaseClient) {
       return res.json({ ok: true });
     } catch (err: any) {
       console.error('[RAG] delete memory:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /refresh-external (#56) — semeia a RAG com sinal externo fresco.
+   *
+   * Dispara 2 callAgent('competitive_intel', enableWebSearch: true) em paralelo:
+   *   1) cenário do município (notícias da última semana + agenda pública)
+   *   2) movimento dos adversários (declarações, presença em mídia, narrativas)
+   *
+   * As respostas são auto-persistidas em knowledge_chunks com primarySources
+   * preservados (#110 + #112). Todos os agentes que consultam RAG (#61) vão
+   * encontrar esse sinal fresco automaticamente — sem mexer em mais nada.
+   *
+   * Throttle: 1x/dia por campanha (cada chamada custa ~$0.05 USD).
+   */
+  router.post('/refresh-external', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    const userId = (req as any).user?.id;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+      // 1) Throttle: olha agent_runs nas últimas 24h c/ tag rag-refresh
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: recent } = await supabaseAdmin
+        .from('agent_runs')
+        .select('id, timestamp')
+        .eq('campaignId', campaignId)
+        .gte('timestamp', since)
+        .like('promptExcerpt', '[rag-refresh]%')
+        .limit(1);
+      if (recent && recent.length > 0) {
+        return res.status(429).json({
+          error: 'throttled',
+          detail: 'Memória externa já foi atualizada nas últimas 24h. Tente amanhã.',
+          nextAvailableAt: new Date(new Date((recent[0] as any).timestamp).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        });
+      }
+
+      // 2) Contexto da campanha
+      const { data: camp } = await supabaseAdmin.from('campaigns')
+        .select('name, "candidateName", party').eq('id', campaignId).maybeSingle();
+      if (!camp) return res.status(404).json({ error: 'campaign_not_found' });
+
+      const candidato = (camp as any).candidateName || (camp as any).name || 'o candidato';
+      const partido = (camp as any).party || '';
+
+      // Top município (do CRM) — pra direcionar a busca local
+      const { data: cityRows } = await supabaseAdmin
+        .from('contacts').select('city').eq('campaignId', campaignId)
+        .not('city', 'is', null).limit(2000);
+      const cityCounts = new Map<string, number>();
+      for (const r of (cityRows ?? [])) {
+        const c = String((r as any).city || '').trim();
+        if (c) cityCounts.set(c, (cityCounts.get(c) || 0) + 1);
+      }
+      const municipio = [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
+      // 3) Dispara 2 web_search briefings em paralelo. Cada um já cai na RAG
+      //    via auto-persist (#110) com primarySources marcado (#112).
+      const SYSTEM = 'Você é um analista de inteligência política. Use web_search para coletar fatos NOVOS (últimos 7-30 dias). Cite a FONTE (veículo + URL + data) em CADA afirmação. Sem fonte, omita. Português do Brasil, conciso e factual.';
+
+      const promptMunicipio =
+        `[rag-refresh] Cenário político e eleitoral do município de ${municipio || '[não informado]'} nos últimos 7 dias.\n\n` +
+        `Liste:\n` +
+        `1. Notícias relevantes (prefeito, vereadores, polêmicas, obras)\n` +
+        `2. Agenda pública confirmada (eventos, audiências, comícios)\n` +
+        `3. Temas que estão dominando o noticiário local\n` +
+        `4. Oportunidades pra ${candidato}${partido ? ' (' + partido + ')' : ''} se posicionar\n\n` +
+        `Cada item: 1 linha + (fonte: URL, data). Sem invenção. Se não encontrar, escreva "sem fonte".`;
+
+      const promptAdversarios =
+        `[rag-refresh] Movimento dos adversários de ${candidato}${municipio ? ' em ' + municipio : ''} nos últimos 7 dias.\n\n` +
+        `Liste pra cada adversário identificado:\n` +
+        `1. Nome + cargo que disputa\n` +
+        `2. Declarações públicas recentes (com fonte + data)\n` +
+        `3. Presença em mídia / redes sociais (volume, tom)\n` +
+        `4. Narrativa principal que está usando\n` +
+        `5. Vulnerabilidades expostas que podem virar oportunidade pra nós\n\n` +
+        `Cada item: fonte: URL + data. Sem invenção. Se não encontrar, escreva "sem dados públicos recentes".`;
+
+      const runOne = async (prompt: string, label: string) => {
+        try {
+          const r = await callAgent(supabaseAdmin, 'competitive_intel', prompt, {
+            campaignId, userId, systemInstruction: SYSTEM,
+            complexity: 'balanced', enableWebSearch: true, maxTokens: 3000,
+          });
+          return { label, ok: true, summary: r.text.slice(0, 400), citations: r.citations || [], webSearches: r.webSearches || 0 };
+        } catch (err: any) {
+          if (err instanceof BudgetExceededError) return { label, ok: false, error: 'orçamento_de_IA_excedido' };
+          return { label, ok: false, error: err?.message || 'ai_failed' };
+        }
+      };
+
+      const [municipal, adversarios] = await Promise.all([
+        runOne(promptMunicipio, 'cenario_municipal'),
+        runOne(promptAdversarios, 'movimento_adversarios'),
+      ]);
+
+      const briefings = [municipal, adversarios];
+      const totalSources = briefings.reduce((acc, b: any) => acc + (b.citations?.length || 0), 0);
+      const totalSearches = briefings.reduce((acc, b: any) => acc + (b.webSearches || 0), 0);
+
+      return res.json({
+        ok: true,
+        refreshedAt: new Date().toISOString(),
+        municipio: municipio || null,
+        candidato,
+        briefings,
+        stats: { totalSources, totalSearches, briefingsOk: briefings.filter((b: any) => b.ok).length },
+      });
+    } catch (err: any) {
+      console.error('[RAG] refresh-external:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * GET /refresh-status (#56) — quando foi a última refresh e quando libera próxima.
+   */
+  router.get('/refresh-status', async (req: Request, res: Response) => {
+    try {
+      const campaignId = (req as any).user?.campaignId;
+      if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { data: last } = await supabaseAdmin
+        .from('agent_runs')
+        .select('timestamp')
+        .eq('campaignId', campaignId)
+        .like('promptExcerpt', '[rag-refresh]%')
+        .order('timestamp', { ascending: false })
+        .limit(1);
+
+      const lastAt = last && last.length ? (last[0] as any).timestamp : null;
+      const nextAt = lastAt ? new Date(new Date(lastAt).getTime() + 24 * 60 * 60 * 1000).toISOString() : null;
+      const canRefresh = !nextAt || new Date(nextAt) <= new Date();
+      return res.json({ lastRefreshAt: lastAt, nextAvailableAt: nextAt, canRefresh });
+    } catch (err: any) {
+      console.error('[RAG] refresh-status:', err);
       return res.status(500).json({ error: err.message });
     }
   });
