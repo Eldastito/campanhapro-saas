@@ -43,6 +43,7 @@ import { createPaymentWebhookRouter } from './src/server/modules/billing/payment
 import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
 import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
 import { createTeamInvitesRouter, createTeamInvitesPublicRouter } from './src/server/modules/team/teamInvitesRouter';
+import { createTeamGoalsRouter } from './src/server/modules/team/teamGoalsRouter';
 import { createGoalsRouter } from './src/server/modules/goals/goalsRouter';
 import { createRoutinesRouter } from './src/server/modules/routines/routinesRouter';
 import { createBudgetRouter } from './src/server/modules/budget/budgetRouter';
@@ -261,6 +262,7 @@ async function startServer() {
     app.use('/api/v1/plan', requireAuth, createPlanStatusRouter(supabaseAdmin));
     app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
     app.use('/api/v1/team', requireAuth, mutationLimiter, createTeamInvitesRouter(supabaseAdmin));
+    app.use('/api/v1/team', requireAuth, mutationLimiter, createTeamGoalsRouter(supabaseAdmin));
     // Token-based routes: GET is public so the email-link landing page can render
     // before login; POST /accept is authed via per-route check inside the router.
     app.use('/api/v1/team', mutationLimiter, (req, res, next) => {

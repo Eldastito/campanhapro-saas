@@ -2,12 +2,15 @@ import Tabs from '../components/Tabs';
 import TeamManager from '../components/resources/TeamManager';
 import LocationsManager from '../components/resources/LocationsManager';
 import TeamResourcesManager from '../components/resources/TeamResourcesManager';
+import TeamGoalsManager from '../components/resources/TeamGoalsManager';
 import { UsersGroupIcon, MapPinIcon, ArchiveBoxIcon } from '../components/icons';
+import { Target } from 'lucide-react';
 
 const ResourcesPage = () => {
-    const tabs = ['Equipes', 'Localidades', 'Materiais'];
+    const tabs = ['Equipes', 'Metas', 'Localidades', 'Materiais'];
     const iconMap = {
         Equipes:     <UsersGroupIcon className="h-5 w-5" />,
+        Metas:       <Target className="h-5 w-5" />,
         Localidades: <MapPinIcon className="h-5 w-5" />,
         Materiais:   <ArchiveBoxIcon className="h-5 w-5" />,
     };
@@ -20,6 +23,7 @@ const ResourcesPage = () => {
             </p>
             <Tabs tabs={tabs} iconMap={iconMap} mode="state">
                 <TeamManager />
+                <TeamGoalsManager />
                 <LocationsManager />
                 <TeamResourcesManager />
             </Tabs>
