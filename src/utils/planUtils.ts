@@ -28,19 +28,24 @@ export const PLAN_TO_TIER: Record<Plan, PlanTier> = {
   [Plan.TOTAL]: 'completo',
 };
 
-// Features de cada tier — keys usadas no featureToTabMap em CampaignWebApp
+// Features de cada tier — keys usadas no featureToTabMap em CampaignWebApp.
+// Convenção: -1 = ILIMITADO (quotaEnforcer trata < 0 como bypass do gate).
+// Source of truth comercial é a tabela `plans` no banco; este TIER_CONFIG é o
+// MAPA DEFAULT usado quando uma campanha não tem plano sincronizado ainda
+// (ensureCampaignConfig). Os limites espelham `plans` para não divergir.
 export const TIER_CONFIG: Record<PlanTier, PlanConfigData> = {
   gratis: {
     planTier: 'gratis',
-    // Plano grátis: foco em COLETA (gera lead p/ IA aprender), IA travada,
-    // Dia D travado (gatilho de conversão na reta final).
+    // Plano grátis: foco em COLETA (gera lead p/ IA aprender). Equipe e
+    // contatos livres (não oneram a plataforma e trazem mais leads). IA
+    // travada (só durante trial). Sem WhatsApp — isca do upgrade pro 10k.
     features: ['dashboard', 'crm', 'visits', 'team', 'forms', 'engagement', 'help'],
-    limits: { aiCalls: 0, teamMembers: 10, visits: 1000, whatsappPerDay: 100, forms: 5 }
+    limits: { aiCalls: 0, teamMembers: -1, visits: -1, whatsappPerDay: 0, forms: -1 }
   },
   limitado: {
     planTier: 'limitado',
     features: ['dashboard', 'visits', 'team', 'help'],
-    limits: { aiCalls: 100, teamMembers: 50, visits: 1000, whatsappPerDay: 1000, forms: 20 }
+    limits: { aiCalls: 100, teamMembers: -1, visits: -1, whatsappPerDay: 1000, forms: -1 }
   },
   completo: {
     planTier: 'completo',
@@ -50,7 +55,7 @@ export const TIER_CONFIG: Record<PlanTier, PlanConfigData> = {
       'resources', 'crm', 'demonstration', 'analytics',
       'election_day'
     ],
-    limits: { aiCalls: 999999, teamMembers: 999999, visits: 999999, whatsappPerDay: 999999, forms: 999999 }
+    limits: { aiCalls: -1, teamMembers: -1, visits: -1, whatsappPerDay: -1, forms: -1 }
   }
 };
 
@@ -78,14 +83,21 @@ const GRATIS_FEATURES = [
   'dashboard', 'crm', 'help', 'visits', 'team', 'engagement', 'forms', 'resources',
 ];
 
+// Essencial 10k: ganha Caixa de Entrada Omnichannel (sem bot IA, sem Call Center
+// — a dor de atender msgs na mão sem IA é o gatilho de upgrade pro 15k/20k).
+// Cap de 1.000 msgs/mês no banco (plans.limits.messages_per_month).
 const ESSENCIAL_FEATURES = [
   'dashboard', 'crm', 'help', 'visits', 'team', 'engagement',
   'resources', 'goals', 'routines', 'ai_agents', 'forms',
+  'whatsapp_omnichannel',
 ];
+// Estratégico 15k: ganha Call Center (Receptivo + Áreas + Telemarketing Ativo
+// + Relatórios) + 10x mais mensagens. Bot IA do Atendimento ainda gated — dor =
+// "atendentes humanos respondendo, quero IA fazendo o trabalho" → 20k.
 const ESTRATEGICO_FEATURES = [
   ...ESSENCIAL_FEATURES,
   'analytics', 'financial', 'content_studio', 'rag', 'meetings',
-  'tools', 'training', 'whatsapp_omnichannel',
+  'tools', 'training', 'call_center',
 ];
 const TOTAL_FEATURES = [
   ...ESTRATEGICO_FEATURES,

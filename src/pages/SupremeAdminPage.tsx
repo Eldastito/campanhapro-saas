@@ -1698,8 +1698,16 @@ const SupremeAdminPage: React.FC = () => {
                                             <div className="grid grid-cols-2 gap-1 mt-3 text-[10px] text-slate-400">
                                                 <span>Contatos: <strong className="text-slate-200">{fmtLimit(p.limits?.contacts)}</strong></span>
                                                 <span>Equipe: <strong className="text-slate-200">{fmtLimit(p.limits?.team_users)}</strong></span>
-                                                <span>IA: <strong className="text-slate-200">{p.limits?.ai_budget_cents === -1 ? 'Ilimitada' : 'Limitada'}</strong></span>
-                                                <span>WhatsApp: <strong className="text-slate-200">{fmtLimit(p.limits?.messages_per_month)}</strong></span>
+                                                <span>IA: <strong className="text-slate-200">{
+                                                    p.limits?.ai_budget_cents === -1 ? 'Ilimitada'
+                                                    : p.limits?.ai_budget_cents === 0 ? 'Zero'
+                                                    : `R$ ${(p.limits.ai_budget_cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 0 })}/mês`
+                                                }</strong></span>
+                                                <span>WhatsApp: <strong className="text-slate-200">{
+                                                    p.limits?.messages_per_month === -1 ? '∞ msgs/mês'
+                                                    : p.limits?.messages_per_month === 0 ? '— (não inclui)'
+                                                    : `${p.limits.messages_per_month.toLocaleString('pt-BR')} msgs/mês`
+                                                }</strong></span>
                                             </div>
                                             <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-white/5">
                                                 {(p.features ?? []).map((f: string) => (
