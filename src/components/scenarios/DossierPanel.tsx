@@ -1,6 +1,6 @@
 import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
-import { FileText, Plus, Play, XCircle, Loader2, AlertTriangle, ShieldAlert, CheckCircle } from 'lucide-react';
+import { FileText, Plus, Play, XCircle, Loader2, AlertTriangle, ShieldAlert, CheckCircle, Bot, User } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 
@@ -14,6 +14,10 @@ interface Dossier {
   status: DossierStatus;
   content: string;
   createdAt: string;
+  /** "manual" = preenchido por humano (fluxo de aprovação); "ai" = vem do Concorrência (#50). */
+  source?: 'manual' | 'ai';
+  /** Quando source='ai', pode trazer cargo/cidade/uf do candidato pesquisado. */
+  metadata?: { cargo?: string; cidade?: string; uf?: string };
 }
 
 const STATUS_META: Record<DossierStatus, { label: string; icon: React.ReactNode; color: string }> = {
@@ -209,10 +213,23 @@ export const DossierPanel: React.FC = () => {
                   onClick={() => setExpanded(e => e === d.id ? null : d.id)}
                 >
                   <div className="flex items-center gap-3 min-w-0">
+                    {/* Origem: IA (Concorrência) vs Manual */}
+                    <span title={d.source === 'ai' ? 'Gerado pela IA Concorrência (#50)' : 'Cadastrado manualmente'}
+                      className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        d.source === 'ai' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-500/20 text-slate-400'
+                      }`}>
+                      {d.source === 'ai' ? <><Bot className="w-3 h-3" /> IA</> : <><User className="w-3 h-3" /> MANUAL</>}
+                    </span>
                     <StatusBadge status={d.status} />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-200 truncate">{d.subjectName}</p>
-                      <p className="text-xs text-slate-500">{SUBJECT_LABELS[d.subjectType]}</p>
+                      <p className="text-sm font-medium text-slate-200 truncate">
+                        {d.subjectName}
+                        {d.metadata?.cargo && <span className="text-xs text-slate-500 font-normal"> · {d.metadata.cargo}</span>}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {SUBJECT_LABELS[d.subjectType]}
+                        {d.metadata?.cidade && <> · {d.metadata.cidade}{d.metadata.uf ? '/' + d.metadata.uf : ''}</>}
+                      </p>
                     </div>
                   </div>
                   <span className="text-xs text-slate-500 ml-3 shrink-0">
@@ -225,7 +242,9 @@ export const DossierPanel: React.FC = () => {
                     <pre className="text-xs text-slate-300 whitespace-pre-wrap bg-slate-800 rounded p-3 max-h-40 overflow-y-auto">
                       {d.content}
                     </pre>
-                    {d.status === 'pending_approval' && (
+                    {/* Aprovação humana SÓ pra dossiês manuais. Os de IA já têm
+                        source-grounding obrigatório (#60), entram como approved. */}
+                    {d.status === 'pending_approval' && d.source !== 'ai' && (
                       <div className="flex gap-2">
                         <Button
                           variant="primary"

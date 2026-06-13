@@ -151,19 +151,47 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
     return res.status(201).json({ dossierId: data?.id, status: 'pending_approval' });
   });
 
-  // GET /api/v1/scenarios/dossiers
+  // GET /api/v1/scenarios/dossiers — UNION dossiês manuais (com aprovação humana)
+  // + dossiês de IA já gerados pelo Concorrência (intelRouter, tabela competitor_intel).
+  // Antes os usuários geravam dossiê rico em Concorrência e abriam Cenários→Dossiês
+  // vazio. Agora a tela mostra TUDO num lugar só — fonte canônica única.
   router.get('/dossiers', async (req, res) => {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { data, error } = await supabase
+    // 1) Dossiês manuais (fluxo de aprovação humana)
+    const { data: manual, error: e1 } = await supabase
       .from('dossiers')
       .select('id, "subjectName", "subjectType", status, content, "createdAt", "updatedAt"')
       .eq('campaignId', campaignId)
       .order('createdAt', { ascending: false });
+    if (e1) return res.status(500).json({ error: e1.message });
 
-    if (error) return res.status(500).json({ error: error.message });
-    return res.json({ dossiers: data ?? [] });
+    // 2) Dossiês de IA do Concorrência (já têm source-grounding obrigatório, #60).
+    //    Mapeia pro shape de Dossier: subjectType='opponent', status='approved' (a IA já valida).
+    const { data: ai, error: e2 } = await supabase
+      .from('competitor_intel')
+      .select('id, name, cargo, cidade, uf, dossier, narrative, "createdAt"')
+      .eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false });
+    if (e2) return res.status(500).json({ error: e2.message });
+
+    const aiMapped = (ai ?? []).map((row: any) => ({
+      id: row.id,
+      subjectName: row.name,
+      subjectType: 'opponent' as const,
+      status: 'approved' as const,
+      content: row.narrative || (row.dossier ? JSON.stringify(row.dossier, null, 2) : ''),
+      createdAt: row.createdAt,
+      updatedAt: row.createdAt,
+      source: 'ai' as const,
+      metadata: { cargo: row.cargo, cidade: row.cidade, uf: row.uf },
+    }));
+    const manualMarked = (manual ?? []).map((d: any) => ({ ...d, source: 'manual' as const }));
+
+    const combined = [...aiMapped, ...manualMarked]
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    return res.json({ dossiers: combined });
   });
 
   // POST /api/v1/scenarios/dossiers/:id/approve
