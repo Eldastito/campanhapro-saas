@@ -1088,5 +1088,53 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ---------- PARTIDOS (visão financeira do Supreme — só você enxerga) ----------
+  // Lista todos os partidos com plano, billingNote (valor combinado fora do Asaas),
+  // contagem de candidatos e somas de valorRecebido/valorAlocado. Front renderiza
+  // como tabela + receita mensal estimada.
+  router.get('/parties', async (_req: Request, res: Response) => {
+    try {
+      const { data: parties, error } = await supabaseAdmin
+        .from('parties')
+        .select('id, name, plan, status, "billingNote", "createdAt"')
+        .order('createdAt', { ascending: false });
+      if (error) throw error;
+
+      const out = await Promise.all((parties || []).map(async (p: any) => {
+        const [{ count: candidates }, { data: sums }] = await Promise.all([
+          supabaseAdmin.from('party_candidates').select('id', { count: 'exact', head: true }).eq('partyId', p.id),
+          supabaseAdmin.from('party_candidates').select('"valorRecebido", "valorAlocado"').eq('partyId', p.id),
+        ]);
+        const valorRecebido = (sums || []).reduce((s: number, r: any) => s + Number(r.valorRecebido || 0), 0);
+        const valorAlocado = (sums || []).reduce((s: number, r: any) => s + Number(r.valorAlocado || 0), 0);
+        return { ...p, candidatesCount: candidates || 0, valorRecebido, valorAlocado };
+      }));
+      return res.json({ parties: out });
+    } catch (err: any) {
+      console.error('[supreme] list parties:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Edita a billingNote (texto livre — ex.: "Plano Partido — R$ 2.500/mês,
+  // 10ª parcela pendente"). Único campo editável daqui — mudanças estruturais
+  // (plan/status) seguem via SQL/migration pra evitar engano.
+  router.patch('/parties/:id', async (req: Request, res: Response) => {
+    try {
+      const { billingNote } = req.body || {};
+      if (typeof billingNote !== 'string') return res.status(400).json({ error: 'billingNote_required' });
+      const { data, error } = await supabaseAdmin
+        .from('parties')
+        .update({ billingNote: billingNote.slice(0, 280), updatedAt: new Date().toISOString() })
+        .eq('id', req.params.id)
+        .select('*').single();
+      if (error) throw error;
+      return res.json({ party: data });
+    } catch (err: any) {
+      console.error('[supreme] update party:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
