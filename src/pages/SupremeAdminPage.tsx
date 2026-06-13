@@ -385,6 +385,39 @@ const SupremeAdminPage: React.FC = () => {
         }
     };
 
+    const [planMenuFor, setPlanMenuFor] = useState<string | null>(null);
+    const [settingPlan, setSettingPlan] = useState<string | null>(null);
+    // Fecha o dropdown ao clicar fora.
+    useEffect(() => {
+        if (!planMenuFor) return;
+        const close = () => setPlanMenuFor(null);
+        const t = setTimeout(() => document.addEventListener('click', close, { once: true }), 0);
+        return () => { clearTimeout(t); document.removeEventListener('click', close); };
+    }, [planMenuFor]);
+
+    const handleSetPlan = async (campaignId: string, planId: 'free' | 'essencial' | 'pro' | 'enterprise') => {
+        setSettingPlan(campaignId);
+        try {
+            const r = await supremeFetch(`/campaigns/${campaignId}/set-plan`, {
+                method: 'POST', body: JSON.stringify({ planId }),
+            });
+            if (r?.ok) {
+                // Recarrega a lista de campanhas pra refletir o novo plano
+                setPlanMenuFor(null);
+                // Refresca o campaignConfigs daquela campanha
+                setCampaignConfigs((prev) => ({
+                    ...prev,
+                    [campaignId]: { ...(prev[campaignId] || {}), planTier: r.planTier, features: r.features ?? prev[campaignId]?.features ?? [] },
+                }));
+                alert(`✅ Plano alterado para ${r.planName || planId}.`);
+            } else {
+                alert(`Erro ao definir plano: ${r?.error || 'desconhecido'}`);
+            }
+        } catch (e: any) {
+            alert(`Erro: ${e.message || 'falha de rede'}`);
+        } finally { setSettingPlan(null); }
+    };
+
     const handleAnalyzeCampaign = async (campaignId: string, campaignName: string) => {
         if (!campaignId) return;
         setAnalyzingId(campaignId);
@@ -1003,6 +1036,37 @@ const SupremeAdminPage: React.FC = () => {
                                                     </td>
                                                     <td className="px-6 py-5 text-right">
                                                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            {/* Definir plano (Grátis / Essencial / Pro / Enterprise) — só Supreme vê */}
+                                                            <div className="relative" onClick={(e) => e.stopPropagation()}>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    onClick={() => setPlanMenuFor(planMenuFor === c.campaignId ? null : (c.campaignId || ''))}
+                                                                    className="h-8 px-2 text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-xs"
+                                                                    title="Definir plano da campanha (libera Grátis ou troca tier)"
+                                                                    disabled={settingPlan === c.campaignId}
+                                                                >
+                                                                    🔓 {settingPlan === c.campaignId ? 'Salvando…' : 'Plano'}
+                                                                </Button>
+                                                                {planMenuFor === c.campaignId && (
+                                                                    <div className="absolute right-0 top-9 z-20 bg-slate-900 border border-white/10 rounded-xl shadow-2xl py-1 min-w-[180px]">
+                                                                        {[
+                                                                            { id: 'free', label: '🆓 Grátis', sub: 'IA 0 · sem WhatsApp' },
+                                                                            { id: 'essencial', label: '🚀 Essencial', sub: 'R$ 10k · 1k msgs' },
+                                                                            { id: 'pro', label: '🎯 Estratégico', sub: 'R$ 15k · 10k msgs + Call Center' },
+                                                                            { id: 'enterprise', label: '👑 Total', sub: 'R$ 20k · tudo ilimitado' },
+                                                                        ].map((p) => (
+                                                                            <button
+                                                                                key={p.id}
+                                                                                onClick={() => handleSetPlan(c.campaignId || '', p.id as any)}
+                                                                                className="w-full text-left px-3 py-2 hover:bg-white/5 text-xs"
+                                                                            >
+                                                                                <p className="font-bold text-white">{p.label}</p>
+                                                                                <p className="text-[10px] text-slate-500">{p.sub}</p>
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                             <Button
                                                                 variant="ghost"
                                                                 onClick={() => handleAnalyzeCampaign(c.campaignId || '', c.name)}

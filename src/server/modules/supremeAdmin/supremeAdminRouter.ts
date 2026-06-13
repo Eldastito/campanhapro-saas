@@ -1088,6 +1088,57 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ---------- DEFINIR PLANO DA CAMPANHA (libera Grátis 1-clique e troca tier) ----------
+  // Lê plans WHERE id=:planId, mapeia para planTier interno e regrava
+  // campaign_configs com features/limits vindos do banco (source of truth
+  // comercial). Mantém subscriptions em sync (status='active' + planId novo).
+  router.post('/campaigns/:id/set-plan', async (req: Request, res: Response) => {
+    try {
+      const campaignId = req.params.id;
+      const { planId } = req.body ?? {};
+      if (!['free', 'essencial', 'pro', 'enterprise'].includes(planId)) {
+        return res.status(400).json({ error: 'invalid_plan', allowed: ['free', 'essencial', 'pro', 'enterprise'] });
+      }
+      const { data: plan, error: planErr } = await supabaseAdmin
+        .from('plans').select('id, name, features, limits').eq('id', planId).maybeSingle();
+      if (planErr || !plan) return res.status(404).json({ error: 'plan_not_found' });
+
+      const tierMap: Record<string, string> = { free: 'gratis', essencial: 'limitado', pro: 'limitado', enterprise: 'completo' };
+      const planTier = tierMap[planId];
+
+      // 1) campaign_configs (fonte que o app lê pra gate de feature/cota)
+      const { error: cfgErr } = await supabaseAdmin.from('campaign_configs').upsert({
+        id: campaignId, planTier, features: (plan as any).features, limits: (plan as any).limits,
+        status: 'active', updatedAt: new Date().toISOString(),
+      }, { onConflict: 'id' });
+      if (cfgErr) return res.status(500).json({ error: 'config_update_failed', detail: cfgErr.message });
+
+      // 2) Subscription (sem cobrança — grátis ou "ativada manualmente por admin")
+      const { data: existing } = await supabaseAdmin.from('subscriptions')
+        .select('id').eq('campaignId', campaignId).maybeSingle();
+      if (existing) {
+        await supabaseAdmin.from('subscriptions').update({
+          planId, status: 'active', updatedAt: new Date().toISOString(),
+        }).eq('id', (existing as any).id);
+      } else {
+        await supabaseAdmin.from('subscriptions').insert({
+          campaignId, planId, status: 'active',
+        });
+      }
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.campaign.set_plan',
+        resourceType: 'campaign', resourceId: campaignId, severity: 'warn',
+        metadata: { planId, planTier },
+      }).catch(() => {});
+
+      return res.json({ ok: true, planId, planTier, planName: (plan as any).name });
+    } catch (err: any) {
+      console.error('[supreme] set-plan error:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---------- PARTIDOS (visão financeira do Supreme — só você enxerga) ----------
   // Lista todos os partidos com plano, billingNote (valor combinado fora do Asaas),
   // contagem de candidatos e somas de valorRecebido/valorAlocado. Front renderiza
