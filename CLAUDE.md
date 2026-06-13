@@ -43,3 +43,4 @@ This is an ESM project (`"type": "module"` in `package.json`) — always use `im
 
 - **Comentários em português** quando explicam *por que* a regra existe (incidente, constraint legal, edge case do GO etc.). Identificadores e logs em inglês.
 - **Não criar arquivos `.md` novos** salvo quando o usuário pedir. Idem screenshots/storyboards — só sob demanda.
+- **Mudanças de assinatura / remoção de símbolo:** antes de aplicar, faça grep de TODOS os call sites (incluindo SQL, JSON e config quando fizer sentido) e **mostre a lista no chat** para o usuário ver com os olhos. Só depois mude. Vale também pra renomear endpoints (frontend chama por string).
