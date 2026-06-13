@@ -17,6 +17,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { searchMetaAds } from './metaAdLibrary';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
+import { lookupByName, getCandidateDetail, detailToRagText } from './tseClient';
 import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 import { executeReadTool } from '../../../lib/agentReadTools';
 
@@ -613,6 +614,75 @@ Máximo 8 recommendations + 5 avoidance.`;
     } catch (err: any) {
       if (err instanceof BudgetExceededError) return res.status(429).json({ error: err.message, code: 'BUDGET_EXCEEDED' });
       console.error('[intel] field-focus:', err);
+      return res.status(500).json({ error: err.message || 'failed' });
+    }
+  });
+
+  /**
+   * POST /tse/lookup (#58) — busca candidato(s) no TSE/DivulgaCand por nome+UF+ano.
+   * Devolve matches estruturados. Se houver UM match único, já traz o detalhe completo.
+   * Sem custo de IA — é fetch direto à API pública.
+   */
+  router.post('/tse/lookup', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const { nome, uf, ano } = req.body || {};
+      if (!nome || !String(nome).trim()) return res.status(400).json({ error: 'nome_required' });
+      if (!uf || String(uf).length !== 2) return res.status(400).json({ error: 'uf_required' });
+      const anoN = Number(ano) || new Date().getFullYear();
+
+      const result = await lookupByName({ nome: String(nome).trim(), uf: String(uf), ano: anoN });
+      return res.json({ ok: true, ano: anoN, uf: String(uf).toUpperCase(), ...result });
+    } catch (err: any) {
+      console.error('[intel] tse/lookup:', err);
+      return res.status(500).json({ error: err.message || 'failed' });
+    }
+  });
+
+  /**
+   * POST /tse/save (#58) — pega 1 candidato (sqCandidato + idEleicao + uf + ano)
+   * busca detalhe, monta texto estruturado e ingere na RAG como FONTE ANCORADA.
+   *
+   * Próxima vez que qualquer agente (consultor, intel competitivo, foco) consultar
+   * a RAG, encontra esses dados como "FONTE" e não como "memória inferida".
+   */
+  router.post('/tse/save', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const { ano, uf, idEleicao, sqCandidato, alias } = req.body || {};
+      const anoN = Number(ano);
+      const eleicaoN = Number(idEleicao);
+      const sqN = Number(sqCandidato);
+      const ufN = String(uf || '').toUpperCase();
+      if (!anoN || !eleicaoN || !sqN || ufN.length !== 2) {
+        return res.status(400).json({ error: 'invalid_params', detail: 'precisa de ano, uf, idEleicao e sqCandidato' });
+      }
+
+      const detail = await getCandidateDetail(anoN, ufN, eleicaoN, sqN);
+      if (!detail) return res.status(404).json({ error: 'candidate_not_found' });
+
+      const text = detailToRagText(detail, anoN);
+      const title = `TSE ${anoN} ${ufN} — ${detail.nomeCompleto || detail.nomeUrna || detail.numero}${alias ? ' (' + alias + ')' : ''}`;
+      const source = `tse:divulgacand:${anoN}:${ufN}:${sqN}`;
+
+      const inserted = await ingestArtifact(supabase, {
+        campaignId, source, title, text,
+        metadata: {
+          provider: 'tse',
+          ano: anoN, uf: ufN, idEleicao: eleicaoN, sqCandidato: sqN,
+          nome: detail.nomeCompleto, nomeUrna: detail.nomeUrna,
+          numero: detail.numero, partido: detail.partido, cargo: detail.cargo, situacao: detail.situacao,
+          bensDeclarados: detail.bensDeclarados,
+          hasPrimarySources: true,
+          primarySources: [{ url: detail.linkOficial || '', title: title, kind: 'tse' }],
+        },
+      });
+
+      return res.json({ ok: true, ingested: inserted, source, detail });
+    } catch (err: any) {
+      console.error('[intel] tse/save:', err);
       return res.status(500).json({ error: err.message || 'failed' });
     }
   });
