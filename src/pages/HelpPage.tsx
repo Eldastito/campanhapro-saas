@@ -1,10 +1,11 @@
 import * as React from 'react';
 import AccordionItem from '../components/ui/AccordionItem';
-import { 
+import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
     UsersGroupIcon, CurrencyDollarIcon, AcademicCapIcon, CogIcon,
     ToolsIcon, MapPinIcon,
 } from '../components/icons';
+import { MessageCircle, Headset, Building2, KeyRound, Phone, Sparkles, Users } from 'lucide-react';
 
 const HelpTopic = ({icon, title, children}: {icon: React.ReactNode, title: string, children?: React.ReactNode}) => (
     <div className="flex items-start gap-4">
@@ -131,11 +132,82 @@ const HelpPage = () => {
             </div>
         </AccordionItem>
 
+        <AccordionItem title="📥 Caixa de Entrada Omnichannel (WhatsApp)">
+            <div className="space-y-4 text-slate-300">
+                <p className="italic">A <strong>Caixa de Entrada</strong> reúne todas as conversas de WhatsApp num quadro Kanban. Cada conversa é um card que você arrasta entre as colunas conforme o estágio do atendimento.</p>
+                <HelpTopic icon={<MessageCircle className="w-5 h-5"/>} title="Pipeline do Atendimento">
+                    <ul>
+                        <li><strong>Novo Lead:</strong> eleitor escreveu pela primeira vez.</li>
+                        <li><strong>🤖 IA Atendendo:</strong> o bot está respondendo automaticamente (só Plano Total).</li>
+                        <li><strong>⏳ Fila Humana:</strong> a IA entendeu que precisa de gente (assunto sensível, pedido de "PESSOA", etc).</li>
+                        <li><strong>🧑 Com Operador:</strong> alguém assumiu — a IA pausa automaticamente.</li>
+                        <li><strong>Fechado:</strong> atendimento encerrado.</li>
+                    </ul>
+                </HelpTopic>
+                <HelpTopic icon={<Sparkles className="w-5 h-5"/>} title="Atualização em tempo real">
+                    Mensagens entram e a IA responde sem você precisar dar refresh. Quando um eleitor escreve, a coluna do Kanban se atualiza sozinha.
+                </HelpTopic>
+                <HelpTopic icon={<Users className="w-5 h-5"/>} title="Equipe de Atendimento">
+                    Botão no topo abre o painel onde você cria <strong>Líderes do Call Center</strong> (que depois cadastram os operadores) e gerencia as <strong>Áreas de Atendimento</strong> (menu no mesmo número).
+                </HelpTopic>
+            </div>
+        </AccordionItem>
+
+        <AccordionItem title="📞 Call Center (Receptivo + Telemarketing Ativo)">
+            <div className="space-y-4 text-slate-300">
+                <p className="italic">Um <strong>módulo completo de central</strong> que opera sobre o WhatsApp. Inclui receptivo com transição invisível da IA pro humano e telemarketing ativo a partir de listas do CRM.</p>
+                <HelpTopic icon={<Headset className="w-5 h-5"/>} title="Receptivo + Transição Invisível">
+                    Quando a IA escala uma conversa pro humano, ela <strong>deixa um resumo pronto</strong> pro operador (assunto, tom, o que já foi falado). O eleitor não precisa repetir a história quando o humano assume.
+                </HelpTopic>
+                <HelpTopic icon={<MapPinIcon className="w-5 h-5"/>} title="Áreas de Atendimento (menu no mesmo número)">
+                    Cadastre áreas (ex.: Financeiro, Suporte, Jurídico) e o eleitor recebe um <strong>menu numérico</strong> ao escrever. A conversa é roteada pra área certa e a IA responde com a <strong>persona daquela área</strong>.
+                </HelpTopic>
+                <HelpTopic icon={<Phone className="w-5 h-5"/>} title="Telemarketing Ativo (lista do CRM → operador)">
+                    Líder cria uma campanha ativa com nome + script. O sistema semeia a lista com seus contatos do CRM. O operador clica em <strong>"Próximo contato"</strong>, recebe nome + telefone + script, fala via wa.me e registra o resultado (Interessado / Recusou / Agendar retorno / etc).
+                </HelpTopic>
+                <HelpTopic icon={<BarChartIcon className="w-5 h-5"/>} title="Relatórios (botão na Caixa de Entrada)">
+                    Coordenador/Candidato veem: conversas por estágio (receptivo), progresso das campanhas ativas, ranking de produtividade por operador (trabalhados + interessados) e mix de resultados.
+                </HelpTopic>
+            </div>
+        </AccordionItem>
+
+        <AccordionItem title="🏛️ Plano Partido (Presidente + Candidatos)">
+            <div className="space-y-4 text-slate-300">
+                <p className="italic">Para <strong>presidentes de partido</strong> que coordenam vários candidatos. O presidente vê o agregado; cada candidato só vê o próprio painel (isolamento RLS).</p>
+                <HelpTopic icon={<Building2 className="w-5 h-5"/>} title="Cadeia de Convites">
+                    Presidente → convida Candidatos → convidam Coordenadores → convidam Líderes → convidam Apoiadores. Cada nível tem link próprio com o nome do superior travado (não dá pra impersonar).
+                </HelpTopic>
+                <HelpTopic icon={<MapPinIcon className="w-5 h-5"/>} title="Comitês & Check-in geolocalizado">
+                    Cada candidato cadastra seu comitê com endereço + GPS + até 4 fotos (fachada/interior/placa/equipe). Coordenadores fazem check-in geolocalizado em eventos.
+                </HelpTopic>
+                <HelpTopic icon={<CurrencyDollarIcon className="w-5 h-5"/>} title="Repasses + Válvula">
+                    Presidente registra repasses (valor/data/destino) e tem uma <strong>válvula</strong> pra aprovar/segurar/cortar baseado no score do candidato (verde/amarelo/vermelho calculado por sinais: cadastro, comitê, atividade, equipe, contas).
+                </HelpTopic>
+                <HelpTopic icon={<BarChartIcon className="w-5 h-5"/>} title="Telão público">
+                    Link tokenizado (não-listado) que mostra um <strong>mapa ao vivo fullscreen</strong> com pino dos comitês e heat do estado — para projetar em eventos do partido.
+                </HelpTopic>
+            </div>
+        </AccordionItem>
+
+        <AccordionItem title="🔐 Gerar Acesso para Membros Órfãos">
+            <div className="space-y-4 text-slate-300">
+                <p className="italic">Quando você cadastra um membro da equipe mas ele ainda não tem login, ele aparece como <strong>órfão</strong> na tabela da Equipe (botão âmbar em destaque).</p>
+                <HelpTopic icon={<KeyRound className="w-5 h-5"/>} title="Como funciona">
+                    <ul>
+                        <li>No card do membro, clique no botão <strong>"🔐 Gerar acesso"</strong>.</li>
+                        <li>O sistema cria um <strong>link de convite</strong> (válido por 7 dias) e o exibe num modal pra você copiar.</li>
+                        <li>Mande pelo WhatsApp/email do membro. Ele abre, se cadastra, e cai direto no app já dentro da equipe com a função correta.</li>
+                        <li>O membro existente fica <strong>amarrado automaticamente</strong> — sem cadastro duplicado.</li>
+                    </ul>
+                </HelpTopic>
+            </div>
+        </AccordionItem>
+
         <AccordionItem title="Treinamento: O Manual da Equipe">
              <div className="space-y-4 text-slate-300">
                 <p className="italic">Aqui fica o "manual de instruções" para sua equipe de campo. É um guia rápido para todo mundo falar a mesma língua e fazer o trabalho da melhor forma.</p>
                 <HelpTopic icon={<AcademicCapIcon className="w-5 h-5"/>} title="Conteúdo">
-                    Inclui scripts de abordagem, guias de como "ler" o eleitor e boas práticas para o trabalho de rua.
+                    Inclui scripts de abordagem, guias de como "ler" o eleitor e boas práticas para o trabalho de rua, <strong>treinamento de operador de Call Center</strong> e <strong>treinamento de Fiscal Dia D</strong>.
                 </HelpTopic>
             </div>
         </AccordionItem>

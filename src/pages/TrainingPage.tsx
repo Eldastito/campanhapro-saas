@@ -99,6 +99,76 @@ const TrainingPage = () => {
                 </TrainingTipCard>
             </div>
         </AccordionItem>
+        <AccordionItem title="📞 Treinamento do Operador de Call Center">
+            <div className="space-y-4 text-slate-300">
+                <p>Quem opera o atendimento humano (Receptivo) ou faz Telemarketing Ativo. Recursos práticos pra trabalhar bem.</p>
+
+                <TrainingTipCard title="Receptivo — assumindo uma conversa da IA" variant="positive">
+                    <p>Quando um eleitor cai na <strong>"⏳ Fila Humana"</strong>, antes de assumir:</p>
+                    <ul className="list-disc list-inside">
+                        <li>Clique na conversa pra ver o histórico completo.</li>
+                        <li>Leia o <strong>resumo da IA</strong> que aparece no topo (Transição Invisível) — diz o que o eleitor já contou, qual é o assunto e o tom.</li>
+                        <li>Clique em <strong>"Assumir"</strong>. A IA pausa automaticamente. Você fala como humano.</li>
+                        <li>Se não for da sua área, clique em <strong>"Devolver"</strong> → volta pra fila.</li>
+                        <li>Resolvido? <strong>"Encerrar"</strong> fecha a conversa.</li>
+                    </ul>
+                </TrainingTipCard>
+
+                <TrainingTipCard title="Telemarketing Ativo — trabalhando uma lista" variant="neutral">
+                    <p>O Líder do Call Center cria uma campanha com nome + script. Pra você operar:</p>
+                    <ul className="list-disc list-inside">
+                        <li>Abra a aba <strong>📞 Ativo</strong> na sua estação. Escolha a campanha.</li>
+                        <li>Clique em <strong>"Próximo contato"</strong>. O sistema te dá nome + telefone + script.</li>
+                        <li>Botão <strong>"Abrir no WhatsApp"</strong> abre o chat no wa.me pra você falar com o eleitor.</li>
+                        <li>Ao fim da conversa: selecione a <strong>disposição</strong> (Interessado / Vai votar / Indeciso / Recusou / Agendar retorno / Número errado), opcionalmente escreva notas.</li>
+                        <li>Botões finais: <strong>Concluir</strong> (encerra), <strong>Sem resposta</strong> (não atendeu), ou <strong>Retorno</strong> (devolve pra fila pra alguém ligar depois).</li>
+                        <li>Ao salvar resultado, o sistema já te dá o próximo contato automático.</li>
+                    </ul>
+                </TrainingTipCard>
+
+                <TrainingTipCard title="Áreas de Atendimento — atenção" variant="neutral">
+                    <p>Se sua campanha tem áreas configuradas (ex.: Financeiro / Suporte), o eleitor escolheu uma área pelo menu numérico. Cada conversa mostra um <strong>badge 🧭 com o nome da área</strong> nos cards do Kanban — só assuma conversas da SUA área.</p>
+                </TrainingTipCard>
+
+                <TrainingTipCard title="O que NÃO fazer" variant="negative">
+                    <ul className="list-disc list-inside">
+                        <li><strong>Não se passe por candidato ou pela IA.</strong> Você é operador humano da equipe.</li>
+                        <li><strong>Não prometa cargo, dinheiro ou favor.</strong> Vedado pela lei eleitoral.</li>
+                        <li><strong>Não force conversa em quem pediu "SAIR".</strong> Respeite o opt-out (LGPD).</li>
+                        <li>Se o assunto exigir, agradeça e <strong>devolva pra fila</strong> ou peça pra alguém especializado pegar.</li>
+                    </ul>
+                </TrainingTipCard>
+            </div>
+        </AccordionItem>
+
+        <AccordionItem title="🗳️ Treinamento do Fiscal Dia D (Leitor de BU)">
+            <div className="space-y-4 text-slate-300">
+                <p>Fiscais que acompanham a apuração no dia da eleição usando o <strong>Leitor de QR Code do Boletim de Urna</strong> (padrão TRE/TSE 2026).</p>
+
+                <TrainingTipCard title="O que é o Leitor BU" variant="positive">
+                    <p>Depois que a urna fecha, a mesa imprime o BU (Boletim de Urna). Ele tem QR Codes que carregam os votos por candidato daquela seção. Você aponta a câmera do celular, o app decodifica, valida e <strong>soma à apuração paralela da sua campanha</strong> — antes de sair pelo TSE.</p>
+                </TrainingTipCard>
+
+                <TrainingTipCard title="Passo a passo no dia" variant="neutral">
+                    <ul className="list-disc list-inside">
+                        <li>Abra a aba <strong>Dia D</strong> no seu app antes de entrar na seção.</li>
+                        <li>Aponte a câmera pros QR Codes do BU. Pode ter mais de um — leia todos até completar.</li>
+                        <li>Confira que zona + seção batem com o que está no BU físico.</li>
+                        <li>Confirme. O sistema soma à apuração da campanha em tempo real.</li>
+                        <li>Se a câmera falhar, há uma opção pra digitar manualmente os totais como fallback.</li>
+                    </ul>
+                </TrainingTipCard>
+
+                <TrainingTipCard title="Cuidados — o que NÃO fazer" variant="negative">
+                    <ul className="list-disc list-inside">
+                        <li><strong>Não compartilhe o BU em redes sociais</strong> antes do TSE divulgar. Pode atrapalhar a apuração oficial.</li>
+                        <li>Não confie em BU que esteja rasurado, parcial ou de seção que você não fiscalizou pessoalmente.</li>
+                        <li>Se houver divergência entre o QR Code e os totais impressos, <strong>registre uma observação</strong> e avise o coordenador.</li>
+                    </ul>
+                </TrainingTipCard>
+            </div>
+        </AccordionItem>
+
         <AccordionItem title="Guia de Boas Práticas de Campo">
             <div className="space-y-4 text-slate-300">
                 <TrainingTipCard title="O que FAZER" variant="positive">
