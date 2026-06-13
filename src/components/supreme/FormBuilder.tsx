@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, Save, Eye, EyeOff, ListChecks,
-  Asterisk, Loader2, CheckCircle2, Type as TypeIcon,
+  Asterisk, Loader2, CheckCircle2, Type as TypeIcon, GripVertical,
 } from 'lucide-react';
 import { NATIVE_HIDEABLE } from './platformForms';
 
@@ -99,6 +99,32 @@ const FormBuilder: React.FC<Props> = ({ campaigns, supremeFetch }) => {
     [copy[i], copy[j]] = [copy[j], copy[i]];
     mutate(copy);
   };
+
+  // Drag-and-drop nativo HTML5 (#53). Reordena `fields` arrastando o handle ⋮.
+  // Sem libs externas — o array existente é manipulado e passa pelo mesmo mutate().
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+  const onDragStart = (i: number) => (e: React.DragEvent) => {
+    setDragIdx(i);
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', String(i)); } catch { /* algumas browsers exigem */ }
+  };
+  const onDragOver = (i: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (overIdx !== i) setOverIdx(i);
+  };
+  const onDrop = (i: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const from = dragIdx ?? Number(e.dataTransfer.getData('text/plain'));
+    setDragIdx(null); setOverIdx(null);
+    if (!Number.isFinite(from) || from === i) return;
+    const copy = [...fields];
+    const [moved] = copy.splice(from, 1);
+    copy.splice(i, 0, moved);
+    mutate(copy);
+  };
+  const onDragEnd = () => { setDragIdx(null); setOverIdx(null); };
 
   // ── Campos NATIVOS (hardcoded) que podem ser ocultados por campanha ──
   const nativeFields = NATIVE_HIDEABLE[target] ?? [];
@@ -239,8 +265,25 @@ const FormBuilder: React.FC<Props> = ({ campaigns, supremeFetch }) => {
             </div>
           ) : (
             fields.map((f, i) => (
-              <div key={f.id} className="bg-slate-900/60 border border-white/5 rounded-xl p-3 space-y-2">
+              <div key={f.id}
+                onDragOver={onDragOver(i)}
+                onDrop={onDrop(i)}
+                onDragEnd={onDragEnd}
+                className={`bg-slate-900/60 border rounded-xl p-3 space-y-2 transition-all ${
+                  overIdx === i && dragIdx !== null && dragIdx !== i
+                    ? 'border-indigo-500 ring-2 ring-indigo-500/20'
+                    : 'border-white/5'
+                } ${dragIdx === i ? 'opacity-40' : ''}`}>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={onDragStart(i)}
+                    title="Arrastar para reordenar"
+                    className="p-1 -ml-1 rounded hover:bg-white/10 cursor-grab active:cursor-grabbing text-slate-500 hover:text-white shrink-0"
+                  >
+                    <GripVertical className="w-3.5 h-3.5" />
+                  </button>
                   <input
                     value={f.label}
                     onChange={(e) => patchField(i, { label: e.target.value })}
