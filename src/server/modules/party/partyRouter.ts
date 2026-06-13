@@ -14,6 +14,7 @@ import { randomBytes } from 'crypto';
 import { computeScore } from './score';
 import { callAgent } from '../../../lib/aiCallAgent';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
+import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 
 const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
@@ -295,6 +296,26 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
     }).eq('id', req.params.id);
     broadcastTelao((party as any).id);
+
+    // Gatilho antifraude: se valor do repasse for "alto" OU candidato já tem
+    // score vermelho/amarelo, dispara orquestrador pro Auditor + Estrategista
+    // analisar o padrão. Threshold conservador (R$ 5k) — ajustável depois.
+    try {
+      const { data: cand } = await supabase.from('party_candidates')
+        .select('displayName, status').eq('id', req.params.id).maybeSingle();
+      const isHighValue = v >= 5000;
+      const isPending = (cand as any)?.status === 'pending';
+      if (isHighValue || isPending) {
+        fireOrchestration(supabase, {
+          campaignId: 'party:' + (party as any).id,
+          source: 'party_repasse_inserted',
+          intent: `Novo repasse de R$ ${v.toFixed(2)} para "${(cand as any)?.displayName || req.params.id}" ` +
+            `(status=${(cand as any)?.status}, total recebido=R$ ${totalRecebido.toFixed(2)}, alocado=R$ ${totalAlocado.toFixed(2)}). ` +
+            `Auditor de Fraudes avalia se há sinal de absorção/desvio; Estrategista revisa válvula de repasse atual e recomenda decisão (liberar/segurar/cortar).`,
+        });
+      }
+    } catch { /* gatilho é best-effort */ }
+
     return res.json({ repasse: ins, total: totalRecebido, alocado: totalAlocado });
   });
 

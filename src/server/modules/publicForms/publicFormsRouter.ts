@@ -10,6 +10,7 @@
  */
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 
 /** Colunas nativas de `contacts` que um campo do form pode preencher. */
 const CONTACT_COLUMN_MAP = new Set(['name', 'email', 'phone', 'neighborhood', 'city']);
@@ -130,6 +131,24 @@ export function createPublicFormsRouter(supabaseAdmin: SupabaseClient) {
       await supabaseAdmin.from('public_forms')
         .update({ submissions_count: (form.submissions_count ?? 0) + 1, updated_at: new Date().toISOString() })
         .eq('id', form.id).then(() => {}, () => {});
+
+      // Dispara orquestrador (fire-and-forget) pra IA classificar o lead +
+      // sugerir próximo toque. Só dispara se campanha tem IA proativa habilitada
+      // (cfg.features inclui 'ai_proactive') — senão lead vai pro CRM e fica
+      // parado esperando classificação manual.
+      try {
+        const { data: cfg } = await supabaseAdmin.from('campaign_configs')
+          .select('features').eq('id', form.campaign_id).maybeSingle();
+        const features = ((cfg as any)?.features || []) as string[];
+        if (features.includes('ai_proactive') || features.includes('ai_agents')) {
+          const nome = (values as any).name || (values as any).nome || contactRow.name || 'novo eleitor';
+          fireOrchestration(supabaseAdmin, {
+            campaignId: form.campaign_id,
+            source: 'form_submitted',
+            intent: `Novo lead capturado no formulário "${slug}": ${nome}. CRM classifica o perfil (apoiador/indeciso/etc), Growth Hacker propõe próximo toque (WhatsApp/email/visita), Estrategista avalia o segmento. Resultado vira tarefa pra equipe.`,
+          });
+        }
+      } catch { /* gating é best-effort — falha não bloqueia submit */ }
 
       return res.status(201).json({ ok: true, message: form.success_message || 'Recebemos seu cadastro. Obrigado!' });
     } catch (err: any) {
