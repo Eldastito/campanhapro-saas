@@ -12,6 +12,7 @@ import { ModernArea, ModernBar } from '../components/supreme/Charts';
 import FormBuilder from '../components/supreme/FormBuilder';
 import PublicFormsPanel from '../components/supreme/PublicFormsPanel';
 import PlatformFormsCatalog from '../components/supreme/PlatformFormsCatalog';
+import SupremeAiHealthCard from '../components/supreme/SupremeAiHealthCard';
 import BusinessKpis from '../components/supreme/BusinessKpis';
 import PartiesTab from '../components/supreme/PartiesTab';
 import TseKeysPanel from '../components/supreme/TseKeysPanel';
@@ -1313,6 +1314,9 @@ const SupremeAdminPage: React.FC = () => {
                                     </Card>
                                 ))}
                             </div>
+
+                            {/* AI Health detalhado — só Supreme vê custos/agentes/campanhas (regra #111) */}
+                            <SupremeAiHealthCard />
 
                             {/* Planos + Inadimplentes */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

@@ -278,40 +278,43 @@ const AIHealthSection = () => {
                 <>
                     <div className="mb-4">
                         <div className="flex justify-between items-baseline mb-2">
-                            <p className="text-xs text-slate-400">Gasto mensal de IA nesta campanha</p>
+                            <p className="text-xs text-slate-400">Consumo de IA deste mês</p>
                             <p className={`text-xl font-black ${overBudget ? 'text-red-400' : warning ? 'text-yellow-400' : 'text-emerald-400'}`}>
-                                R$ {used.toFixed(2)} <span className="text-xs text-slate-500">/ R$ {cap.toFixed(2)}</span>
+                                {pct}% <span className="text-xs text-slate-500">do limite mensal</span>
                             </p>
                         </div>
                         <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
                             <div
                                 className={`h-full transition-all ${overBudget ? 'bg-red-500' : warning ? 'bg-yellow-500' : 'bg-emerald-500'}`}
-                                style={{ width: `${pct}%` }}
+                                style={{ width: `${Math.min(pct, 100)}%` }}
                             />
                         </div>
                         {overBudget && (
                             <p className="text-xs text-red-400 mt-2">
-                                ⚠️ Cap mensal estourado. Novas chamadas de IA estão bloqueadas até o próximo mês.
+                                ⚠️ Limite mensal de IA atingido. Novas chamadas estão bloqueadas até virar o mês ou trocar de plano.
+                            </p>
+                        )}
+                        {!overBudget && warning && (
+                            <p className="text-xs text-yellow-400 mt-2">
+                                Você está usando bastante IA esse mês. Considere o upgrade pro Plano Total (IA ilimitada).
                             </p>
                         )}
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3 mb-4 text-center">
-                        <Stat label="Chamadas" value={data.runs_count} />
+                    {/* Regra #111: usuário NÃO vê valores em R$/$/tokens. Só % e contadores. */}
+                    <div className="grid grid-cols-2 gap-3 mb-4 text-center">
+                        <Stat label="Chamadas este mês" value={data.runs_count} />
                         <Stat label="Erros" value={data.errors_count} className={data.errors_count > 0 ? 'text-red-400' : ''} />
-                        <Stat label="Cap" value={`R$ ${cap.toFixed(2)}`} />
                     </div>
 
                     {topAgents.length > 0 && (
                         <div>
-                            <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Top agentes (por custo)</p>
+                            <p className="text-xs uppercase tracking-widest text-slate-500 mb-2">Agentes mais usados</p>
                             <ul className="space-y-1.5">
                                 {topAgents.map(([agent, st]) => (
                                     <li key={agent} className="flex justify-between items-center text-sm">
                                         <span className="text-slate-300">{agent}</span>
-                                        <span className="text-xs text-slate-500">
-                                            {st.runs} chamada(s) · ${(st.cost_cents / 100).toFixed(3)}
-                                        </span>
+                                        <span className="text-xs text-slate-500">{st.runs} chamada(s)</span>
                                     </li>
                                 ))}
                             </ul>

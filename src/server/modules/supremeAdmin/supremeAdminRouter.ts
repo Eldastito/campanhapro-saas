@@ -234,6 +234,77 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ── GET /ai-health ──────────────────────────────────────────────────
+  // Visão Supreme do consumo de IA: total mês, breakdown por agente e por
+  // campanha (top 10 cada). É AQUI que o Supreme decide quando recarregar
+  // créditos do provider. Usuário comum não vê R$/tokens (regra #111).
+  router.get('/ai-health', async (_req: Request, res: Response) => {
+    try {
+      const start = new Date();
+      start.setDate(1); start.setHours(0, 0, 0, 0);
+
+      const { data: runs, error } = await supabaseAdmin
+        .from('agent_runs')
+        .select('"agentId", "campaignId", "costCentsUsd", error, "tokensIn", "tokensOut"')
+        .gte('timestamp', start.toISOString())
+        .limit(50000);
+      if (error) return res.status(500).json({ error: 'ai_health_failed', detail: error.message });
+
+      const list = (runs || []) as any[];
+      let totalCents = 0, totalRuns = list.length, totalErrors = 0, totalTokensIn = 0, totalTokensOut = 0;
+      const byAgent = new Map<string, { runs: number; costCents: number; errors: number }>();
+      const byCampaign = new Map<string, { runs: number; costCents: number }>();
+      for (const r of list) {
+        const c = Number(r.costCentsUsd) || 0;
+        totalCents += c;
+        totalTokensIn += Number(r.tokensIn) || 0;
+        totalTokensOut += Number(r.tokensOut) || 0;
+        if (r.error) totalErrors++;
+
+        const a = byAgent.get(r.agentId) || { runs: 0, costCents: 0, errors: 0 };
+        a.runs++; a.costCents += c; if (r.error) a.errors++;
+        byAgent.set(r.agentId, a);
+
+        if (r.campaignId) {
+          const x = byCampaign.get(r.campaignId) || { runs: 0, costCents: 0 };
+          x.runs++; x.costCents += c;
+          byCampaign.set(r.campaignId, x);
+        }
+      }
+
+      // Enriquecer campanhas com nome
+      const topCampaignIds = [...byCampaign.entries()].sort((a, b) => b[1].costCents - a[1].costCents).slice(0, 10).map(([id]) => id);
+      const { data: camps } = topCampaignIds.length > 0
+        ? await supabaseAdmin.from('campaigns').select('id, name, "candidateName"').in('id', topCampaignIds)
+        : { data: [] };
+      const nameByCamp = new Map<string, string>();
+      for (const c of (camps || []) as any[]) {
+        nameByCamp.set(c.id, c.candidateName || c.name || c.id.slice(0, 8));
+      }
+
+      return res.json({
+        month: start.toISOString().slice(0, 7),
+        totals: {
+          runs: totalRuns,
+          errors: totalErrors,
+          costCentsUsd: totalCents,
+          tokensIn: totalTokensIn,
+          tokensOut: totalTokensOut,
+        },
+        topAgents: [...byAgent.entries()]
+          .sort((a, b) => b[1].costCents - a[1].costCents)
+          .slice(0, 10)
+          .map(([id, st]) => ({ agentId: id, ...st })),
+        topCampaigns: [...byCampaign.entries()]
+          .sort((a, b) => b[1].costCents - a[1].costCents)
+          .slice(0, 10)
+          .map(([id, st]) => ({ campaignId: id, name: nameByCamp.get(id) || id.slice(0, 8), ...st })),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message ?? 'ai_health_failed' });
+    }
+  });
+
   // ── GET /access-log ─────────────────────────────────────────────────
   // Per-user access view: last sign-in, registration, action count.
   router.get('/access-log', async (_req: Request, res: Response) => {
