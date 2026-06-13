@@ -232,10 +232,16 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
     const addEngagementAction = async (action: Omit<EngagementAction, 'id'>) => {
         if (!user?.campaignId) return;
         try {
+            // Pessoas identificadas viram CRM. Salvar SEPARADO do engagement_actions
+            // pra não bater contra schema da tabela. Mantém o contador agregado.
+            const identified = (action.pessoasIdentificadas || []).filter(p => p?.nome?.trim());
+            const rest: any = { ...action };
+            delete rest.pessoasIdentificadas;
+
             const { data: created, error } = await supabase
                 .from('engagement_actions')
                 .insert(sanitizeData({
-                    ...action,
+                    ...rest,
                     campaignId: user.campaignId,
                     createdBy: user.uid,
                 }))
@@ -243,6 +249,30 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
                 .single();
             if (error) throw error;
             if (created) setEngagementActions(prev => [created as EngagementAction, ...prev.filter(a => a.id !== (created as any).id)]);
+
+            // Bridge engajamento→CRM (#53). Cria contatos só pras pessoas com nome,
+            // marca source=engajamento:<id> e supportLevel correspondente.
+            if (identified.length > 0 && created?.id) {
+                const now = new Date().toISOString();
+                const rows = identified.map(p => ({
+                    campaignId: user.campaignId,
+                    name: p.nome.trim(),
+                    phone: p.phone?.trim() || null,
+                    neighborhood: p.bairro?.trim() || null,
+                    source: `engajamento:${created.id}`,
+                    funnelStage: 'relacionamento',
+                    supportLevel: p.tipo === 'apoiador' ? 'apoiador' : 'indeciso',
+                    tags: ['engajamento', String(action.tipo || '').toLowerCase().replace(/\s+/g, '-')],
+                    lastInteractionAt: now,
+                    createdAt: now,
+                }));
+                try {
+                    await supabase.from('contacts').insert(rows);
+                } catch (e) {
+                    console.warn('[engagement→CRM] falha inserindo contatos identificados:', e);
+                }
+            }
+
             void logSubmissionGeo({
                 campaignId: user.campaignId,
                 userId: user.id ? String(user.id) : null,
