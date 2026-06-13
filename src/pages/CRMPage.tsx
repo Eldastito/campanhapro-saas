@@ -51,7 +51,7 @@ const ClassifyContactsButton: React.FC<ClassifyContactsButtonProps> = ({ campaig
         if (json.code === 'PLAN_BLOCKED' || json.upgradeMessage) { setShowUpgrade(true); return; }
         throw new Error(json.error || `HTTP ${r.status}`);
       }
-      alert(`✅ ${json.classified}/${json.total} contatos classificados pela IA.\nCusto: $${(json.cost_cents_usd/100).toFixed(4)}`);
+      alert(`✅ ${json.classified} de ${json.total} contatos classificados. A IA também sugeriu a próxima ação pra cada um — abra o contato pra ver.`);
       onDone?.();
     } catch (err: any) {
       alert(`Erro: ${err?.message || err}`);
@@ -592,6 +592,13 @@ const CRMPage: React.FC = () => {
                               {contact.voter_journey?.[0]?.nextBestAction && (
                                 <div className="text-[10px] text-emerald-400 font-bold mt-1 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 animate-pulse">
                                   NBA: {contact.voter_journey[0].nextBestAction}
+                                </div>
+                              )}
+                              {/* Ação acionável sugerida pelo classificador IA (#114).
+                                  Curta (≤140 chars), com verbo no início. */}
+                              {contact.nextAction && (
+                                <div className="text-[10px] text-indigo-300 font-medium mt-1 bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20" title={contact.supportReasoning || ''}>
+                                  🎯 {contact.nextAction}
                                 </div>
                               )}
                             </div>

@@ -872,17 +872,29 @@ async function startServer() {
         `${i+1}. id=${c.id} | nome=${c.name} | bairro=${c.neighborhood||'?'} | classif_legado=${c.classification||'?'} | tags=${(c.tags||[]).join(',')||'?'} | notas=${(c.aiNotes||'').slice(0,80)||'?'} | origem=${c.source||'?'}`
       ).join('\n');
 
-      const systemPrompt = `Você é o Classificador de Eleitores. Sua única tarefa: ler dados de cada contato e classificar em UM dos níveis:
+      const systemPrompt = `Você é o Classificador de Eleitores. Sua tarefa: classificar cada contato E sugerir a PRÓXIMA AÇÃO que mais converte voto.
+
+NÍVEIS:
 - 'rejeitador': demonstra rejeição clara ao candidato/causa
 - 'indeciso': sem sinal claro de apoio nem rejeição
 - 'simpatizante': sinais leves de apoio (ex: tags positivas, classificação legado "Apoiador")
 - 'apoiador': apoio declarado consistente
-- 'multiplicador': apoiador que ATIVAMENTE traz outros (ex: tags "lider de bairro", origem "Indicação")
+- 'multiplicador': apoiador que ATIVAMENTE traz outros (tags "lider de bairro", origem "Indicação")
 - 'desconhecido': dados insuficientes pra classificar com >50% de confiança
 
-Atribua também um support_score (0-100) que é sua CONFIANÇA na classificação.
+REGRA DE OURO DA AÇÃO (next_action): seja CONCRETO e CURTO (≤140 chars), com VERBO no início.
+Princípios pra cada nível:
+- multiplicador: maximizar alcance — "Convidar pra evento e pedir 3 indicações no bairro X"
+- apoiador: fortalecer engajamento — "Mandar conteúdo aprofundado sobre pauta Y" / "Mobilizar pra mutirão"
+- simpatizante: converter pra apoio — "Visita pessoal focada em [pauta que mais combina]"
+- indeciso: ESCUTAR antes de empurrar — "Visita aberta: ouvir queixas do bairro, evitar discurso"
+- rejeitador: NÃO gastar recursos — "Não incluir em blast; revisar em 30 dias se mudar contexto"
+- desconhecido: COLETAR — "Mandar formulário curto antes de qualquer abordagem"
+
+Atribua support_score (0-100) = sua CONFIANÇA na classificação.
+
 Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
-[{ "id": "uuid", "support_level": "indeciso", "support_score": 60, "reasoning": "frase curta" }, ...]`;
+[{ "id": "uuid", "support_level": "indeciso", "support_score": 60, "reasoning": "frase curta", "next_action": "Visita pessoal focada em Saúde, evitar discurso" }, ...]`;
 
       const aiResponse = await callAgent(supabaseAdmin, 'crm', `Classifique estes ${contacts.length} contatos:\n\n${lines}\n\nLembre: JSON array puro, sem markdown.`, {
         campaignId, userId, systemInstruction: systemPrompt,
@@ -901,24 +913,27 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
 
       const validLevels = new Set(['desconhecido','rejeitador','indeciso','simpatizante','apoiador','multiplicador']);
       let classified = 0;
+      const now = new Date().toISOString();
       for (const item of parsed) {
         if (!item?.id || !validLevels.has(item.support_level)) continue;
+        const nextAction = (item.next_action || '').toString().trim().slice(0, 140) || null;
         const { error: upErr } = await supabaseAdmin.from('contacts').update({
           supportLevel: item.support_level,
           supportScore: typeof item.support_score === 'number' ? Math.max(0, Math.min(100, item.support_score)) : null,
           supportReasoning: (item.reasoning || '').slice(0, 500),
-          supportClassifiedAt: new Date().toISOString(),
+          supportClassifiedAt: now,
           supportClassifiedBy: 'ai_crm_agent',
+          nextAction,
+          nextActionAt: nextAction ? now : null,
         }).eq('id', item.id).eq('campaignId', campaignId);
         if (!upErr) classified++;
       }
 
+      // Custo / provider / run_id NÃO são retornados pro cliente (regra #111:
+      // só Supreme vê isso; ficam só em agent_runs/ai_usage pra auditoria).
       res.json({
         classified,
         total: contacts.length,
-        cost_cents_usd: aiResponse.costCentsUsd,
-        provider: aiResponse.provider,
-        run_id: aiResponse.runId,
       });
     } catch (error: any) {
       if (error instanceof BudgetExceededError) {
