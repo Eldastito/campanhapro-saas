@@ -181,5 +181,72 @@ export function createRagRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  /**
+   * GET /memory — lista a memória da IA (chunks com source agent:*) com filtros.
+   * Servidor não retorna o embedding (binário grande); só metadata utilizável.
+   */
+  router.get('/memory', async (req: Request, res: Response) => {
+    try {
+      const campaignId = (req as any).user?.campaignId;
+      if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const agentId = (req.query.agentId as string) || undefined;
+      const limit = Math.min(Number(req.query.limit ?? 100), 500);
+      const offset = Math.max(Number(req.query.offset ?? 0), 0);
+
+      let query = supabaseAdmin
+        .from('knowledge_chunks')
+        .select('id, source, content, metadata, "createdAt"', { count: 'exact' })
+        .eq('campaignId', campaignId)
+        .like('source', 'agent:%')
+        .order('createdAt', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (agentId) query = query.eq('source', `agent:${agentId}`);
+
+      const { data, error, count } = await query;
+      if (error) throw error;
+
+      // Stats por agente (qtd de chunks). Útil pra UI mostrar facets.
+      const { data: facets } = await supabaseAdmin.rpc('count_memory_by_source', { p_campaign_id: campaignId }).then(
+        (r: any) => r,
+        () => ({ data: [] as Array<{ source: string; n: number }> }),
+      );
+
+      res.json({ chunks: data ?? [], total: count ?? 0, facets: facets ?? [] });
+    } catch (err: any) {
+      console.error('[RAG] list memory:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * DELETE /memory/:id — apaga 1 chunk de memória da IA. Só Admin/Coordenador
+   * (verificação simples por type — autorização granular fica pra depois).
+   */
+  router.delete('/memory/:id', async (req: Request, res: Response) => {
+    try {
+      const campaignId = (req as any).user?.campaignId;
+      const userType = (req as any).user?.userType;
+      if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+      if (userType !== 'Admin' && userType !== 'Coordenador') {
+        return res.status(403).json({ error: 'admin_required' });
+      }
+
+      const { error } = await supabaseAdmin
+        .from('knowledge_chunks')
+        .delete()
+        .eq('id', req.params.id)
+        .eq('campaignId', campaignId)
+        .like('source', 'agent:%'); // só permite apagar memória IA, nunca conhecimento ancorado
+
+      if (error) throw error;
+      return res.json({ ok: true });
+    } catch (err: any) {
+      console.error('[RAG] delete memory:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }

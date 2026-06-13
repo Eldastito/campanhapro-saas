@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bot, TrendingUp, Share2, Map, Send, Loader2, LayoutDashboard, Ticket, ArrowRight, CheckCircle2, Link as LinkIcon, ShieldCheck, Sparkles as SparklesIcon, History, Shield, Zap, X, BellRing, Trash2 } from 'lucide-react';
+import { Bot, TrendingUp, Share2, Map, Send, Loader2, LayoutDashboard, Ticket, ArrowRight, CheckCircle2, Link as LinkIcon, ShieldCheck, Sparkles as SparklesIcon, History, Shield, Zap, X, BellRing, Trash2, Brain } from 'lucide-react';
+import AiMemoryPanel from '../components/ai/AiMemoryPanel';
 import { supabase } from '../lib/supabaseClient';
 import { askStrategist, askGrowthHacker, askSocialMedia, askFieldCommander, askCreativeProducer, askBackupAgent, askFraudAuditor, runFullPipeline, getPipelineHistory, PipelineResult, generateCreativeImage, createProductionOrder, publishToSocialMedia } from '../services/agentsClientService';
 import { createBackup, restoreBackup, BackupData } from '../services/backupService';
@@ -18,6 +19,8 @@ const AgentsHQPage: React.FC = () => {
     const { config } = useProfilePermissions();
     const { activeTab, setActiveTab } = useAgentStore();
     const [isHydrated, setIsHydrated] = useState(false);
+    // Modal Memória da IA — lista o que os agentes guardaram no RAG.
+    const [memoryOpen, setMemoryOpen] = useState(false);
 
     useEffect(() => {
         // Zustand persist hydration check
@@ -437,6 +440,11 @@ const AgentsHQPage: React.FC = () => {
                         <Zap className={`w-3.5 h-3.5 ${autoPipelineEnabled ? 'animate-pulse' : ''}`} />
                         {autoPipelineEnabled ? 'Automação ON' : 'Automação OFF'}
                     </button>
+                    <button onClick={() => setMemoryOpen(true)}
+                        title="Ver e gerenciar o que a IA salvou como memória"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border bg-indigo-500/10 text-indigo-300 border-indigo-500/20 hover:bg-indigo-500/20">
+                        <Brain className="w-3.5 h-3.5" /> Memória
+                    </button>
                     <button
                         onClick={runManualPipeline}
                         title="Rodar análise diária agora"
@@ -501,6 +509,15 @@ const AgentsHQPage: React.FC = () => {
                     renderTabContent()
                 )}
             </div>
+
+            {/* Modal Memória da IA — opens via header button */}
+            {memoryOpen && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setMemoryOpen(false)}>
+                    <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+                        <AiMemoryPanel onClose={() => setMemoryOpen(false)} />
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

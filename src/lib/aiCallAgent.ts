@@ -59,6 +59,14 @@ export interface CallAgentOpts {
      * competitivo e defesa de imagem em tempo real.
      */
     enableWebSearch?: boolean;
+    /**
+     * Memória da IA (RAG): por padrão, TODA resposta bem-sucedida do callAgent
+     * é indexada em knowledge_chunks com source=`agent:{agentId}` (fire-and-forget,
+     * nunca bloqueia o caller). Define `noRagPersist: true` em casos onde isso
+     * não faz sentido — ex.: classificações binárias (yes/no), respostas muito
+     * curtas, prompts sensíveis (LGPD).
+     */
+    noRagPersist?: boolean;
 }
 
 export interface CallAgentResult {
@@ -541,6 +549,30 @@ export async function callAgent(
                     } catch (e) {
                         // never block on billing telemetry
                     }
+                }
+
+                // RAG auto-persist: indexa a resposta como memória pra futuras
+                // consultas (`agent:{agentId}` distingue do conhecimento ancorado
+                // tipo formulários/settings). Fire-and-forget — nunca bloqueia.
+                // Pula respostas muito curtas (yes/no/classificação) e prompts
+                // que pediram opt-out explícito.
+                const text = raw.text || '';
+                const shouldPersist = !opts.noRagPersist && text.trim().length >= 60 && opts.campaignId && supabaseAdmin;
+                if (shouldPersist) {
+                    void import('../server/modules/rag/knowledgeIngest').then(({ ingestArtifact }) =>
+                        ingestArtifact(supabaseAdmin, {
+                            campaignId: opts.campaignId,
+                            source: `agent:${agentId}`,
+                            title: prompt.slice(0, 100).replace(/\s+/g, ' ').trim(),
+                            text,
+                            metadata: {
+                                agentId, provider, model: raw.model, runId,
+                                promptExcerpt: prompt.slice(0, 300),
+                                tokensOut: raw.tokensOut, costCentsUsd: costCents,
+                                webSearches: raw.webSearches ?? 0,
+                            },
+                        }).catch(() => { /* swallowed: knowledgeIngest já tolera erros */ })
+                    ).catch(() => { /* import falhou: segue */ });
                 }
 
                 return {
