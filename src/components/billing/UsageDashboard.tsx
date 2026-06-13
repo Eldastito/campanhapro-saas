@@ -8,6 +8,8 @@ interface UsageSummary {
   aiCostCents: number;
   aiCalls: number;
   messagesOutbound: number;
+  /** Disparos em massa do mês corrente — usado pela barra de cota. */
+  blastsThisMonth: number;
   simulations: number;
   embeddings: number;
 }
@@ -17,7 +19,8 @@ interface Plan {
     contacts: number;
     ai_budget_cents: number;
     team_users: number;
-    messages_per_month: number;
+    blasts_per_month: number;
+    messages_per_month?: number; // legado pré-#109
   };
 }
 
@@ -83,9 +86,9 @@ const UsageDashboard: React.FC<Props> = ({ usage, plan, withinBudget }) => {
             formatValue={formatBRL}
           />
           <ProgressBar
-            label="Mensagens enviadas"
-            current={usage.messagesOutbound}
-            limit={plan?.limits.messages_per_month ?? 0}
+            label="Disparos em massa do mês"
+            current={usage.blastsThisMonth ?? 0}
+            limit={plan?.limits.blasts_per_month ?? plan?.limits.messages_per_month ?? 0}
           />
         </div>
 

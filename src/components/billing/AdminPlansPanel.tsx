@@ -16,7 +16,8 @@ interface Plan {
     contacts?: number;
     ai_budget_cents?: number;
     team_users?: number;
-    messages_per_month?: number;
+    blasts_per_month?: number;
+    messages_per_month?: number; // legado pré-#109
   };
   active: boolean;
   createdAt?: string;
@@ -49,7 +50,7 @@ const FEATURE_LABELS: Record<string, string> = {
 const LIMITS = [
   { key: 'contacts', label: 'Contatos' },
   { key: 'team_users', label: 'Usuários da equipe' },
-  { key: 'messages_per_month', label: 'Mensagens/mês' },
+  { key: 'blasts_per_month', label: 'Disparos em massa/mês' },
   { key: 'ai_budget_cents', label: 'Orçamento IA (centavos)' },
 ] as const;
 
@@ -58,7 +59,7 @@ const emptyPlan: Plan = {
   name: '',
   monthlyCents: 0,
   features: ['dashboard'],
-  limits: { contacts: 100, team_users: 1, messages_per_month: 0, ai_budget_cents: 0 },
+  limits: { contacts: 100, team_users: 1, blasts_per_month: 0, ai_budget_cents: 0 },
   active: true,
 };
 

@@ -1,9 +1,11 @@
 /**
  * Enforcement de cotas do plano GRATIS (e cotas duras dos pagos).
  *
- * Fonte da verdade: campaign_configs.limits (JSON com whatsapp_per_day, forms,
+ * Fonte da verdade: campaign_configs.limits (JSON com blasts_per_month, forms,
  * ai_calls, team_members, visits). Quando o cliente bate na cota:
- *   - WhatsApp/dia POR CAMPANHA → bloqueia disparo até o próximo dia (UTC).
+ *   - Disparos em massa POR MÊS → bloqueia disparo até o 1º do mês seguinte.
+ *     Conta APENAS blast_recipients — não conta Caixa de Entrada, Call Center
+ *     nem bot IA.
  *   - Formulários ativos → bloqueia criação acima do limite.
  *   - IA calls → bloqueia chamadas se aiCalls=0 (a menos que trial 24h esteja
  *     ativo — flag em campaign_configs.aiTrial).
@@ -35,11 +37,15 @@ async function loadCampaignConfig(supabase: SupabaseClient, campaignId: string) 
 }
 
 /**
- * Conta os disparos de hoje pra essa campanha (UTC).
+ * Conta os disparos EM MASSA do mês corrente pra essa campanha (UTC).
  * blast_recipients = uma linha por destinatário; campaignId vem da tabela.
+ *
+ * IMPORTANTE: isto NÃO conta mensagens recebidas, nem respostas individuais
+ * da Caixa de Entrada, nem mensagens do bot/IA, nem do Call Center. Conta
+ * apenas o que o cliente dispara via /api/v1/whatsapp/blast.
  */
-async function countWhatsappToday(supabase: SupabaseClient, campaignId: string): Promise<number> {
-  const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+async function countBlastsThisMonth(supabase: SupabaseClient, campaignId: string): Promise<number> {
+  const start = new Date(); start.setUTCDate(1); start.setUTCHours(0, 0, 0, 0);
   const { count } = await supabase
     .from('blast_recipients')
     .select('id', { count: 'exact', head: true })
@@ -71,13 +77,18 @@ async function countAiCallsThisMonth(supabase: SupabaseClient, campaignId: strin
 
 const UPGRADE_GENERIC = 'Esta ação faz parte do Plano Pro. Faltam dias até a eleição — não chegue na reta final sem isso.';
 const UPGRADE_AI = '🤖 IA está no Plano Pro. Classificar eleitores, dossiê de adversários e estratégia automática — seu opositor pode já estar usando.';
-const UPGRADE_WA = '📱 Você atingiu o limite diário de WhatsApp do Plano Grátis. Pro tem disparos ilimitados.';
+const UPGRADE_WA = '📱 Você atingiu o limite de DISPAROS EM MASSA do mês. Plano Total: disparos ilimitados. (Caixa de Entrada e Call Center continuam funcionando normalmente.)';
 const UPGRADE_FORMS = '📝 Plano Grátis permite poucos formulários ativos. Plano Pro: ilimitados.';
 const UPGRADE_DIAD = '🗳️ Dia D / Leitor de BU é exclusivo do Plano Pro. No dia da eleição você precisa disso pra acompanhar a apuração antes dos concorrentes.';
 
 /**
- * Verifica se a campanha pode disparar mais N mensagens de WhatsApp hoje.
- * Conta TODOS os destinatários do dia (não só campanhas distintas).
+ * Verifica se a campanha pode disparar mais N mensagens de WhatsApp EM MASSA
+ * no MÊS corrente. Não confunda com mensagens da Caixa de Entrada ou do Call
+ * Center — essas NÃO consomem cota.
+ *
+ * Lê blasts_per_month dos limits (nome novo). Aceita os legados
+ * messages_per_month e whatsapp_per_day por compatibilidade enquanto
+ * sobram campanhas com schema antigo (migration roda no DB mas há cache).
  */
 export async function checkWhatsAppQuota(
   supabase: SupabaseClient, campaignId: string, requestedCount: number = 1,
@@ -85,15 +96,22 @@ export async function checkWhatsAppQuota(
   const cfg = await loadCampaignConfig(supabase, campaignId);
   if (!cfg) return { ok: false, reason: 'no_config', upgradeMessage: 'Configuração não encontrada.' };
 
-  const limit = Number(cfg?.limits?.whatsapp_per_day ?? cfg?.limits?.whatsappPerDay ?? 999999);
+  const limit = Number(
+    cfg?.limits?.blasts_per_month
+      ?? cfg?.limits?.messages_per_month     // legado pré-#109
+      ?? cfg?.limits?.whatsapp_per_day        // legado mais antigo
+      ?? cfg?.limits?.whatsappPerDay
+      ?? 999999,
+  );
   if (limit < 0 || limit >= 999999) return { ok: true, planTier: cfg.planTier, limit }; // -1 = ilimitado
 
-  const used = await countWhatsappToday(supabase, campaignId);
+  const used = await countBlastsThisMonth(supabase, campaignId);
   if (used + requestedCount > limit) {
-    const tomorrow = new Date(); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1); tomorrow.setUTCHours(0, 0, 0, 0);
+    // Próximo mês UTC (reset)
+    const reset = new Date(); reset.setUTCMonth(reset.getUTCMonth() + 1); reset.setUTCDate(1); reset.setUTCHours(0, 0, 0, 0);
     return {
       ok: false, reason: 'quota_exceeded', feature: 'whatsapp_blast',
-      used, limit, resetAt: tomorrow.toISOString(), planTier: cfg.planTier,
+      used, limit, resetAt: reset.toISOString(), planTier: cfg.planTier,
       upgradeMessage: UPGRADE_WA,
     };
   }

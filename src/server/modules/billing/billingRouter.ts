@@ -47,7 +47,9 @@ function validatePlanInput(
   if (!body.limits || typeof body.limits !== 'object' || Array.isArray(body.limits)) {
     return { error: 'invalid_limits (object)' };
   }
-  const allowedLimits = ['contacts', 'ai_budget_cents', 'team_users', 'messages_per_month'];
+  // Aceita o nome novo (blasts_per_month) e o legado (messages_per_month) por
+  // compat — clients antigos do AdminPlansPanel podem demorar a atualizar.
+  const allowedLimits = ['contacts', 'ai_budget_cents', 'team_users', 'blasts_per_month', 'messages_per_month'];
   for (const k of Object.keys(body.limits)) {
     if (!allowedLimits.includes(k)) return { error: `unknown_limit: ${k}` };
     const v = body.limits[k];

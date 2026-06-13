@@ -26,6 +26,7 @@ interface UsageSummary {
   aiCostCents: number;
   aiCalls: number;
   messagesOutbound: number;
+  blastsThisMonth: number; // único contador que enforça blasts_per_month
   simulations: number;
   embeddings: number;
 }

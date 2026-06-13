@@ -7,7 +7,10 @@ interface PlanLimits {
   contacts: number;
   ai_budget_cents: number;
   team_users: number;
-  messages_per_month: number;
+  blasts_per_month: number;
+  /** Legado pré-#109 — UI lê blasts_per_month, mas planos antigos do banco
+   *  ainda podem trazer messages_per_month. Mantido opcional pra retrocompat. */
+  messages_per_month?: number;
 }
 
 export interface Plan {
@@ -75,7 +78,9 @@ const PlanCard: React.FC<Props> = ({ plan, currentPlanId, recommended, onSubscri
           <p className="text-slate-400 font-medium mb-1">Limites</p>
           <p>· {formatLimit(plan.limits.contacts, 'contatos')}</p>
           <p>· {formatLimit(plan.limits.team_users, 'usuários da equipe')}</p>
-          <p>· {formatLimit(plan.limits.messages_per_month, 'mensagens/mês')}</p>
+          <p title="Conta apenas disparos em massa. Caixa de Entrada e Call Center NÃO consomem cota.">
+            · {formatLimit(plan.limits.blasts_per_month ?? plan.limits.messages_per_month ?? 0, 'disparos em massa/mês')}
+          </p>
           <p>· {plan.limits.ai_budget_cents === -1
             ? 'Orçamento IA ilimitado'
             : `${formatBRL(plan.limits.ai_budget_cents)} de IA/mês`}</p>

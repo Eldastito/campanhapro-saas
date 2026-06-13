@@ -9,10 +9,15 @@ export interface Plan {
 }
 
 export interface PlanLimits {
-  contacts: number;          // -1 = unlimited
-  ai_budget_cents: number;   // -1 = unlimited
-  team_users: number;        // -1 = unlimited
-  messages_per_month: number; // -1 = unlimited
+  contacts: number;            // -1 = unlimited
+  ai_budget_cents: number;     // -1 = unlimited
+  team_users: number;          // -1 = unlimited
+  /** Disparos EM MASSA por mês (não confunda com mensagens da Caixa/Call Center,
+   *  que não consomem cota). -1 = ilimitado. */
+  blasts_per_month: number;
+  /** Legado pré-#109 — alguns clients antigos ainda enviam este nome. Reader
+   *  faz fallback. */
+  messages_per_month?: number;
 }
 
 export interface Subscription {
@@ -33,7 +38,12 @@ export interface UsageSummary {
   periodEnd: string;
   aiCostCents: number;
   aiCalls: number;
+  /** Total de mensagens outbound do período (Caixa + Call Center + blast).
+   *  ATENÇÃO: NÃO é o que consome a cota — usar blastsThisMonth pra isso. */
   messagesOutbound: number;
+  /** Disparos em massa do mês corrente. Esta é a métrica que enforça
+   *  blasts_per_month. Vem direto de blast_recipients. */
+  blastsThisMonth: number;
   simulations: number;
   embeddings: number;
 }
@@ -211,6 +221,17 @@ export async function getUsageForCurrentPeriod(
     aiCostCents: aiRows.reduce((s, r) => s + (r.costCents ?? 0), 0),
     aiCalls: aiRows.reduce((s, r) => s + (r.quantity ?? 0), 0),
     messagesOutbound: rows.filter(r => r.metric === 'message_outbound').reduce((s, r) => s + (r.quantity ?? 0), 0),
+    blastsThisMonth: await (async () => {
+      // Disparos EM MASSA do mês — só essa contagem alimenta a cota
+      // (blasts_per_month). NÃO conta Caixa de Entrada nem Call Center.
+      const start = new Date(); start.setUTCDate(1); start.setUTCHours(0, 0, 0, 0);
+      const { count } = await supabase
+        .from('blast_recipients')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaignId', campaignId)
+        .gte('createdAt', start.toISOString());
+      return count || 0;
+    })(),
     simulations: rows.filter(r => r.metric === 'simulation').reduce((s, r) => s + (r.quantity ?? 0), 0),
     embeddings: rows.filter(r => r.metric === 'embedding').reduce((s, r) => s + (r.quantity ?? 0), 0),
   };

@@ -1768,10 +1768,11 @@ const SupremeAdminPage: React.FC = () => {
                                                     : p.limits?.ai_budget_cents === 0 ? 'Zero'
                                                     : 'Limitada'
                                                 }</strong></span>
-                                                <span>WhatsApp: <strong className="text-slate-200">{
-                                                    p.limits?.messages_per_month === -1 ? '∞ msgs/mês'
-                                                    : p.limits?.messages_per_month === 0 ? '— (não inclui)'
-                                                    : `${p.limits.messages_per_month.toLocaleString('pt-BR')} msgs/mês`
+                                                <span title="Conta apenas disparos em massa (blast). Caixa de Entrada e Call Center NÃO consomem cota.">
+                                                  Disparos: <strong className="text-slate-200">{
+                                                    p.limits?.blasts_per_month === -1 ? '∞ /mês'
+                                                    : p.limits?.blasts_per_month === 0 ? '— (não inclui)'
+                                                    : `${Number(p.limits?.blasts_per_month ?? 0).toLocaleString('pt-BR')} /mês`
                                                 }</strong></span>
                                             </div>
                                             <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-white/5">
