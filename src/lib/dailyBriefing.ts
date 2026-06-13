@@ -27,21 +27,90 @@ interface CampaignRow {
   dailyBriefingLastRunAt: string | null;
 }
 
-const buildIntent = (c: CampaignRow): string => {
+/**
+ * Coleta sumário das últimas 24h: visitas, engajamentos, novos contatos.
+ * Vai como dado PRÉ-MASTIGADO no intent, dando ao manager pretexto pra
+ * drillar com as tools. Sem isso, briefings eram genéricos ("analise o dia")
+ * porque o LLM não sabia o que tinha mudado.
+ */
+async function fetchDailyDelta(supabaseAdmin: any, campaignId: string) {
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  try {
+    const [visitsR, engR, contactsR, blastsR] = await Promise.all([
+      supabaseAdmin.from('visits')
+        .select('id, bairro, realizada, votos', { count: 'exact', head: false })
+        .eq('campaignId', campaignId).gte('createdAt', since).limit(2000),
+      supabaseAdmin.from('engagement_actions')
+        .select('id, tipo, sentimento, "novosApoiadores", "contatosColetados"')
+        .eq('campaignId', campaignId).gte('createdAt', since).limit(1000),
+      supabaseAdmin.from('contacts')
+        .select('id, supportLevel, neighborhood', { count: 'exact', head: false })
+        .eq('campaignId', campaignId).gte('createdAt', since).limit(2000),
+      supabaseAdmin.from('whatsapp_blasts')
+        .select('id, sent, failed').eq('campaignId', campaignId).gte('createdAt', since).limit(50),
+    ]);
+    const visits = (visitsR.data ?? []) as any[];
+    const eng = (engR.data ?? []) as any[];
+    const contacts = (contactsR.data ?? []) as any[];
+    const blasts = (blastsR.data ?? []) as any[];
+
+    const visitsRealizadas = visits.filter(v => v.realizada).length;
+    const votosCaptados = visits.reduce((s, v) => s + (Number(v.votos) || 0), 0);
+    const topBairrosVisitas = Object.entries(
+      visits.reduce<Record<string, number>>((acc, v) => {
+        const b = String(v.bairro || '').trim(); if (b) acc[b] = (acc[b] || 0) + 1; return acc;
+      }, {})
+    ).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([b, n]) => `${b}(${n})`).join(', ');
+
+    const engPorTipo = eng.reduce<Record<string, number>>((acc, e) => {
+      const t = String(e.tipo || 'outro'); acc[t] = (acc[t] || 0) + 1; return acc;
+    }, {});
+    const novosApoiadoresEng = eng.reduce((s, e) => s + (Number(e.novosApoiadores) || 0), 0);
+
+    const novosApoiadoresCRM = contacts.filter((c: any) =>
+      c.supportLevel === 'apoiador' || c.supportLevel === 'multiplicador').length;
+
+    const blastsTotal = blasts.reduce((s, b) => s + (Number(b.sent) || 0), 0);
+    const blastsFalha = blasts.reduce((s, b) => s + (Number(b.failed) || 0), 0);
+
+    return {
+      hasData: visits.length + eng.length + contacts.length + blasts.length > 0,
+      summary:
+        `- Visitas registradas: ${visits.length} (realizadas: ${visitsRealizadas}, votos estimados: ${votosCaptados})` +
+        (topBairrosVisitas ? ` — top bairros: ${topBairrosVisitas}` : '') + '\n' +
+        `- Ações de campo: ${eng.length}` +
+        (Object.keys(engPorTipo).length ? ` — tipos: ${Object.entries(engPorTipo).map(([t, n]) => `${t}(${n})`).join(', ')}` : '') +
+        (novosApoiadoresEng > 0 ? ` — novos apoiadores reportados: ${novosApoiadoresEng}` : '') + '\n' +
+        `- Novos contatos no CRM: ${contacts.length}` +
+        (novosApoiadoresCRM > 0 ? ` (${novosApoiadoresCRM} classificados como apoiador/multiplicador)` : '') + '\n' +
+        (blasts.length > 0 ? `- WhatsApp blasts: ${blastsTotal} enviadas, ${blastsFalha} falhas\n` : ''),
+    };
+  } catch (e: any) {
+    console.warn('[DailyBriefing] fetchDailyDelta falhou:', e?.message);
+    return { hasData: false, summary: '' };
+  }
+}
+
+const buildIntent = (c: CampaignRow, delta: { hasData: boolean; summary: string }): string => {
   const local = [c.electionCity, c.electionState].filter(Boolean).join('/') || 'a região da campanha';
   return `BRIEFING DIÁRIO — ANÁLISE INTERNA (rotina automática 1x/dia).
 
-Analise o ESTADO ATUAL da operação da campanha de "${c.name || 'o candidato'}" em ${local} usando os dados REAIS da plataforma. Delegue aos especialistas para que cada um use suas ferramentas:
-- Comandante de Campo (call_field): use analyze_territorial_gap e get_team_activity — onde estamos parados? quais bairros sub-atendidos? quais líderes inativos?
-- CRM (call_crm): use get_conversion_funnel — onde o funil está travando? que segmento priorizar?
+Campanha de "${c.name || 'o candidato'}" em ${local}.
+
+${delta.hasData
+  ? `📊 ATIVIDADE DAS ÚLTIMAS 24H:\n${delta.summary}\n`
+  : `⚠️ NENHUMA atividade registrada nas últimas 24h.\n`}
+Use os dados acima como ponto de partida e delegue aos especialistas:
+- Comandante de Campo (call_field): use analyze_territorial_gap e get_team_activity — quais bairros sub-atendidos vs onde a equipe foi? quais líderes inativos?
+- CRM (call_crm): use get_conversion_funnel — onde o funil está travando? que segmento priorizar com os novos contatos?
 - Estrategista (call_strategist): consolide e use get_competitive_intel — qual a prioridade do dia e por quê?
 
-Com base nisso, no FINALIZE entregue:
-1. **Diagnóstico do dia** (3-5 bullets do que os dados mostram)
+No FINALIZE entregue:
+1. **Diagnóstico do dia** (3-5 bullets do que os dados mostram — compare com a memória RAG se houver briefing anterior)
 2. **Ações delegadas** (lista: quem faz / o quê / em qual bairro/segmento / métrica)
 3. **1 alerta** se algo estiver em risco (meta, inatividade, gap crítico)
 
-Publique os achados mais importantes no war room (call_strategist com 'publicar insight'). Seja eficiente: máximo 3 rodadas. Se não houver dados suficientes, finalize dizendo que faltam dados e o que cadastrar.`;
+Publique os achados mais importantes no war room (call_strategist com 'publicar insight'). Máximo 3 rodadas. Se não houver dados suficientes, finalize dizendo que faltam dados e o que cadastrar.`;
 };
 
 const runOnce = async (supabaseAdmin: any) => {
@@ -70,8 +139,9 @@ const runOnce = async (supabaseAdmin: any) => {
         .eq('id', c.id);
 
       try {
-        const result = await runManager({ supabaseAdmin, campaignId: c.id, userId: null, intent: buildIntent(c) });
-        console.log(`[DailyBriefing] OK ${c.id}: status=${result.status} cost=$${(result.totalCostCents / 100).toFixed(3)} iter=${result.iterations}`);
+        const delta = await fetchDailyDelta(supabaseAdmin, c.id);
+        const result = await runManager({ supabaseAdmin, campaignId: c.id, userId: null, intent: buildIntent(c, delta) });
+        console.log(`[DailyBriefing] OK ${c.id}: status=${result.status} cost=$${(result.totalCostCents / 100).toFixed(3)} iter=${result.iterations} hasData=${delta.hasData}`);
       } catch (runErr: any) {
         console.error(`[DailyBriefing] FALHA ${c.id}:`, runErr?.message || runErr);
       }
