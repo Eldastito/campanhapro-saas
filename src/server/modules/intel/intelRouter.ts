@@ -485,5 +485,137 @@ Responda APENAS um objeto JSON válido (sem markdown, sem preâmbulo).`;
     }
   });
 
+  /**
+   * POST /field-focus — Foco de Campo IA (#116).
+   *
+   * Pra responder a pergunta operacional do coordenador:
+   *   "Semana que vem, ONDE vou? COM QUE PAUTA? E onde EVITO?"
+   *
+   * Cruza heat de bairro + visitas + dias até eleição → IA prioriza
+   * 5-8 bairros com ação concreta, e marca os bairros a evitar.
+   * Custo controlado pelo enforcer (#115); resposta vai pro RAG (#110).
+   */
+  router.post('/field-focus', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    const userId = (req as any).user?.id;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+      // 1) Coleta os sinais brutos (queries baratas — sem nova IA)
+      const [{ data: contacts }, { data: cfg }, { data: visits }] = await Promise.all([
+        supabase.from('contacts')
+          .select('neighborhood, city, "supportLevel", "voteIntention", objection')
+          .eq('campaignId', campaignId)
+          .not('neighborhood', 'is', null).limit(20000),
+        supabase.from('campaign_configs')
+          .select('"electionDate"').eq('id', campaignId).maybeSingle(),
+        supabase.from('visits')
+          .select('bairro, realizada, votos').eq('campaignId', campaignId).limit(20000),
+      ]);
+
+      const electionDate = (cfg as any)?.electionDate ? new Date((cfg as any).electionDate) : null;
+      const daysToElection = electionDate ? Math.max(0, Math.ceil((electionDate.getTime() - Date.now()) / 86400000)) : null;
+
+      // 2) Agrega por bairro (mesma matemática do /neighborhood-heat — mas
+      //    enriquecida com visitas e top objection)
+      const buckets = new Map<string, any>();
+      for (const c of (contacts ?? [])) {
+        const bairro = String((c as any).neighborhood || '').trim();
+        if (!bairro) continue;
+        const municipio = String((c as any).city || '').trim();
+        const key = `${bairro}::${municipio}`;
+        let b = buckets.get(key);
+        if (!b) {
+          b = { bairro, municipio, total: 0, apoiadores: 0, multiplicadores: 0,
+                simpatizantes: 0, indecisos: 0, rejeitadores: 0, desconhecidos: 0,
+                visitasFeitas: 0, votosEstim: 0,
+                objections: new Map<string, number>(), intentions: new Map<string, number>() };
+          buckets.set(key, b);
+        }
+        switch ((c as any).supportLevel) {
+          case 'apoiador': b.apoiadores++; break;
+          case 'multiplicador': b.multiplicadores++; break;
+          case 'simpatizante': b.simpatizantes++; break;
+          case 'indeciso': b.indecisos++; break;
+          case 'rejeitador': b.rejeitadores++; break;
+          default: b.desconhecidos++;
+        }
+        b.total++;
+        const obj = String((c as any).objection || '').trim();
+        if (obj) b.objections.set(obj, (b.objections.get(obj) || 0) + 1);
+        const intent = String((c as any).voteIntention || '').trim();
+        if (intent) b.intentions.set(intent, (b.intentions.get(intent) || 0) + 1);
+      }
+      for (const v of (visits ?? [])) {
+        const bairro = String((v as any).bairro || '').trim();
+        if (!bairro) continue;
+        // visitas não trazem município; agrupa por bairro só
+        for (const [key, b] of buckets) {
+          if (b.bairro === bairro) {
+            if ((v as any).realizada) { b.visitasFeitas++; b.votosEstim += Number((v as any).votos || 0); }
+            break;
+          }
+        }
+      }
+
+      const ranked = Array.from(buckets.values()).map((b: any) => {
+        const classificados = b.total - b.desconhecidos;
+        const positivos = b.apoiadores + b.multiplicadores + b.simpatizantes * 0.5;
+        const score = classificados > 0 ? Math.round(((positivos - b.rejeitadores) / classificados) * 100) : 0;
+        const topObj = [...b.objections.entries()].sort((a: any, b2: any) => b2[1] - a[1])[0]?.[0] || null;
+        const topInt = [...b.intentions.entries()].sort((a: any, b2: any) => b2[1] - a[1])[0]?.[0] || null;
+        return { ...b, score, topObjection: topObj, topIntention: topInt, objections: undefined, intentions: undefined };
+      }).sort((a, b) => b.total - a.total).slice(0, 40); // top 40 por base
+
+      if (ranked.length === 0) {
+        return res.json({ recommendations: [], avoidance: [], summary: 'Sem dados suficientes por bairro ainda. Continue cadastrando contatos.' });
+      }
+
+      // 3) Monta o brief enxuto pra IA (não jogamos a base toda)
+      const linhas = ranked.map((b, i) =>
+        `${i+1}. ${b.bairro}${b.municipio ? '/' + b.municipio : ''} | base=${b.total} (${b.apoiadores}A + ${b.multiplicadores}M + ${b.simpatizantes}S vs ${b.rejeitadores}R + ${b.indecisos}I + ${b.desconhecidos}?) | score=${b.score} | visitas=${b.visitasFeitas} | votos≈${b.votosEstim}${b.topObjection ? ' | objeção_top="'+b.topObjection.slice(0,40)+'"' : ''}${b.topIntention ? ' | pauta_top="'+b.topIntention.slice(0,40)+'"' : ''}`
+      ).join('\n');
+
+      const system = `Você é o Estrategista de Campo. Sua tarefa: SEMANALMENTE recomendar onde a equipe deve atuar.
+
+PRINCÍPIOS:
+- Onde IR (recommendations): bairros com OPORTUNIDADE — base já existe + score positivo OU indecisos altos + objeção tratável.
+- Onde EVITAR (avoidance): bairros com score muito negativo (rejeição predominante) — gastar lá é desperdício.
+- Para cada recomendação, dê PAUTA específica (use objeção_top/pauta_top quando houver) e AÇÃO concreta (visita, mutirão, evento).
+- Considere DIAS ATÉ A ELEIÇÃO: ${daysToElection != null ? daysToElection + ' dias' : 'não informado'}. Quanto mais perto, mais foco em conversão de indecisos.
+
+NÃO INVENTE bairros — use apenas os listados.
+
+Retorne JSON estrito (sem markdown):
+{
+  "recommendations": [{"bairro":"X","municipio":"Y","priority":"alta|media|baixa","reason":"≤140 chars","pauta":"texto curto","action":"verbo + alvo concreto"}],
+  "avoidance": [{"bairro":"X","municipio":"Y","reason":"≤140 chars"}],
+  "summary": "1-2 frases pro coordenador no Dashboard"
+}
+Máximo 8 recommendations + 5 avoidance.`;
+
+      const ai = await callAgent(supabase, 'strategist', `Bairros disponíveis (top 40 por base de contatos):\n\n${linhas}\n\nFaça o Foco de Campo da próxima semana.`, {
+        campaignId, userId, systemInstruction: system, complexity: 'balanced', maxTokens: 2500,
+      });
+
+      let cleaned = ai.text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const sIdx = cleaned.indexOf('{'); const eIdx = cleaned.lastIndexOf('}');
+      if (sIdx >= 0 && eIdx > sIdx) cleaned = cleaned.slice(sIdx, eIdx + 1);
+      const parsed = JSON.parse(cleaned);
+
+      return res.json({
+        analyzedAt: new Date().toISOString(),
+        daysToElection,
+        recommendations: Array.isArray(parsed?.recommendations) ? parsed.recommendations.slice(0, 8) : [],
+        avoidance: Array.isArray(parsed?.avoidance) ? parsed.avoidance.slice(0, 5) : [],
+        summary: typeof parsed?.summary === 'string' ? parsed.summary.slice(0, 300) : '',
+      });
+    } catch (err: any) {
+      if (err instanceof BudgetExceededError) return res.status(429).json({ error: err.message, code: 'BUDGET_EXCEEDED' });
+      console.error('[intel] field-focus:', err);
+      return res.status(500).json({ error: err.message || 'failed' });
+    }
+  });
+
   return router;
 }

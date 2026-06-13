@@ -25,6 +25,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { askAdvisor } from '../services/agentsClientService';
 import AgendaPanel from '../components/agenda/AgendaPanel';
 import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
+import FieldFocusCard from '../components/dashboard/FieldFocusCard';
 
 const DashboardPage = () => {
   const { user, userType } = useAuth();
@@ -177,6 +178,9 @@ const DashboardPage = () => {
         isLoading={isAdvisorLoading}
         tips={advisorTips}
       />
+
+      {/* Foco de Campo IA (#116) — recomenda onde ir, onde evitar, qual pauta */}
+      <FieldFocusCard />
 
       {/* Social Media Insights - Fase 4 */}
       <Card className="no-print p-6 border-t-4 border-t-pink-500">
