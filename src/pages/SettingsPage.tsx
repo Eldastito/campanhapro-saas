@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Brain, AlertTriangle } from 'lucide-react';
 import AgendaPanel from '../components/agenda/AgendaPanel';
 import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
+import ExternalMemoryRefreshCard from '../components/dashboard/ExternalMemoryRefreshCard';
 
 const SettingsPage = () => {
     const { campaignDetails, updateCampaignDetails } = useSettings();
@@ -39,6 +40,9 @@ const SettingsPage = () => {
             <ProactiveMonitorSection />
 
             <DailyBriefingSection />
+
+            {/* Memória externa da IA (#56) — task admin 1x/dia, fica junto das outras de IA */}
+            <ExternalMemoryRefreshCard />
 
             <AIHealthSection />
 

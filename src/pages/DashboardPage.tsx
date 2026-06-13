@@ -27,7 +27,7 @@ import AgendaPanel from '../components/agenda/AgendaPanel';
 import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
 import FieldFocusCard from '../components/dashboard/FieldFocusCard';
 import PartyFieldQuickCard from '../components/party/PartyFieldQuickCard';
-import ExternalMemoryRefreshCard from '../components/dashboard/ExternalMemoryRefreshCard';
+// ExternalMemoryRefreshCard movido para SettingsPage (#56 era admin 1x/dia, não decisão diária do coord)
 
 const DashboardPage = () => {
   const { user, userType } = useAuth();
@@ -186,9 +186,6 @@ const DashboardPage = () => {
 
       {/* Foco de Campo IA (#116) — recomenda onde ir, onde evitar, qual pauta */}
       <FieldFocusCard />
-
-      {/* Memória externa fresca (#56) — abastece RAG c/ notícias do município + adversários */}
-      <ExternalMemoryRefreshCard />
 
       {/* Social Media Insights - Fase 4 */}
       <Card className="no-print p-6 border-t-4 border-t-pink-500">

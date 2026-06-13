@@ -30,7 +30,12 @@ const EngagementPage = () => {
     return (
         <div className="space-y-6">
             <div className="flex flex-wrap justify-between items-center gap-4">
-                <h2 className="text-2xl font-bold text-slate-200">Ações de Engajamento</h2>
+                <div>
+                    <h2 className="text-2xl font-bold text-slate-200">Ações de Campo (em massa)</h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                        Panfletagem, distribuição de material e eventos. Para cadastro nominal de eleitores, use <b>CRM</b>.
+                    </p>
+                </div>
                 <Button onClick={() => setIsModalOpen(true)}>Registrar Nova Ação</Button>
             </div>
             <Card>

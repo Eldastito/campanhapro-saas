@@ -9,7 +9,7 @@ import CompetitiveIntelPanel from '../components/intelligence/CompetitiveIntelPa
 import PlaybookPanel from '../components/intelligence/PlaybookPanel';
 import TseLookupCard from '../components/intelligence/TseLookupCard';
 
-const SUBTABS = ['Visão Geral', 'Concorrência', 'Argumentário', 'Fatores', 'Cenários', 'Relatórios', 'Base de Conhecimento'];
+const SUBTABS = ['Visão Geral', 'Concorrência', 'Argumentário', 'Fatores', 'Projeções', 'Relatórios', 'Base de Conhecimento'];
 
 const IntelligencePage: React.FC = () => {
   const [syncKey, setSyncKey] = React.useState(0);

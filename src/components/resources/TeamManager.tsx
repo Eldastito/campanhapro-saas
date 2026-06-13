@@ -215,8 +215,13 @@ const TeamManager: React.FC = () => {
 
     return (
     <Card>
-      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-        <h3 className="text-lg font-bold text-slate-300">Membros da Equipe</h3>
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-2">
+        <div>
+          <h3 className="text-lg font-bold text-slate-300">Cadastro da Equipe</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            CRUD de membros: contato, acesso e dados pessoais. Pra desempenho/ranking abra a aba <b>Equipes</b>.
+          </p>
+        </div>
         <div className="flex gap-2">
             <Button variant="secondary" onClick={handleCopyLink}>Copiar Link de Cadastro</Button>
             <Button onClick={openAddModal}>Adicionar Membro</Button>
