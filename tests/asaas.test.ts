@@ -84,14 +84,20 @@ describe('AsaasGateway', () => {
     assert.equal(body.externalReference, 'campaign-uuid');
   });
 
-  // TODO bit-rot: mock retornou null em vez do invoiceUrl esperado. Fluxo Asaas
-  // está provadamente funcionando em produção (validado manualmente). Provável
-  // dessincronização entre o mock e a implementação atual do AsaasGateway.
-  // Revisar antes de tocar billingService/asaasGateway.
-  test.skip('createSubscription maps PIX method and amount correctly', async () => {
+  test('createSubscription maps PIX method and amount correctly', async () => {
+    // O gateway hoje faz 3 chamadas para montar o resultado completo:
+    //   1) POST /subscriptions               → { id }
+    //   2) GET /subscriptions/:id/payments   → { data: [{ id, invoiceUrl }] }
+    //   3) GET /payments/:id/pixQrCode       → { encodedImage, payload }  (só PIX)
+    // O teste antigo só preparava 1 resposta — invoiceUrl ficava null e a
+    // assertion quebrava. Agora fornecemos as 3 e validamos a URL final.
     process.env.ASAAS_API_KEY = 'test-key';
     mockFetch();
-    responses = [{ status: 200, body: { id: 'sub_456', invoiceUrl: 'https://asaas.com/i/abc' } }];
+    responses = [
+      { status: 200, body: { id: 'sub_456' } },
+      { status: 200, body: { data: [{ id: 'pay_001', invoiceUrl: 'https://asaas.com/i/abc' }] } },
+      { status: 200, body: { encodedImage: 'base64-png', payload: '00020126…' } },
+    ];
 
     const g = new AsaasGateway();
     const result = await g.createSubscription({
@@ -106,6 +112,9 @@ describe('AsaasGateway', () => {
 
     assert.equal(result.providerSubscriptionId, 'sub_456');
     assert.equal(result.checkoutUrl, 'https://asaas.com/i/abc');
+    assert.equal(result.pixQrCode, 'base64-png');
+    assert.equal(result.pixCopyPaste, '00020126…');
+    // calls[0] = POST /subscriptions
     const body = JSON.parse(String(calls[0].init?.body));
     assert.equal(body.customer, 'cus_123');
     assert.equal(body.billingType, 'PIX');

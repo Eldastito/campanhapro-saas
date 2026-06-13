@@ -72,20 +72,15 @@ describe('Onboarding', () => {
     assert.match(res.body.error, /campaignName/);
   });
 
-  // TODO bit-rot: mock esperava 1 subscription criada, mas o store fica com 0.
-  // O fluxo /bootstrap funciona em produção (Alice/Ronald cadastrados via essa rota).
-  // Mock do Supabase provavelmente está dessincronizado com o insert atual.
-  // Revisar antes de tocar o onboardingRouter ou createMockSupabase.
-  test.skip('POST /bootstrap creates campaign + user + free subscription', async () => {
+  test('POST /bootstrap creates campaign + user + pending_payment config', async () => {
+    // Mudança de produto (#46 "Onboarding pago"): /bootstrap NÃO cria mais
+    // assinatura free automática. Cria a campanha + admin user e marca
+    // campaign_configs.status='pending_payment' — acesso só libera depois
+    // do pagamento do plano escolhido (webhook Asaas seta status='active').
     const sb = createMockSupabase({
       users: [],
       campaigns: [],
-      plans: [{
-        id: 'free', name: 'Gratuito', monthlyCents: 0, active: true,
-        features: ['dashboard', 'crm'],
-        limits: { contacts: 100, ai_budget_cents: 0, team_users: 2, messages_per_month: 0 },
-      }],
-      subscriptions: [],
+      campaign_configs: [],
     });
     const app = appWith(USER_A, sb);
     const res = await req(app, 'POST', '/api/v1/onboarding/bootstrap', {
@@ -108,9 +103,12 @@ describe('Onboarding', () => {
     assert.equal(users[0].type, 'Admin');
     assert.equal(users[0].campaignId, campaigns[0].id);
 
-    const subs = (sb as any)._store.get('subscriptions');
-    assert.equal(subs.length, 1);
-    assert.equal(subs[0].planId, 'free');
+    // Sem subscription criada — fluxo agora é pending_payment até o Asaas
+    // confirmar via webhook.
+    const configs = (sb as any)._store.get('campaign_configs');
+    assert.equal(configs.length, 1);
+    assert.equal(configs[0].status, 'pending_payment');
+    assert.equal(configs[0].id, campaigns[0].id);
   });
 
   test('POST /bootstrap is idempotent — second call returns alreadyBootstrapped', async () => {
