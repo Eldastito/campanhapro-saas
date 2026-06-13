@@ -244,5 +244,122 @@ export function createCallCenterRouter(supabase: SupabaseClient): Router {
     return res.json({ ok: true });
   });
 
+  // ---------- TELEMARKETING ATIVO (F4 — listas do CRM → operador → resultado) ----------
+
+  // Conta os alvos por status (pra barra de progresso da campanha ativa).
+  async function targetCounts(activeCampaignId: string) {
+    const statuses = ['pendente', 'em_andamento', 'concluido', 'sem_resposta', 'retorno'] as const;
+    const out: Record<string, number> = { total: 0 };
+    for (const s of statuses) {
+      const { count } = await supabase.from('active_campaign_targets')
+        .select('id', { count: 'exact', head: true })
+        .eq('activeCampaignId', activeCampaignId).eq('status', s);
+      out[s] = count || 0; out.total += count || 0;
+    }
+    return out;
+  }
+
+  // Criar campanha ativa + semear alvos a partir do CRM.
+  // body: { name, script?, areaId?, contactIds?[] } — sem contactIds, semeia
+  // TODOS os contatos da campanha que têm telefone (cap 2000).
+  router.post('/active', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await canManageAreas(userId))) return res.status(403).json({ error: 'sem_permissao' });
+    const { name, script, areaId, contactIds } = req.body || {};
+    if (!name?.trim()) return res.status(400).json({ error: 'name_obrigatorio' });
+
+    const { data: camp, error: e1 } = await supabase.from('active_campaigns').insert({
+      campaignId, name: String(name).trim().slice(0, 120),
+      script: script?.toString().slice(0, 4000) || null,
+      areaId: areaId || null, createdBy: userId, status: 'ativa',
+    }).select('*').single();
+    if (e1) return res.status(500).json({ error: e1.message });
+
+    // Semeia os alvos a partir dos contatos.
+    let q = supabase.from('contacts').select('id, name, phone').eq('campaignId', campaignId).not('phone', 'is', null);
+    if (Array.isArray(contactIds) && contactIds.length) q = q.in('id', contactIds.slice(0, 2000));
+    const { data: contacts } = await q.limit(2000);
+    const rows = (contacts || [])
+      .filter((c: any) => (c.phone || '').toString().replace(/\D+/g, '').length >= 10)
+      .map((c: any) => ({
+        activeCampaignId: (camp as any).id, campaignId,
+        contactId: c.id, phone: String(c.phone), name: c.name || null, status: 'pendente',
+      }));
+    if (rows.length) await supabase.from('active_campaign_targets').insert(rows);
+
+    return res.json({ campaign: camp, seeded: rows.length });
+  });
+
+  // Lista campanhas ativas + progresso.
+  router.get('/active', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data } = await supabase.from('active_campaigns')
+      .select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false });
+    const campaigns = await Promise.all((data || []).map(async (c: any) => ({
+      ...c, counts: await targetCounts(c.id),
+    })));
+    return res.json({ campaigns });
+  });
+
+  // Pausar / retomar / concluir.
+  router.post('/active/:id/status', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await canManageAreas(userId))) return res.status(403).json({ error: 'sem_permissao' });
+    const status = ['ativa', 'pausada', 'concluida'].includes(req.body?.status) ? req.body.status : null;
+    if (!status) return res.status(400).json({ error: 'status_invalido' });
+    await supabase.from('active_campaigns').update({ status, updatedAt: new Date().toISOString() })
+      .eq('id', req.params.id).eq('campaignId', campaignId);
+    return res.json({ ok: true });
+  });
+
+  // Operador puxa o PRÓXIMO alvo pendente (claim otimista p/ não dar o mesmo a dois).
+  router.post('/active/:id/next', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: camp } = await supabase.from('active_campaigns')
+      .select('id, status, script, name').eq('id', req.params.id).eq('campaignId', campaignId).maybeSingle();
+    if (!camp) return res.status(404).json({ error: 'not_found' });
+    if ((camp as any).status !== 'ativa') return res.status(409).json({ error: 'campanha_nao_ativa' });
+
+    // Tenta reservar um pendente. Algumas tentativas pra absorver corrida entre
+    // operadores (o WHERE status='pendente' no update garante exclusão mútua).
+    for (let i = 0; i < 5; i++) {
+      const { data: cand } = await supabase.from('active_campaign_targets')
+        .select('id, attempts').eq('activeCampaignId', req.params.id).eq('status', 'pendente')
+        .order('createdAt', { ascending: true }).limit(1).maybeSingle();
+      if (!cand) break;
+      const { data: claimed } = await supabase.from('active_campaign_targets')
+        .update({ status: 'em_andamento', assignedUserId: userId, attempts: ((cand as any).attempts || 0) + 1, lastAttemptAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+        .eq('id', (cand as any).id).eq('status', 'pendente')
+        .select('*').maybeSingle();
+      if (claimed) {
+        return res.json({ target: claimed, script: (camp as any).script || '', campaignName: (camp as any).name });
+      }
+    }
+    return res.json({ target: null, done: true });
+  });
+
+  // Operador registra o resultado e libera o alvo.
+  router.post('/active/targets/:id/result', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { status, disposition, notes } = req.body || {};
+    const finalStatus = ['concluido', 'sem_resposta', 'retorno', 'pendente'].includes(status) ? status : 'concluido';
+    const { data, error } = await supabase.from('active_campaign_targets').update({
+      status: finalStatus,
+      disposition: disposition?.toString().slice(0, 60) || null,
+      notes: notes?.toString().slice(0, 1000) || null,
+      // 'retorno'/'pendente' devolvem o alvo pra fila (tira o dono);
+      // 'concluido'/'sem_resposta' encerram com o operador como autor.
+      assignedUserId: (finalStatus === 'pendente') ? null : userId,
+      updatedAt: new Date().toISOString(),
+    }).eq('id', req.params.id).eq('campaignId', campaignId).select('*').maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ target: data });
+  });
+
   return router;
 }

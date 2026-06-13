@@ -40,6 +40,7 @@ const waitTime = (iso?: string | null) => {
 const CallCenterPage: React.FC = () => {
   const { user, logout } = useAuth();
   const isLeader = user?.type === 'Líder Call Center';
+  const [mode, setMode] = React.useState<'receptivo' | 'ativo'>('receptivo');
   const [waiting, setWaiting] = React.useState<Convo[]>([]);
   const [mine, setMine] = React.useState<Convo[]>([]);
   const [selected, setSelected] = React.useState<Convo | null>(null);
@@ -168,7 +169,12 @@ const CallCenterPage: React.FC = () => {
           <p className="text-xs text-slate-400 truncate">{user?.name} · {user?.type}</p>
         </div>
         <div className="flex gap-2">
-          {isLeader && (
+          {/* Receptivo (entra eleitor) × Ativo (operador liga a lista) */}
+          <div className="flex rounded-xl bg-white/5 p-0.5">
+            <button onClick={() => setMode('receptivo')} className={`px-3 py-1.5 rounded-lg text-sm font-bold ${mode === 'receptivo' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Receptivo</button>
+            <button onClick={() => setMode('ativo')} className={`px-3 py-1.5 rounded-lg text-sm font-bold ${mode === 'ativo' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>📞 Ativo</button>
+          </div>
+          {isLeader && mode === 'receptivo' && (
             <button onClick={() => setTeamOpen(!teamOpen)} className={`px-3 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${teamOpen ? 'bg-indigo-600 text-white' : 'bg-white/5 text-slate-300'}`}>
               <Users className="w-4 h-4" /> Equipe
             </button>
@@ -203,6 +209,9 @@ const CallCenterPage: React.FC = () => {
         </div>
       )}
 
+      {mode === 'ativo' && <ActiveTelemarketingPanel isLeader={isLeader} flash={flash} />}
+
+      {mode === 'receptivo' && (
       <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
         {/* Coluna fila + meus */}
         <div className="space-y-4">
@@ -304,6 +313,177 @@ const CallCenterPage: React.FC = () => {
           )}
         </div>
       </div>
+      )}
+    </div>
+  );
+};
+
+// ───────────────────────── TELEMARKETING ATIVO (F4) ─────────────────────────
+interface ActiveCampaign {
+  id: string; name: string; script: string | null; status: string;
+  counts: { total: number; pendente: number; concluido: number; sem_resposta: number; em_andamento: number; retorno: number };
+}
+interface ActiveTarget {
+  id: string; phone: string | null; name: string | null; attempts: number; status: string;
+}
+const DISPOSITIONS = ['Interessado', 'Vai votar', 'Indeciso', 'Recusou', 'Agendar retorno', 'Número errado'];
+
+const ActiveTelemarketingPanel: React.FC<{ isLeader: boolean; flash: (t: string) => void }> = ({ isLeader, flash }) => {
+  const [campaigns, setCampaigns] = React.useState<ActiveCampaign[]>([]);
+  const [selected, setSelected] = React.useState<ActiveCampaign | null>(null);
+  const [target, setTarget] = React.useState<ActiveTarget | null>(null);
+  const [script, setScript] = React.useState('');
+  const [disposition, setDisposition] = React.useState('');
+  const [notes, setNotes] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const [newName, setNewName] = React.useState('');
+  const [newScript, setNewScript] = React.useState('');
+
+  const load = React.useCallback(async () => {
+    try {
+      const r = await authedFetch('/api/v1/callcenter/active');
+      if (r.ok) { const j = await r.json(); setCampaigns(j.campaigns || []); }
+    } catch { /* */ }
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+
+  const createCampaign = async () => {
+    if (!newName.trim()) return;
+    setBusy(true);
+    try {
+      const r = await authedFetch('/api/v1/callcenter/active', {
+        method: 'POST', body: JSON.stringify({ name: newName.trim(), script: newScript.trim() || undefined }),
+      });
+      if (r.ok) { const j = await r.json(); flash(`✅ Campanha criada — ${j.seeded} contatos na fila.`); setNewName(''); setNewScript(''); setCreating(false); await load(); }
+      else { const j = await r.json().catch(() => ({})); flash(`⚠️ ${j.error || 'Falha ao criar.'}`); }
+    } finally { setBusy(false); }
+  };
+
+  const pullNext = async (camp: ActiveCampaign) => {
+    setBusy(true); setTarget(null); setDisposition(''); setNotes('');
+    try {
+      const r = await authedFetch(`/api/v1/callcenter/active/${camp.id}/next`, { method: 'POST' });
+      const j = await r.json();
+      if (r.ok && j.target) { setTarget(j.target); setScript(j.script || camp.script || ''); }
+      else if (j.done) { flash('🎉 Lista concluída — sem contatos pendentes.'); await load(); }
+      else flash(`⚠️ ${j.error || 'Sem contato disponível.'}`);
+    } catch { flash('Erro de conexão.'); } finally { setBusy(false); }
+  };
+
+  const saveResult = async (status: 'concluido' | 'sem_resposta' | 'retorno') => {
+    if (!target || !selected) return;
+    setBusy(true);
+    try {
+      await authedFetch(`/api/v1/callcenter/active/targets/${target.id}/result`, {
+        method: 'POST', body: JSON.stringify({ status, disposition: disposition || undefined, notes: notes || undefined }),
+      });
+      setTarget(null);
+      await pullNext(selected); // já puxa o próximo
+    } finally { setBusy(false); }
+  };
+
+  const waLink = (phone: string | null) => phone ? `https://wa.me/${phone.replace(/\D+/g, '')}` : '#';
+  const pct = (c: ActiveCampaign) => c.counts.total ? Math.round((c.counts.concluido + c.counts.sem_resposta) / c.counts.total * 100) : 0;
+
+  // Detalhe de uma campanha selecionada (área de trabalho do operador)
+  if (selected) {
+    return (
+      <div className="bg-[#1c2128] border border-white/5 rounded-3xl p-4 sm:p-6 max-w-2xl mx-auto">
+        <button onClick={() => { setSelected(null); setTarget(null); }} className="text-xs text-slate-400 hover:text-white mb-3">← Voltar às campanhas</button>
+        <h2 className="text-lg font-black mb-1">{selected.name}</h2>
+        <p className="text-xs text-slate-400 mb-4">
+          {selected.counts.pendente} pendentes · {selected.counts.concluido} concluídos · {selected.counts.sem_resposta} sem resposta · {selected.counts.retorno} retorno
+        </p>
+
+        {!target ? (
+          <button onClick={() => pullNext(selected)} disabled={busy || selected.counts.pendente === 0}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-2xl px-4 py-3 font-bold flex items-center justify-center gap-2">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {selected.counts.pendente === 0 ? 'Sem contatos pendentes' : 'Próximo contato'}
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <div className="bg-slate-950/60 rounded-2xl p-4">
+              <p className="text-lg font-black">{target.name || 'Contato'}</p>
+              <p className="text-sm text-slate-300">📱 {target.phone}{target.attempts > 1 ? ` · tentativa ${target.attempts}` : ''}</p>
+              <a href={waLink(target.phone)} target="_blank" rel="noreferrer"
+                className="inline-flex items-center gap-2 mt-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 text-sm font-bold">
+                <MessageCircle className="w-4 h-4" /> Abrir no WhatsApp
+              </a>
+            </div>
+
+            {script && (
+              <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 mb-1">📋 Script</p>
+                <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">{script}</p>
+              </div>
+            )}
+
+            <div>
+              <p className="text-xs font-bold text-slate-400 mb-1.5">Resultado</p>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {DISPOSITIONS.map((d) => (
+                  <button key={d} onClick={() => setDisposition(d)}
+                    className={`text-xs px-2.5 py-1 rounded-full border ${disposition === d ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white/5 border-white/10 text-slate-300'}`}>{d}</button>
+                ))}
+              </div>
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Observações (opcional)"
+                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm mb-2" />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <button onClick={() => saveResult('concluido')} disabled={busy}
+                className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 rounded-xl px-2 py-2.5 text-sm font-bold flex items-center justify-center gap-1"><CheckCircle2 className="w-4 h-4" /> Concluir</button>
+              <button onClick={() => saveResult('sem_resposta')} disabled={busy}
+                className="bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl px-2 py-2.5 text-sm font-bold">Sem resposta</button>
+              <button onClick={() => saveResult('retorno')} disabled={busy}
+                className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 rounded-xl px-2 py-2.5 text-sm font-bold flex items-center justify-center gap-1"><RotateCcw className="w-4 h-4" /> Retorno</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Lista de campanhas + criar (líder)
+  return (
+    <div className="max-w-2xl mx-auto space-y-4">
+      {isLeader && (
+        <div className="bg-[#1c2128] border border-white/5 rounded-3xl p-4">
+          {!creating ? (
+            <button onClick={() => setCreating(true)} className="w-full text-sm font-bold text-indigo-300 flex items-center justify-center gap-2 py-1"><Plus className="w-4 h-4" /> Nova campanha ativa</button>
+          ) : (
+            <div className="space-y-2">
+              <p className="font-bold text-sm">Nova campanha de telemarketing</p>
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nome (ex.: Pesquisa zona norte)"
+                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" />
+              <textarea value={newScript} onChange={(e) => setNewScript(e.target.value)} rows={3} placeholder="Script que o operador vai seguir"
+                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm" />
+              <p className="text-[11px] text-slate-500">A lista é semeada automaticamente com os contatos do CRM que têm telefone.</p>
+              <div className="flex gap-2">
+                <button onClick={createCampaign} disabled={!newName.trim() || busy} className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2 font-bold text-sm">{busy ? 'Criando…' : 'Criar'}</button>
+                <button onClick={() => setCreating(false)} className="bg-white/5 rounded-xl px-4 py-2 text-sm">Cancelar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {campaigns.map((c) => (
+        <button key={c.id} onClick={() => setSelected(c)}
+          className="w-full text-left bg-[#1c2128] border border-white/5 hover:border-indigo-500/40 rounded-3xl p-4 transition-colors">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="font-bold">{c.name}</span>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.status === 'ativa' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700 text-slate-400'}`}>{c.status}</span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-1.5">
+            <div className="h-full bg-indigo-500" style={{ width: `${pct(c)}%` }} />
+          </div>
+          <p className="text-[11px] text-slate-400">{c.counts.pendente} pendentes · {c.counts.concluido + c.counts.sem_resposta}/{c.counts.total} trabalhados ({pct(c)}%)</p>
+        </button>
+      ))}
+      {campaigns.length === 0 && <p className="text-sm text-slate-500 text-center py-8">Nenhuma campanha ativa.{isLeader ? ' Crie uma acima.' : ' Aguarde o líder criar uma lista.'}</p>}
     </div>
   );
 };
