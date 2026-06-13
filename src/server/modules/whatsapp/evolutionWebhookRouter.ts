@@ -22,6 +22,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { audit } from '../observability/auditLogger';
 import { handleInboundForBot } from '../../../lib/voterBot';
+import { broadcastCallCenter } from '../callcenter/callCenterRouter';
 
 interface RawRequest extends Request {
   rawBody?: Buffer;
@@ -229,7 +230,7 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             ? rawPushName
             : null;
 
-          await ingestMessage(supabaseAdmin, {
+          const ingested = await ingestMessage(supabaseAdmin, {
             campaignId,
             whatsappInstanceId: inst.id,
             externalId,
@@ -239,6 +240,12 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             direction,
             pushName,
           });
+
+          // Tempo real: avisa a Caixa de Entrada/painel do operador que entrou
+          // mensagem nova — assim a tela atualiza sozinha (sem precisar dar F5).
+          if (ingested?.isNew) {
+            broadcastCallCenter(campaignId, 'new_message', { conversationId: ingested.conversationId });
+          }
 
           // Bot ao vivo: responde mensagens INBOUND de eleitores (nunca grupos,
           // nunca as próprias mensagens). Fire-and-forget — não trava o webhook.
@@ -288,7 +295,7 @@ async function ingestMessage(
     direction: 'inbound' | 'outbound';
     pushName: string | null;
   },
-) {
+): Promise<{ conversationId: string; isNew: boolean } | null> {
   const fallbackName = `WhatsApp ${params.externalId}`;
   // Try to match existing contact by phone; auto-create if missing
   const { data: existing } = await supabase
@@ -342,30 +349,31 @@ async function ingestMessage(
     .select('id')
     .single();
 
-  if (convoRow?.id) {
-    // Dedup: if the same provider message id was already recorded
-    // (e.g. outbound sent via /channels/send already inserted it),
-    // skip to avoid duplicates.
-    const { data: dup } = await supabase
-      .from('channel_messages')
-      .select('id')
-      .eq('conversationId', convoRow.id)
-      .eq('providerMessageId', params.providerMessageId)
-      .maybeSingle();
-    if (dup) return;
+  if (!convoRow?.id) return null;
 
-    await supabase.from('channel_messages').insert({
-      conversationId: convoRow.id,
-      campaignId: params.campaignId,
-      direction: params.direction,
-      channel: 'whatsapp',
-      provider: 'evolution',
-      whatsappInstanceId: params.whatsappInstanceId,
-      providerMessageId: params.providerMessageId,
-      body: params.text,
-      createdAt: now,
-    });
-  }
+  // Dedup: if the same provider message id was already recorded
+  // (e.g. outbound sent via /channels/send already inserted it),
+  // skip to avoid duplicates.
+  const { data: dup } = await supabase
+    .from('channel_messages')
+    .select('id')
+    .eq('conversationId', convoRow.id)
+    .eq('providerMessageId', params.providerMessageId)
+    .maybeSingle();
+  if (dup) return { conversationId: convoRow.id, isNew: false };
+
+  await supabase.from('channel_messages').insert({
+    conversationId: convoRow.id,
+    campaignId: params.campaignId,
+    direction: params.direction,
+    channel: 'whatsapp',
+    provider: 'evolution',
+    whatsappInstanceId: params.whatsappInstanceId,
+    providerMessageId: params.providerMessageId,
+    body: params.text,
+    createdAt: now,
+  });
+  return { conversationId: convoRow.id, isNew: true };
 }
 
 function isPlaceholderName(name: unknown): boolean {

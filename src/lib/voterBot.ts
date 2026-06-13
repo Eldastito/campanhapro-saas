@@ -124,6 +124,11 @@ async function recordOutbound(supabase: SupabaseClient, p: VoterBotParams, body:
     // Bot respondendo → estágio 'ia_atendendo' (sai do novo_lead, entra no funil do call center).
     await supabase.from('channel_conversations').update({ stage: 'ia_atendendo' })
       .eq('id', convo.id).eq('stage', 'novo_lead').then(() => {}, () => {});
+    // Tempo real: a resposta da IA aparece na Caixa de Entrada sem dar F5.
+    try {
+      const { broadcastCallCenter } = await import('../server/modules/callcenter/callCenterRouter');
+      broadcastCallCenter(p.campaignId, 'new_message', { conversationId: convo.id });
+    } catch { /* best-effort */ }
   } catch (e: any) {
     console.error('[voterBot] recordOutbound:', e?.message || e);
   }

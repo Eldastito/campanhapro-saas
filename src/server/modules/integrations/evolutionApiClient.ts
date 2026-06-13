@@ -103,6 +103,42 @@ async function call<T = unknown>(
 }
 
 /**
+ * Faz a chamada tentando cada chave na ordem dada, pulando para a próxima
+ * APENAS em falha de autenticação (401/403/"not authorized"). Erros não-auth
+ * (400/404/500) não trocam de chave — não adianta.
+ *
+ * Ordem usada nas operações por-instância (send/status/connect): o TOKEN DA
+ * INSTÂNCIA primeiro (esquema do exaforge, comprovado: é ele que autoriza as
+ * operações daquela instância no Evolution GO), e a GLOBAL key como rede de
+ * segurança caso o token salvo no banco esteja defasado. Antes priorizávamos a
+ * global, e ela retornava 401 "not authorized" → o /send/text falhava e o bot
+ * nunca entregava a resposta.
+ */
+async function callWithKeys<T = unknown>(
+  method: 'GET' | 'POST' | 'DELETE' | 'PUT',
+  path: string,
+  body: unknown | undefined,
+  keys: Array<string | undefined>,
+  instanceName?: string,
+): Promise<T> {
+  const tried = new Set<string>();
+  let lastErr: unknown;
+  for (const k of keys) {
+    if (!k || tried.has(k)) continue;
+    tried.add(k);
+    try {
+      return await call<T>(method, path, body, k, instanceName);
+    } catch (e) {
+      lastErr = e;
+      const msg = String((e as Error)?.message || '');
+      const authish = /_(401|403)[:_]|not authorized|unauthorized/i.test(msg);
+      if (!authish) throw e; // erro não-auth → trocar a chave não resolve
+    }
+  }
+  throw lastErr ?? new Error('evolution_no_valid_key');
+}
+
+/**
  * Build the per-instance webhook URL we hand to Evolution. The optional
  * shared secret is appended as a query string param because Evolution GO
  * delivers webhooks to whatever URL we register and does not let us inject
@@ -259,8 +295,7 @@ export async function getStatus(
   apiKey: string,
 ): Promise<EvolutionStatus | 'unknown'> {
   try {
-    const token = EVOLUTION_GLOBAL_API_KEY || apiKey;
-    const result = await call<any>('GET', '/instance/status', undefined, token, instanceName);
+    const result = await callWithKeys<any>('GET', '/instance/status', undefined, [apiKey, EVOLUTION_GLOBAL_API_KEY], instanceName);
     const d = result?.data ?? result ?? {};
     // Evolution GO devolve PascalCase: { Connected: bool, LoggedIn: bool, Name }.
     // Toleramos também minúsculas/state de outras versões.
@@ -286,8 +321,8 @@ export async function getStatus(
  * Send a text message via this instance.
  * Evolution GO (formato do exaforgeStudio, comprovado): POST /send/text com
  * body { number, text, delay } e a instância no header `instance`.
- * Prioriza a GLOBAL key do ambiente (fonte da verdade no deploy) sobre a key
- * salva no banco — evita um token antigo/errado vencer.
+ * Usa o TOKEN DA INSTÂNCIA primeiro (é ele que autoriza no GO) e cai para a
+ * GLOBAL key só se o token salvo estiver defasado (callWithKeys).
  */
 export async function sendText(
   instanceName: string,
@@ -295,12 +330,11 @@ export async function sendText(
   to: string,
   text: string,
 ): Promise<EvolutionSendResult> {
-  const token = EVOLUTION_GLOBAL_API_KEY || apiKey;
-  const result = await call<any>(
+  const result = await callWithKeys<any>(
     'POST',
     '/send/text',
     { number: to, text, delay: 1200 },
-    token,
+    [apiKey, EVOLUTION_GLOBAL_API_KEY],
     instanceName,
   );
   const messageId =
@@ -321,18 +355,16 @@ export async function sendText(
  */
 export async function setWebhook(instanceName: string, apiKey: string): Promise<void> {
   if (!EVOLUTION_WEBHOOK_URL) throw new Error('evolution_webhook_url_not_configured');
-  // Chave global do ambiente é a fonte da verdade (esquema do exaforge): a
-  // instância é identificada pelo header `instance`, então o token salvo no
-  // banco pode estar defasado sem quebrar o registro do webhook.
-  const token = EVOLUTION_GLOBAL_API_KEY || apiKey;
-  await call(
+  // Token da instância primeiro (autoriza no GO); GLOBAL como fallback se o
+  // salvo estiver defasado. Antes priorizávamos a global e ela dava 401.
+  await callWithKeys(
     'POST',
     '/instance/connect',
     {
       webhookUrl: buildWebhookUrl(instanceName),
       subscribe: SUBSCRIBED_EVENTS,
     },
-    token,
+    [apiKey, EVOLUTION_GLOBAL_API_KEY],
     instanceName,
   );
 }

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { authedFetch } from '../lib/authedFetch';
+import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import {
     Inbox as InboxIcon, RefreshCw, User, Clock,
@@ -63,6 +64,10 @@ const InboxPage: React.FC = () => {
     const [conversations, setConversations] = React.useState<Conversation[]>([]);
     const [messages, setMessages] = React.useState<Message[]>([]);
     const [selectedId, setSelectedId] = React.useState<string | null>(null);
+    // Espelha selectedId num ref p/ o handler de Broadcast ler a seleção atual
+    // sem precisar re-assinar o canal a cada troca de conversa.
+    const selectedIdRef = React.useRef<string | null>(null);
+    React.useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
     const [input, setInput] = React.useState('');
     const [sending, setSending] = React.useState(false);
     const [suggesting, setSuggesting] = React.useState(false);
@@ -136,6 +141,23 @@ const InboxPage: React.FC = () => {
         fetchMessages(selectedId);
         setSummary(null);
     }, [selectedId, fetchMessages]);
+
+    // Tempo real: mensagens novas (eleitor OU resposta da IA) chegam por
+    // Broadcast no canal callcenter-<campaignId> — o webhook/bot dispara o
+    // evento 'new_message'. Assim a Caixa de Entrada atualiza sozinha, sem F5.
+    React.useEffect(() => {
+        if (!user?.campaignId) return;
+        const ch = supabase.channel(`callcenter-${user.campaignId}`)
+            .on('broadcast', { event: 'queue_changed' }, () => fetchConversations())
+            .on('broadcast', { event: 'new_message' }, (p: any) => {
+                fetchConversations();
+                const cid = p?.payload?.conversationId;
+                if (cid && cid === selectedIdRef.current) fetchMessages(cid);
+            })
+            .subscribe();
+        const safety = setInterval(fetchConversations, 60_000); // rede de segurança
+        return () => { supabase.removeChannel(ch); clearInterval(safety); };
+    }, [user?.campaignId, fetchConversations, fetchMessages]);
 
     React.useEffect(() => {
         if (scrollRef.current) {
