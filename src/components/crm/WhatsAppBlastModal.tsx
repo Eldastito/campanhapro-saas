@@ -91,8 +91,9 @@ export const WhatsAppBlastModal: React.FC<WhatsAppBlastModalProps> = ({
   };
 
   const estimatedMinutes = React.useMemo(() => {
+    // Throttle anti-queima: 5-15s aleatório por envio → ~10s médio.
     const count = filterAll ? totalContactsAll : (filterClass.length ? totalContactsAll : 0);
-    return Math.ceil((count * 2.5) / 60);
+    return Math.ceil((count * 10) / 60);
   }, [filterAll, filterClass, totalContactsAll]);
 
   const canStart = selectedInstance && title.trim() && message.trim() && (filterAll || filterClass.length > 0);
@@ -291,11 +292,14 @@ export const WhatsAppBlastModal: React.FC<WhatsAppBlastModalProps> = ({
         {/* Step: confirm */}
         {step === 'confirm' && (
           <div className="space-y-4">
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
-              <p className="text-sm font-semibold text-amber-300 mb-1">Confirme antes de enviar</p>
-              <p className="text-xs text-amber-200/70">
-                Esta ação enviará mensagens reais pelo WhatsApp. Verifique os detalhes abaixo.
-              </p>
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4">
+              <p className="text-sm font-bold text-rose-300 mb-2">🛑 Risco de banimento do chip — leia antes</p>
+              <ul className="text-[11px] text-rose-200/80 space-y-1 list-disc pl-4">
+                <li><b>Meta bane chips</b> que disparam pra contatos que não te escreveram antes. Risco é REAL.</li>
+                <li>Para mitigar, o sistema espalha os envios em <b>5–15s aleatórios</b> entre cada msg (não dá pra disparar tudo de uma vez).</li>
+                <li>Adicionamos automaticamente <b>"Pra parar de receber: responda SAIR"</b> no rodapé da sua mensagem (LGPD + reduz denúncia).</li>
+                <li>Quanto MAIS contatos nunca te escreveram, MAIOR o risco. Recomendado: começar pequeno (50–100) e ver se chegam respostas.</li>
+              </ul>
             </div>
 
             <div className="space-y-2 text-sm">
@@ -314,9 +318,12 @@ export const WhatsAppBlastModal: React.FC<WhatsAppBlastModalProps> = ({
             </div>
 
             <div className="bg-white/[0.03] rounded-xl p-3 border border-white/5">
-              <p className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wider">Prévia da mensagem</p>
+              <p className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wider">Prévia (como o eleitor vai ver)</p>
               <p className="text-sm text-gray-300 whitespace-pre-wrap">
                 {message.replace(/\{\{nome\}\}/gi, 'João Silva').replace(/\{\{bairro\}\}/gi, 'Centro')}
+                {!/sair|stop|cancelar|descadastr/i.test(message) && (
+                  <span className="text-amber-300/80 italic">{'\n\n_Pra parar de receber: responda SAIR._'}</span>
+                )}
               </p>
             </div>
 

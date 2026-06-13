@@ -508,16 +508,27 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
       ;(async () => {
         let sent = 0;
         let failed = 0;
-        const DELAY_MS = 2500; // 2.5s between sends ≈ 24 msgs/min ≈ 200/day per number
+        // Throttle ANTI-QUEIMA-DE-CHIP: intervalo ALEATÓRIO entre envios
+        // (5–15s). Padrão humano. WhatsApp/Meta detecta ritmo de bot quando
+        // cadência é fixa → ban temporário ou permanente do número. Em volume
+        // baixo (50 msgs) levam ~10min; em volume alto (500 msgs) ~80min —
+        // muito mais seguro que disparo concentrado.
+        const randDelay = () => 5000 + Math.floor(Math.random() * 10000);
+
+        // Rodapé de OPT-OUT obrigatório (LGPD + reduz denúncia de spam, que é
+        // o maior gatilho de banimento). Não duplica se o admin já incluiu.
+        const OPT_OUT = '\n\n_Pra parar de receber: responda SAIR._';
+        const ensureOptOut = (t: string) =>
+          /sair|stop|cancelar|descadastr/i.test(t) ? t : t + OPT_OUT;
 
         for (const contact of eligible) {
           try {
             const phone = String(contact.phone).replace(/\D/g, '');
-            const personalised = message
+            const personalised = ensureOptOut(message
               .replace(/\{\{name\}\}/gi, contact.name ?? '')
               .replace(/\{\{nome\}\}/gi, contact.name ?? '')
               .replace(/\{\{neighborhood\}\}/gi, contact.neighborhood ?? '')
-              .replace(/\{\{bairro\}\}/gi, contact.neighborhood ?? '');
+              .replace(/\{\{bairro\}\}/gi, contact.neighborhood ?? ''));
 
             await sendText(inst.instanceName, inst.apiKey, phone, personalised);
             sent++;
@@ -534,7 +545,7 @@ export function createWhatsappRouter(supabaseAdmin: SupabaseClient) {
           }
 
           if (sent + failed < eligible.length) {
-            await new Promise(r => setTimeout(r, DELAY_MS));
+            await new Promise(r => setTimeout(r, randDelay()));
           }
         }
 
