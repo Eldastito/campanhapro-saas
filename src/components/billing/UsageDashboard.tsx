@@ -79,12 +79,33 @@ const UsageDashboard: React.FC<Props> = ({ usage, plan, withinBudget }) => {
           Uso no período atual
         </h3>
         <div className="space-y-4">
-          <ProgressBar
-            label="Custo de IA"
-            current={usage.aiCostCents}
-            limit={plan?.limits.ai_budget_cents ?? 0}
-            formatValue={formatBRL}
-          />
+          {/* Uso de IA — exibido SÓ como pct/status, sem expor valor em R$ ou
+              tokens. Decisão do produto: cliente paga o plano e usa; custo
+              técnico é assunto interno (Supreme Admin). */}
+          {(() => {
+            const aiLimit = plan?.limits.ai_budget_cents ?? 0;
+            const aiUsed = usage.aiCostCents ?? 0;
+            const isUnlimited = aiLimit === -1;
+            const isBlocked = aiLimit === 0;
+            const pct = isUnlimited || isBlocked ? 0 : Math.min((aiUsed / Math.max(aiLimit, 1)) * 100, 100);
+            const status = isUnlimited ? 'Ilimitada'
+              : isBlocked ? 'Não inclusa no seu plano'
+              : pct >= 90 ? 'Quase esgotada'
+              : pct >= 70 ? 'Em uso intenso'
+              : 'Tudo certo';
+            return (
+              <div>
+                <div className="flex justify-between text-xs text-slate-400 mb-1">
+                  <span>Uso de IA</span>
+                  <span className="font-mono text-slate-300">{status}</span>
+                </div>
+                <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${isUnlimited ? 'bg-emerald-500/30' : isBlocked ? 'bg-slate-600' : pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-indigo-500'}`}
+                    style={{ width: isUnlimited ? '4%' : isBlocked ? '0%' : `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })()}
           <ProgressBar
             label="Disparos em massa do mês"
             current={usage.blastsThisMonth ?? 0}
@@ -92,30 +113,16 @@ const UsageDashboard: React.FC<Props> = ({ usage, plan, withinBudget }) => {
           />
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 pt-4 border-t border-slate-700">
+        {/* Cards técnicos antigos (Chamadas IA / Simulações / Embeddings) removidos
+            — eram jargão e expunham detalhes que o cliente não precisa ver.
+            Mantemos só o contador de mensagens, que é útil pra ele. */}
+        <div className="grid grid-cols-1 gap-3 mt-6 pt-4 border-t border-slate-700">
           <div>
             <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1">
-              <Cpu className="w-3.5 h-3.5" /> Chamadas IA
-            </div>
-            <p className="text-xl font-bold text-slate-100">{usage.aiCalls.toLocaleString('pt-BR')}</p>
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1">
-              <MessageSquare className="w-3.5 h-3.5" /> Mensagens
+              <MessageSquare className="w-3.5 h-3.5" /> Mensagens enviadas no período
             </div>
             <p className="text-xl font-bold text-slate-100">{usage.messagesOutbound.toLocaleString('pt-BR')}</p>
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1">
-              <Activity className="w-3.5 h-3.5" /> Simulações
-            </div>
-            <p className="text-xl font-bold text-slate-100">{usage.simulations.toLocaleString('pt-BR')}</p>
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1">
-              <FileText className="w-3.5 h-3.5" /> Embeddings
-            </div>
-            <p className="text-xl font-bold text-slate-100">{usage.embeddings.toLocaleString('pt-BR')}</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">Inclui Caixa de Entrada e Call Center — não consome cota.</p>
           </div>
         </div>
 

@@ -81,9 +81,9 @@ const PlanCard: React.FC<Props> = ({ plan, currentPlanId, recommended, onSubscri
           <p title="Conta apenas disparos em massa. Caixa de Entrada e Call Center NÃO consomem cota.">
             · {formatLimit(plan.limits.blasts_per_month ?? plan.limits.messages_per_month ?? 0, 'disparos em massa/mês')}
           </p>
-          <p>· {plan.limits.ai_budget_cents === -1
-            ? 'Orçamento IA ilimitado'
-            : `${formatBRL(plan.limits.ai_budget_cents)} de IA/mês`}</p>
+          <p>· IA: {plan.limits.ai_budget_cents === -1 ? 'Ilimitada'
+            : plan.limits.ai_budget_cents === 0 ? 'Não inclusa'
+            : 'Limitada'}</p>
         </div>
 
         <div className="mt-4 space-y-1 text-xs text-slate-300">

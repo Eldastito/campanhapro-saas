@@ -163,14 +163,9 @@ const AiMemoryPanel: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
               {isOpen && (
                 <div className="px-9 pb-3 space-y-2 border-t border-white/5">
                   <pre className="whitespace-pre-wrap text-xs text-slate-300 font-sans leading-relaxed pt-2">{c.content}</pre>
-                  {(meta.provider || meta.model || meta.tokensOut) && (
-                    <p className="text-[10px] text-slate-600 pt-1 border-t border-white/5 mt-2">
-                      {meta.provider && <span>provider: <code>{meta.provider}</code></span>}
-                      {meta.model && <span> · model: <code>{meta.model}</code></span>}
-                      {meta.tokensOut != null && <span> · tokens out: <code>{meta.tokensOut}</code></span>}
-                      {meta.costCentsUsd != null && <span> · custo: <code>${(meta.costCentsUsd / 100).toFixed(4)}</code></span>}
-                    </p>
-                  )}
+                  {/* Metadados técnicos (provider, tokens, custo) NÃO são exibidos
+                      pro usuário comum — informação de billing só fica no Supreme.
+                      O que importa pro coordenador é ver O QUE a IA lembrou. */}
                 </div>
               )}
             </div>
