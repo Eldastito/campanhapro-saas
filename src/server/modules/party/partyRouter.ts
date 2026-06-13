@@ -13,6 +13,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
 import { computeScore } from './score';
 import { callAgent } from '../../../lib/aiCallAgent';
+import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 
 const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
@@ -497,8 +498,16 @@ REGRAS:
 Saída JSON estrito (sem markdown):
 {"summary":"...","highlights":[{"type":"subiu|caiu|risco|destaque","candidateId":"uuid","title":"≤80","body":"≤140"}],"actions":["..."]}`;
 
-      const ai = await callAgent(supabase, 'strategist', `Candidatos do partido "${party.name}" (snapshot atual):\n\n${linhas}\n\nFaça o digest semanal.`, {
-        campaignId: 'party:' + (party as any).id,
+      // Busca o digest anterior no RAG pra IA poder COMPARAR (subiu/caiu desde
+      // a última semana) em vez de gerar do zero. Namespace 'party:<id>'.
+      const partyNs = 'party:' + (party as any).id;
+      const memoria = await retrieveContext(supabase, partyNs, 'digest semanal anterior estatísticas highlights');
+
+      const ai = await callAgent(supabase, 'strategist',
+        `Candidatos do partido "${party.name}" (snapshot atual):\n\n${linhas}` +
+        (memoria ? `\n\n--- Digest anterior (RAG) ---\n${memoria}\n--- fim ---\n\nCompare com o atual e destaque o que MUDOU.` : '') +
+        `\n\nFaça o digest semanal.`, {
+        campaignId: partyNs,
         systemInstruction: system, complexity: 'balanced', maxTokens: 2000,
       });
 
@@ -507,7 +516,7 @@ Saída JSON estrito (sem markdown):
       if (sIdx >= 0 && eIdx > sIdx) cleaned = cleaned.slice(sIdx, eIdx + 1);
       const parsed = JSON.parse(cleaned);
 
-      return res.json({
+      const result = {
         party: party.name,
         analyzedAt: new Date().toISOString(),
         stats: { total: snap.length, greens, reds, retidos, cortados,
@@ -515,7 +524,22 @@ Saída JSON estrito (sem markdown):
         summary: typeof parsed?.summary === 'string' ? parsed.summary.slice(0, 500) : '',
         highlights: Array.isArray(parsed?.highlights) ? parsed.highlights.slice(0, 6) : [],
         actions: Array.isArray(parsed?.actions) ? parsed.actions.slice(0, 4) : [],
-      });
+      };
+
+      // Persiste no RAG pra próxima execução comparar. Fire-and-forget.
+      const digestText = `Digest ${result.analyzedAt}\n${result.summary}\n` +
+        `Stats: ${result.stats.greens} verdes, ${result.stats.reds} vermelhos, ${result.stats.retidos} retidos, ${result.stats.cortados} cortados.\n` +
+        `Highlights:\n${result.highlights.map((h: any) => `- [${h.type}] ${h.title}: ${h.body}`).join('\n')}\n` +
+        `Ações sugeridas:\n${result.actions.map((a: any) => `- ${a}`).join('\n')}`;
+      ingestArtifact(supabase, {
+        campaignId: partyNs,
+        source: 'party:digest:weekly',
+        title: `Digest semanal — ${result.analyzedAt.slice(0, 10)}`,
+        text: digestText,
+        metadata: { stats: result.stats, generatedAt: result.analyzedAt },
+      }).catch((e) => console.warn('[party] digest ingest RAG falhou (não-fatal):', e?.message));
+
+      return res.json(result);
     } catch (err: any) {
       console.error('[party] digest-weekly:', err);
       return res.status(500).json({ error: err?.message || 'ai_failed' });

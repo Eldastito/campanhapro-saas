@@ -595,7 +595,14 @@ Retorne JSON estrito (sem markdown):
 }
 Máximo 8 recommendations + 5 avoidance.`;
 
-      const ai = await callAgent(supabase, 'strategist', `Bairros disponíveis (top 40 por base de contatos):\n\n${linhas}\n\nFaça o Foco de Campo da próxima semana.`, {
+      // Unifica fontes: busca no RAG análises anteriores (battle_plan, playbook,
+      // intel competitivo, TSE) pra dar contexto à IA — antes de gerar foco do zero.
+      const memoria = await retrieveContext(supabase, campaignId, 'foco de campo bairros pauta visitas estratégia');
+
+      const ai = await callAgent(supabase, 'strategist',
+        `Bairros disponíveis (top 40 por base de contatos):\n\n${linhas}` +
+        (memoria ? `\n\n--- Memória anterior (RAG) ---\n${memoria}\n--- fim da memória ---` : '') +
+        `\n\nFaça o Foco de Campo da próxima semana.`, {
         campaignId, userId, systemInstruction: system, complexity: 'balanced', maxTokens: 2500,
       });
 
