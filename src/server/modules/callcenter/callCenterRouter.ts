@@ -175,5 +175,74 @@ export function createCallCenterRouter(supabase: SupabaseClient): Router {
     return res.json({ ok: true });
   });
 
+  // ---------- ÁREAS DE ATENDIMENTO (F3 — menu no mesmo número + roteamento) ----------
+  // Quem gerencia áreas: coordenador/admin/partido e o líder do call center.
+  async function canManageAreas(userId: string): Promise<boolean> {
+    const t = await userType(userId);
+    return t === 'Admin' || t === 'Coordenador' || t === 'Candidato de Partido' || t === CC_LEADER;
+  }
+
+  // Lista as áreas (todas as funções autenticadas da campanha veem; o painel do
+  // operador usa pra mostrar o badge da área na conversa).
+  router.get('/areas', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data } = await supabase.from('service_areas')
+      .select('*').eq('campaignId', campaignId)
+      .order('position', { ascending: true }).order('createdAt', { ascending: true });
+    return res.json({ areas: data || [] });
+  });
+
+  router.post('/areas', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await canManageAreas(userId))) return res.status(403).json({ error: 'sem_permissao' });
+    const { name, description, persona, assignedUserId } = req.body || {};
+    if (!name?.trim()) return res.status(400).json({ error: 'name_obrigatorio' });
+    // Próxima posição no menu (sequencial, começando em 1).
+    const { data: last } = await supabase.from('service_areas')
+      .select('position').eq('campaignId', campaignId)
+      .order('position', { ascending: false }).limit(1).maybeSingle();
+    const position = ((last as any)?.position ?? 0) + 1;
+    const { data, error } = await supabase.from('service_areas').insert({
+      campaignId, name: String(name).trim().slice(0, 80),
+      description: description?.toString().trim().slice(0, 280) || null,
+      persona: persona?.toString().trim().slice(0, 1200) || null,
+      assignedUserId: assignedUserId || null,
+      position, active: true,
+    }).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ area: data });
+  });
+
+  router.patch('/areas/:id', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await canManageAreas(userId))) return res.status(403).json({ error: 'sem_permissao' });
+    const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    const b = req.body || {};
+    if (typeof b.name === 'string') patch.name = b.name.trim().slice(0, 80);
+    if ('description' in b) patch.description = b.description?.toString().trim().slice(0, 280) || null;
+    if ('persona' in b) patch.persona = b.persona?.toString().trim().slice(0, 1200) || null;
+    if ('assignedUserId' in b) patch.assignedUserId = b.assignedUserId || null;
+    if (typeof b.active === 'boolean') patch.active = b.active;
+    if (typeof b.position === 'number') patch.position = b.position;
+    const { data, error } = await supabase.from('service_areas')
+      .update(patch).eq('id', req.params.id).eq('campaignId', campaignId).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ area: data });
+  });
+
+  router.delete('/areas/:id', async (req: Request, res: Response) => {
+    const { userId, campaignId } = ctx(req);
+    if (!userId || !campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await canManageAreas(userId))) return res.status(403).json({ error: 'sem_permissao' });
+    // Soft-delete: desativa (active=false) pra não quebrar conversas que já
+    // foram roteadas com esse areaId. Some do menu, mas o histórico fica.
+    await supabase.from('service_areas').update({ active: false, updatedAt: new Date().toISOString() })
+      .eq('id', req.params.id).eq('campaignId', campaignId);
+    return res.json({ ok: true });
+  });
+
   return router;
 }

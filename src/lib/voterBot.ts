@@ -17,6 +17,7 @@ import { sendText } from '../server/modules/integrations/evolutionApiClient';
 import { callAgent } from './aiCallAgent';
 import { retrieveContext } from '../server/modules/rag/knowledgeIngest';
 import { buildVoterBotSystemPrompt, evaluateInbound, setConsent, DISCLOSURE } from './voterBotCompliance';
+import { loadActiveAreas, buildAreaMenu, matchAreaChoice } from '../server/modules/callcenter/serviceAreas';
 
 export interface VoterBotParams {
   campaignId: string;
@@ -38,7 +39,7 @@ export async function handleInboundForBot(supabaseAdmin: SupabaseClient, p: Vote
 
     // ---- CALL CENTER: estado da conversa + plano ----
     const { data: convo } = await supabaseAdmin.from('channel_conversations')
-      .select('id, "aiPaused", stage')
+      .select('id, "aiPaused", stage, "areaId"')
       .eq('campaignId', p.campaignId).eq('channel', 'whatsapp').eq('externalId', p.phone)
       .maybeSingle();
 
@@ -89,14 +90,51 @@ export async function handleInboundForBot(supabaseAdmin: SupabaseClient, p: Vote
         broadcastCallCenter(p.campaignId, 'queue_changed', { conversationId: (convo as any).id });
       }
     } else {
-      // proceed → resposta ancorada no Argumentário (RAG).
+      // ---- F3: ÁREAS DE ATENDIMENTO (menu no mesmo número + roteamento) ----
+      // Se a campanha tem áreas ativas e a conversa ainda não foi roteada,
+      // mostra o MENU e espera a escolha. Escolhida a área, a IA responde com a
+      // persona dela. Sem áreas → segue o receptivo único (comportamento F2).
+      const areas = await loadActiveAreas(supabaseAdmin, p.campaignId);
+      let areaPersona: string | undefined;
+      let areaGreeting = '';
+      if (areas.length > 0) {
+        let areaId = (convo as any)?.areaId as string | null;
+        if (!areaId) {
+          const picked = matchAreaChoice(text, areas);
+          if (!picked) {
+            // Ainda não escolheu → manda o menu (com disclosure na 1ª vez) e para.
+            let menu = buildAreaMenu(areas);
+            if (decision.disclosure) menu = `${DISCLOSURE}\n\n${menu}`;
+            await setConsent(supabaseAdmin, p.campaignId, p.phone, 'opt_in');
+            const sentMenu = await sendText(p.instanceName, p.apiKey, p.phone, menu);
+            await recordOutbound(supabaseAdmin, p, menu, sentMenu.messageId || crypto.randomBytes(8).toString('hex'));
+            return;
+          }
+          // Roteia a conversa para a área escolhida + avisa o painel.
+          areaId = picked.id;
+          if ((convo as any)?.id) {
+            await supabaseAdmin.from('channel_conversations')
+              .update({ areaId, updatedAt: new Date().toISOString() })
+              .eq('id', (convo as any).id);
+            const { broadcastCallCenter } = await import('../server/modules/callcenter/callCenterRouter');
+            broadcastCallCenter(p.campaignId, 'queue_changed', { conversationId: (convo as any).id });
+          }
+          areaPersona = picked.persona || undefined;
+          areaGreeting = `✅ Você está na área *${picked.name}*. `;
+        } else {
+          areaPersona = areas.find((a) => a.id === areaId)?.persona || undefined;
+        }
+      }
+
+      // proceed → resposta ancorada no Argumentário (RAG) + persona da área.
       const ctx = await retrieveContext(supabaseAdmin, p.campaignId, text, 6);
-      const system = buildVoterBotSystemPrompt({ candidato: p.candidato || undefined, cargo: p.cargo || undefined, playbookContext: ctx });
+      const system = buildVoterBotSystemPrompt({ candidato: p.candidato || undefined, cargo: p.cargo || undefined, playbookContext: ctx, areaPersona });
       const ai = await callAgent(supabaseAdmin, 'crm', text, {
         campaignId: p.campaignId, systemInstruction: system, complexity: 'cheap', maxTokens: 600,
       });
       reply = (ai.text || '').trim();
       if (!reply) return;
+      if (areaGreeting) reply = areaGreeting + reply;
       if (decision.disclosure) reply = `${DISCLOSURE}\n\n${reply}`;
       await setConsent(supabaseAdmin, p.campaignId, p.phone, 'opt_in');
     }

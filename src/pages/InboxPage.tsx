@@ -18,6 +18,7 @@ interface Conversation {
     isOpen: boolean;
     stage: string; // pipeline do call center + estágios legados
     priority: 'alta' | 'media' | 'baixa';
+    areaId?: string | null; // área de atendimento roteada (F3)
 }
 
 interface Message {
@@ -83,11 +84,47 @@ const InboxPage: React.FC = () => {
     const [ccInvites, setCcInvites] = React.useState<any[]>([]);
     const [ccCopied, setCcCopied] = React.useState<string | null>(null);
     const [ccError, setCcError] = React.useState<string | null>(null);
+    // Áreas de atendimento (F3 — menu no mesmo número + roteamento)
+    const [areas, setAreas] = React.useState<any[]>([]);
+    const [areaName, setAreaName] = React.useState('');
+    const [areaDesc, setAreaDesc] = React.useState('');
+    const [areaPersona, setAreaPersona] = React.useState('');
+    const [areaBusy, setAreaBusy] = React.useState(false);
+    const areaById = React.useMemo(() => {
+        const m: Record<string, any> = {};
+        for (const a of areas) m[a.id] = a;
+        return m;
+    }, [areas]);
 
     const loadCcInvites = React.useCallback(async () => {
         try { const r = await authedFetch('/api/v1/callcenter/invites'); if (r.ok) { const j = await r.json(); setCcInvites(j.invites || []); } } catch { /* */ }
     }, []);
-    React.useEffect(() => { if (ccOpen) loadCcInvites(); }, [ccOpen, loadCcInvites]);
+    const loadAreas = React.useCallback(async () => {
+        try { const r = await authedFetch('/api/v1/callcenter/areas'); if (r.ok) { const j = await r.json(); setAreas(j.areas || []); } } catch { /* */ }
+    }, []);
+    React.useEffect(() => { if (ccOpen) { loadCcInvites(); loadAreas(); } }, [ccOpen, loadCcInvites, loadAreas]);
+    // Carrega áreas no mount também — pra mostrar o badge da área nos cards.
+    React.useEffect(() => { loadAreas(); }, [loadAreas]);
+
+    const createArea = async () => {
+        if (!areaName.trim()) return;
+        setAreaBusy(true);
+        try {
+            const r = await authedFetch('/api/v1/callcenter/areas', {
+                method: 'POST',
+                body: JSON.stringify({ name: areaName.trim(), description: areaDesc.trim() || undefined, persona: areaPersona.trim() || undefined }),
+            });
+            if (r.ok) { setAreaName(''); setAreaDesc(''); setAreaPersona(''); await loadAreas(); }
+        } finally { setAreaBusy(false); }
+    };
+    const toggleArea = async (a: any) => {
+        await authedFetch(`/api/v1/callcenter/areas/${a.id}`, { method: 'PATCH', body: JSON.stringify({ active: !a.active }) });
+        await loadAreas();
+    };
+    const deleteArea = async (id: string) => {
+        await authedFetch(`/api/v1/callcenter/areas/${id}`, { method: 'DELETE' });
+        await loadAreas();
+    };
 
     const createCcInvite = async () => {
         setCcBusy(true); setCcError(null);
@@ -304,6 +341,47 @@ const InboxPage: React.FC = () => {
                             ))}
                             {ccInvites.length === 0 && <p className="text-xs text-slate-500">Nenhum convite ainda.</p>}
                         </div>
+
+                        {/* ── Áreas de Atendimento (menu no mesmo número) ── */}
+                        <div className="mt-5 pt-4 border-t border-white/10">
+                            <h4 className="font-bold text-white text-sm mb-1">🧭 Áreas de Atendimento</h4>
+                            <p className="text-xs text-slate-400 mb-3">
+                                Crie áreas (ex.: Financeiro, Suporte) e o eleitor escolhe pelo <b>menu no mesmo número</b>.
+                                A IA responde com o tom da área. <b>Sem áreas</b>, o atendimento é único (sem menu).
+                            </p>
+                            <input value={areaName} onChange={(e) => setAreaName(e.target.value)} placeholder="Nome da área (ex.: Financeiro)"
+                                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm mb-2" />
+                            <input value={areaDesc} onChange={(e) => setAreaDesc(e.target.value)} placeholder="Descrição curta (aparece no menu) — opcional"
+                                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm mb-2" />
+                            <textarea value={areaPersona} onChange={(e) => setAreaPersona(e.target.value)} rows={2}
+                                placeholder="Persona da IA p/ esta área (ex.: 'Você é do setor financeiro; tire dúvidas sobre prestação de contas') — opcional"
+                                className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm mb-2" />
+                            <button onClick={createArea} disabled={!areaName.trim() || areaBusy}
+                                className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-xl px-4 py-2 font-bold text-sm mb-3">
+                                {areaBusy ? 'Salvando…' : '+ Adicionar área'}
+                            </button>
+                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                {areas.map((a: any, idx: number) => (
+                                    <div key={a.id} className={`flex items-center justify-between gap-2 text-sm rounded-xl px-3 py-2 ${a.active ? 'bg-slate-950/60' : 'bg-slate-950/30 opacity-60'}`}>
+                                        <span className="truncate">
+                                            <span className="text-slate-500">{idx + 1}.</span> {a.name}
+                                            {!a.active && <span className="text-[11px] text-slate-500"> · inativa</span>}
+                                        </span>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            <button onClick={() => toggleArea(a)} title={a.active ? 'Desativar' : 'Ativar'}
+                                                className="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">
+                                                {a.active ? 'Pausar' : 'Ativar'}
+                                            </button>
+                                            <button onClick={() => deleteArea(a.id)} title="Remover"
+                                                className="text-xs px-2 py-1 rounded-lg bg-rose-600/10 hover:bg-rose-600/20 text-rose-400">
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                                {areas.length === 0 && <p className="text-xs text-slate-500">Nenhuma área — atendimento único (sem menu).</p>}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -367,6 +445,11 @@ const InboxPage: React.FC = () => {
                                                                                 <p className="text-[10px] text-slate-500">
                                                                                     {CHANNEL_EMOJI[convo.channel]} {convo.channel}
                                                                                 </p>
+                                                                                {convo.areaId && areaById[convo.areaId] && (
+                                                                                    <span className="inline-block mt-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+                                                                                        🧭 {areaById[convo.areaId].name}
+                                                                                    </span>
+                                                                                )}
                                                                             </div>
                                                                         </div>
                                                                         <span className={`flex-shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${PRIORITY_BADGE[convo.priority ?? 'media']}`}>

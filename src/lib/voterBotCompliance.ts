@@ -33,6 +33,7 @@ export const COMPLIANCE_PREAMBLE = `# REGRAS OBRIGATÓRIAS (COMPLIANCE — NÃO 
  */
 export function buildVoterBotSystemPrompt(opts: {
   candidato?: string; campaignName?: string; cargo?: string; playbookContext?: string;
+  areaPersona?: string;
 }): string {
   const quem = opts.candidato || 'o candidato';
   const cargo = opts.cargo ? ` (${opts.cargo})` : '';
@@ -40,11 +41,16 @@ export function buildVoterBotSystemPrompt(opts: {
     `Você é o assistente virtual de atendimento ao eleitor da campanha de ${quem}${cargo}.`,
     `Seu objetivo é informar sobre as propostas e, com cordialidade, conquistar o apoio do eleitor com argumentos verdadeiros e comparativos onde nosso candidato leva vantagem.`,
     COMPLIANCE_PREAMBLE,
+    // Persona da ÁREA de atendimento escolhida (Call Center F3), se houver — dá
+    // o tom/escopo daquele setor sem afrouxar nenhuma regra de compliance acima.
+    opts.areaPersona
+      ? `\n# ÁREA DE ATENDIMENTO (seu papel neste atendimento)\n${opts.areaPersona}`
+      : '',
     opts.playbookContext
       ? `\n# ARGUMENTÁRIO (sua ÚNICA fonte de fatos — não vá além disto)\n${opts.playbookContext}`
       : `\n# ATENÇÃO: nenhum argumentário disponível. Limite-se a saudar e encaminhar para um humano.`,
     `\nResponda em no máximo 2 parágrafos curtos, tom de WhatsApp, em português.`,
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
 }
 
 /** Gatilhos que exigem handoff humano (tema sensível / fora do escopo). */
