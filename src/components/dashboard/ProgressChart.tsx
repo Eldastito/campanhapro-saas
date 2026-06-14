@@ -1,4 +1,8 @@
 import * as React from 'react';
+import {
+    AreaChart, Area, XAxis, YAxis, CartesianGrid,
+    Tooltip, ResponsiveContainer, Legend,
+} from 'recharts';
 import Card from '../ui/Card';
 import { Visit } from '../../types/visits';
 
@@ -15,158 +19,132 @@ interface ProgressChartProps {
     allApoiadores: string[];
 }
 
-// Componente de Gráfico de Barras SVG Moderno e Animado
-const AnimatedBarChart = ({ data }: { data: { date: string; visits: number; votes: number }[] }) => {
-    const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null);
-    const [tooltipPos, setTooltipPos] = React.useState({ x: 0, y: 0 });
-    
-    const chartHeight = 350;
-    const chartWidth = 800;
-    const padding = { top: 60, right: 30, bottom: 50, left: 50 };
-    
-    const maxVisits = Math.max(...data.map(d => d.visits), 0);
-    const maxVotes = Math.max(...data.map(d => d.votes), 0);
-    const yMax = Math.max(maxVisits, maxVotes, 5);
-    
-    const yScale = (value: number) => chartHeight - padding.bottom - (value / yMax) * (chartHeight - padding.top - padding.bottom);
-    const spacing = (chartWidth - padding.left - padding.right) / data.length;
-    const barWidth = Math.min(spacing * 0.35, 35);
-
-    const handleMouseMove = (e: React.MouseEvent, index: number) => {
-        const svg = e.currentTarget.closest('svg');
-        if (svg) {
-            const pt = svg.createSVGPoint();
-            pt.x = e.clientX;
-            pt.y = e.clientY;
-            const cursorPt = pt.matrixTransform(svg.getScreenCTM()?.inverse());
-            setTooltipPos({ x: cursorPt.x, y: cursorPt.y });
-            setHoveredIndex(index);
-        }
-    };
-
+/**
+ * Tooltip de vidro fosco — igual ao do Supreme (ModernArea/Charts.tsx).
+ */
+const GlassTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
     return (
-        <div className="relative w-full overflow-hidden">
-            <div className="h-[350px] w-full overflow-x-auto custom-scrollbar">
-                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="xMidYMid meet" className="min-w-[800px] select-none">
-                    <defs>
-                        <linearGradient id="gradVisits" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stopColor="#60a5fa" />
-                            <stop offset="100%" stopColor="#2563eb" />
-                        </linearGradient>
-                        <linearGradient id="gradVotes" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stopColor="#34d399" />
-                            <stop offset="100%" stopColor="#059669" />
-                        </linearGradient>
-                        <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                            <feGaussianBlur stdDeviation="3" result="blur" />
-                            <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                        </filter>
-                    </defs>
-
-                    {/* Linhas de Grade e Eixo Y */}
-                    {Array.from({ length: 6 }).map((_, i) => {
-                        const y = padding.top + i * ((chartHeight - padding.top - padding.bottom) / 5);
-                        const value = Math.round(yMax * (1 - i / 5));
-                        return (
-                            <g key={i}>
-                                <line x1={padding.left} y1={y} x2={chartWidth - padding.right} y2={y} stroke="#334155" strokeDasharray="3 6" strokeWidth="0.5" />
-                                <text x={padding.left - 15} y={y + 4} textAnchor="end" fill="#94a3b8" fontSize="11" fontWeight="bold">{value}</text>
-                            </g>
-                        )
-                    })}
-
-                    {/* Barras Interativas */}
-                    {data.map((d, i) => {
-                        const x = padding.left + (i + 0.5) * spacing;
-                        const hVisits = chartHeight - padding.bottom - yScale(d.visits);
-                        const hVotes = chartHeight - padding.bottom - yScale(d.votes);
-                        const isHovered = hoveredIndex === i;
-                        
-                        return (
-                            <g key={d.date} 
-                               onMouseMove={(e) => handleMouseMove(e, i)}
-                               onMouseLeave={() => setHoveredIndex(null)}
-                               className="transition-all duration-300"
-                            >
-                                {/* Background Highlight */}
-                                {isHovered && (
-                                    <rect x={x - spacing/2} y={padding.top - 10} width={spacing} height={chartHeight - padding.top - padding.bottom + 20} fill="#334155" fillOpacity="0.2" rx="8" />
-                                )}
-
-                                {/* Barra Visitas */}
-                                <rect
-                                    x={x - barWidth - 3}
-                                    y={yScale(d.visits)}
-                                    width={barWidth}
-                                    height={hVisits}
-                                    fill="url(#gradVisits)"
-                                    rx="6"
-                                    className="transition-all duration-500"
-                                    style={{ filter: isHovered ? 'url(#glow)' : 'none' }}
-                                >
-                                    <animate attributeName="height" from="0" to={hVisits} dur={`${0.5 + i * 0.05}s`} fill="freeze" calcMode="spline" keySplines="0.42 0 0.58 1" />
-                                    <animate attributeName="y" from={chartHeight - padding.bottom} to={yScale(d.visits)} dur={`${0.5 + i * 0.05}s`} fill="freeze" calcMode="spline" keySplines="0.42 0 0.58 1" />
-                                </rect>
-
-                                {/* Barra Votos */}
-                                <rect
-                                    x={x + 3}
-                                    y={yScale(d.votes)}
-                                    width={barWidth}
-                                    height={hVotes}
-                                    fill="url(#gradVotes)"
-                                    rx="6"
-                                    className="transition-all duration-500"
-                                    style={{ filter: isHovered ? 'url(#glow)' : 'none' }}
-                                >
-                                    <animate attributeName="height" from="0" to={hVotes} dur={`${0.7 + i * 0.05}s`} fill="freeze" calcMode="spline" keySplines="0.42 0 0.58 1" />
-                                    <animate attributeName="y" from={chartHeight - padding.bottom} to={yScale(d.votes)} dur={`${0.7 + i * 0.05}s`} fill="freeze" calcMode="spline" keySplines="0.42 0 0.58 1" />
-                                </rect>
-
-                                 <text x={x} y={chartHeight - padding.bottom + 25} textAnchor="middle" fill={isHovered ? "#f8fafc" : "#64748b"} fontSize="11" fontWeight={isHovered ? "bold" : "600"} className="transition-colors">
-                                    {new Date(d.date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                                </text>
-                            </g>
-                        )
-                    })}
-                    
-                    {/* Linha de base */}
-                    <line x1={padding.left} y1={chartHeight - padding.bottom} x2={chartWidth - padding.right} y2={chartHeight - padding.bottom} stroke="#475569" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-
-                {/* Tooltip Customizado (Floating HTML) */}
-                {hoveredIndex !== null && (
-                    <div 
-                        className="pointer-events-none absolute z-50 bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl backdrop-blur-md min-w-[140px]"
-                        style={{ 
-                            left: Math.min(tooltipPos.x + 20, chartWidth - 160), 
-                            top: Math.min(tooltipPos.y - 80, chartHeight - 100),
-                            transform: 'translateY(-50%)'
-                        }}
-                    >
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                            {new Date(data[hoveredIndex].date + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
-                        </p>
-                        <div className="space-y-1">
-                            <div className="flex justify-between items-center gap-4">
-                                <span className="flex items-center gap-1.5 text-sm text-slate-300">
-                                    <div className="w-2 h-2 rounded-full bg-blue-500"></div> Visitas
-                                </span>
-                                <span className="text-sm font-black text-white">{data[hoveredIndex].visits}</span>
-                            </div>
-                            <div className="flex justify-between items-center gap-4">
-                                <span className="flex items-center gap-1.5 text-sm text-slate-300">
-                                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Votos
-                                </span>
-                                <span className="text-sm font-black text-white">{data[hoveredIndex].votes}</span>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
+        <div style={{
+            background: 'rgba(15,23,42,0.85)',
+            border: '1px solid rgba(255,255,255,0.14)',
+            borderRadius: 12,
+            padding: '10px 14px',
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+            minWidth: 140,
+        }}>
+            {label && (
+                <p style={{ color: '#94a3b8', fontSize: 10, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    {new Date(label + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
+                </p>
+            )}
+            {payload.map((p: any, i: number) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: i > 0 ? 4 : 0 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#cbd5e1', fontSize: 13 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, display: 'inline-block' }} />
+                        {p.name}
+                    </span>
+                    <span style={{ color: '#fff', fontWeight: 800, fontFamily: 'monospace' }}>
+                        {Number(p.value).toLocaleString('pt-BR')}
+                    </span>
+                </div>
+            ))}
         </div>
     );
-}
+};
+
+/**
+ * Gráfico de linha com área glow — visual igual ao "Crescimento de Usuários
+ * (30d)" do Supreme Control (Charts.tsx ModernArea), mas com 2 séries
+ * sobrepostas (Visitas + Votos). Substituiu o gráfico de barras antigo.
+ */
+const AnimatedAreaChart = ({ data }: { data: { date: string; visits: number; votes: number }[] }) => {
+    return (
+        <div style={{ width: '100%', height: 350 }}>
+            <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={data} margin={{ top: 16, right: 12, left: -6, bottom: 0 }}>
+                    <defs>
+                        <linearGradient id="fill-visits" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#93c5fd" stopOpacity={0.75} />
+                            <stop offset="45%" stopColor="#3b82f6" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id="stroke-visits" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor="#93c5fd" />
+                            <stop offset="100%" stopColor="#3b82f6" />
+                        </linearGradient>
+                        <linearGradient id="fill-votes" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#6ee7b7" stopOpacity={0.65} />
+                            <stop offset="45%" stopColor="#10b981" stopOpacity={0.30} />
+                            <stop offset="100%" stopColor="#10b981" stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id="stroke-votes" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor="#6ee7b7" />
+                            <stop offset="100%" stopColor="#10b981" />
+                        </linearGradient>
+                        <filter id="glow-visits" x="-30%" y="-30%" width="160%" height="160%">
+                            <feGaussianBlur stdDeviation="4" result="blur" />
+                            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                        </filter>
+                        <filter id="glow-votes" x="-30%" y="-30%" width="160%" height="160%">
+                            <feGaussianBlur stdDeviation="4" result="blur" />
+                            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                        </filter>
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 6" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                    <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 10, fill: '#64748b' }}
+                        axisLine={false}
+                        tickLine={false}
+                        dy={6}
+                        tickFormatter={(d: string) => new Date(d + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                    />
+                    <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} width={32} />
+                    <Tooltip content={<GlassTooltip />} cursor={{ stroke: '#3b82f6', strokeOpacity: 0.25, strokeWidth: 2 }} />
+                    <Legend
+                        verticalAlign="top"
+                        iconType="circle"
+                        wrapperStyle={{ paddingBottom: 12 }}
+                        formatter={(v: string) => <span style={{ color: '#cbd5e1', fontSize: 12, marginLeft: 4 }}>{v}</span>}
+                    />
+                    <Area
+                        type="monotone"
+                        name="Visitas"
+                        dataKey="visits"
+                        stroke="url(#stroke-visits)"
+                        strokeWidth={3.5}
+                        strokeLinecap="round"
+                        fill="url(#fill-visits)"
+                        filter="url(#glow-visits)"
+                        dot={false}
+                        activeDot={{ r: 6, fill: '#3b82f6', stroke: '#fff', strokeWidth: 2, filter: 'url(#glow-visits)' }}
+                        isAnimationActive
+                        animationDuration={1100}
+                        animationEasing="ease-out"
+                    />
+                    <Area
+                        type="monotone"
+                        name="Votos"
+                        dataKey="votes"
+                        stroke="url(#stroke-votes)"
+                        strokeWidth={3.5}
+                        strokeLinecap="round"
+                        fill="url(#fill-votes)"
+                        filter="url(#glow-votes)"
+                        dot={false}
+                        activeDot={{ r: 6, fill: '#10b981', stroke: '#fff', strokeWidth: 2, filter: 'url(#glow-votes)' }}
+                        isAnimationActive
+                        animationDuration={1100}
+                        animationEasing="ease-out"
+                    />
+                </AreaChart>
+            </ResponsiveContainer>
+        </div>
+    );
+};
+
 
 const ProgressChart = ({
     filteredVisits,
@@ -221,7 +199,7 @@ const ProgressChart = ({
             </div>
 
             {chartData.length > 0 ? (
-                <AnimatedBarChart data={chartData} />
+                <AnimatedAreaChart data={chartData} />
             ) : (
                 <div className="h-80 flex items-center justify-center text-slate-400">
                     <p>Sem dados de visitas realizadas para exibir o gráfico.</p>
