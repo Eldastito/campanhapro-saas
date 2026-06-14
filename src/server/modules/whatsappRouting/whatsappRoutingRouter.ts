@@ -11,7 +11,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 function isAdmin(req: Request): boolean {
   const t = (req as any).user?.type;
-  return t === 'Admin' || t === 'Coordenador';
+  // Quem pode mexer no roteador: dono da campanha + coordenadores + líderes.
+  // Operador comum e fiscal NÃO entram. Supreme Admin entra (vê tudo).
+  return t === 'Admin' || t === 'Coordenador' || t === 'Líder' || t === 'Candidato' || (req as any).user?.isSupremeAdmin === true;
 }
 
 export function createWhatsappRoutingRouter(supabase: SupabaseClient): Router {
