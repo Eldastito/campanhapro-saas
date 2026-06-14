@@ -21,6 +21,7 @@ import {
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import WhatsAppInstancesPanel from './WhatsAppInstancesPanel';
+import SocialScenariosPanel from './SocialScenariosPanel';
 
 async function authFetch(url: string, init: RequestInit = {}): Promise<any> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -373,6 +374,8 @@ export const SocialConnectionsHub: React.FC = () => {
           );
         })}
       </div>
+
+      <SocialScenariosPanel />
 
       {/* Modal de Configuração Genérico */}
       {configuring && (

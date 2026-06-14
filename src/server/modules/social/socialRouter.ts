@@ -22,17 +22,15 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ingestArtifact } from '../rag/knowledgeIngest';
 import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 import {
   generatePkce, buildXAuthorizeUrl, exchangeXCodeForToken,
-  refreshXToken, fetchXSnapshot,
 } from '../../../lib/socialSyncX';
 import {
   buildLinkedInAuthorizeUrl, exchangeLinkedInCode,
-  refreshLinkedInToken, fetchLinkedInSnapshot,
 } from '../../../lib/socialSyncLinkedIn';
 import { fetchKwaiPublicProfile } from '../../../lib/socialSyncKwai';
+import { runSocialSync, SyncProvider } from '../../../lib/socialSyncRunner';
 
 const VALID_OAUTH_PROVIDERS = new Set(['x', 'linkedin']);
 const VALID_SYNC_PROVIDERS = new Set(['x', 'linkedin', 'kwai']);
@@ -237,139 +235,25 @@ export function createSocialRouter(supabase: SupabaseClient): Router {
     return res.json({ ok: true });
   });
 
-  // ── SYNC: pega métricas, persiste em social_metrics_daily, indexa no RAG
+  // ── SYNC: delega pro runner compartilhado (também usado pelo worker noturno)
   router.post('/sync/:provider', async (req: Request, res: Response) => {
     try {
       const campaignId = (req as any).user?.campaignId;
       if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
       if (!isAdmin(req)) return res.status(403).json({ error: 'admin_required' });
 
-      const provider = req.params.provider;
+      const provider = req.params.provider as SyncProvider;
       if (!VALID_SYNC_PROVIDERS.has(provider)) {
         return res.status(400).json({ error: 'provider_invalid' });
       }
 
-      const { data: token } = await supabase
-        .from('social_tokens')
-        .select('*')
-        .eq('campaignId', campaignId)
-        .eq('provider', provider)
-        .maybeSingle();
-      if (!token) return res.status(404).json({ error: 'not_connected' });
-
-      const todayIso = new Date().toISOString().slice(0, 10);
-      let metricsRow: any = null;
-      let snapshotText = '';
-      let snapshotTitle = '';
-
-      if (provider === 'x') {
-        let accessToken = (token as any).access_token;
-        // Refresh se expirado
-        const expiresAt = (token as any).expires_at ? new Date((token as any).expires_at).getTime() : 0;
-        if (expiresAt && expiresAt < Date.now() + 60_000 && (token as any).refresh_token) {
-          const refreshed = await refreshXToken({
-            clientId: getEnv('X_CLIENT_ID'),
-            clientSecret: getEnv('X_CLIENT_SECRET'),
-            refreshToken: (token as any).refresh_token,
-          });
-          accessToken = refreshed.access_token;
-          await supabase.from('social_tokens').update({
-            access_token: refreshed.access_token,
-            refresh_token: refreshed.refresh_token || (token as any).refresh_token,
-            expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
-            updatedAt: new Date().toISOString(),
-          }).eq('campaignId', campaignId).eq('provider', 'x');
-        }
-
-        const snap = await fetchXSnapshot(accessToken);
-        metricsRow = {
-          campaignId, provider: 'x', snapshotDate: todayIso,
-          handle: snap.username,
-          followers: snap.followers, following: snap.following,
-          postsCount: snap.postsCount,
-          impressions7d: snap.recentTweets.reduce((s, t) => s + (t.impressionCount || 0), 0) || null,
-          engagement7d: snap.recentTweets.reduce((s, t) => s + (t.likeCount + t.retweetCount + t.replyCount), 0) || null,
-          topPosts: snap.recentTweets.slice(0, 5),
-          raw: snap.raw,
-        };
-        snapshotTitle = `X (Twitter) snapshot — @${snap.username} em ${todayIso}`;
-        snapshotText = renderXSnapshotForRag(snap);
-      }
-
-      else if (provider === 'linkedin') {
-        let accessToken = (token as any).access_token;
-        const expiresAt = (token as any).expires_at ? new Date((token as any).expires_at).getTime() : 0;
-        if (expiresAt && expiresAt < Date.now() + 60_000 && (token as any).refresh_token) {
-          const refreshed = await refreshLinkedInToken({
-            clientId: getEnv('LINKEDIN_CLIENT_ID'),
-            clientSecret: getEnv('LINKEDIN_CLIENT_SECRET'),
-            refreshToken: (token as any).refresh_token,
-          });
-          accessToken = refreshed.access_token;
-          await supabase.from('social_tokens').update({
-            access_token: refreshed.access_token,
-            refresh_token: refreshed.refresh_token || (token as any).refresh_token,
-            expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
-            updatedAt: new Date().toISOString(),
-          }).eq('campaignId', campaignId).eq('provider', 'linkedin');
-        }
-
-        const snap = await fetchLinkedInSnapshot(accessToken);
-        const totalFollowers = snap.organizations.reduce((s, o) => s + (o.followers || 0), 0) || null;
-        metricsRow = {
-          campaignId, provider: 'linkedin', snapshotDate: todayIso,
-          handle: snap.profile.name,
-          followers: totalFollowers,
-          following: null, postsCount: null,
-          impressions7d: null, engagement7d: null,
-          topPosts: snap.organizations.flatMap(o => o.sharePosts.slice(0, 3)),
-          raw: snap.raw,
-        };
-        snapshotTitle = `LinkedIn snapshot — ${snap.profile.name} em ${todayIso}`;
-        snapshotText = renderLinkedInSnapshotForRag(snap);
-      }
-
-      else if (provider === 'kwai') {
-        const handle = (token as any).settings?.handle || (token as any).settings?.profileUrl;
-        if (!handle) return res.status(400).json({ error: 'handle_nao_configurado' });
-        const snap = await fetchKwaiPublicProfile(handle);
-        metricsRow = {
-          campaignId, provider: 'kwai', snapshotDate: todayIso,
-          handle: snap.handle,
-          followers: snap.followers, following: snap.following,
-          postsCount: snap.videosCount,
-          impressions7d: null, engagement7d: null,
-          topPosts: null,
-          raw: { displayName: snap.displayName, bio: snap.bio, profileUrl: snap.profileUrl },
-        };
-        snapshotTitle = `Kwai snapshot — @${snap.handle} em ${todayIso}`;
-        snapshotText = renderKwaiSnapshotForRag(snap);
-      }
-
-      if (!metricsRow) return res.status(500).json({ error: 'sync_no_data' });
-
-      // Persiste (upsert pelo unique (campaignId, provider, snapshotDate))
-      const { error: insertErr } = await supabase
-        .from('social_metrics_daily')
-        .upsert(metricsRow, { onConflict: 'campaignId,provider,snapshotDate' });
-      if (insertErr) {
-        console.warn('[social] upsert metrics falhou:', insertErr.message);
-      }
-
-      // Indexa no RAG (best-effort — não bloqueia)
-      void ingestArtifact(supabase, {
-        campaignId,
-        source: `social:${provider}`,
-        title: snapshotTitle,
-        text: snapshotText,
-        metadata: { provider, snapshotDate: todayIso, hasPrimarySources: true,
-                    primarySources: [{ url: (token as any).settings?.profileUrl || null, title: snapshotTitle }] },
-      });
-
-      return res.json({ ok: true, provider, snapshotDate: todayIso, metrics: metricsRow });
+      const result = await runSocialSync(supabase, campaignId, provider);
+      return res.json({ ok: true, ...result });
     } catch (err: any) {
       console.error('[social] sync:', err);
-      return res.status(500).json({ error: err?.message || 'sync_failed' });
+      const msg = err?.message || 'sync_failed';
+      const status = msg === 'not_connected' ? 404 : msg === 'handle_nao_configurado' ? 400 : 500;
+      return res.status(status).json({ error: msg });
     }
   });
 
@@ -400,6 +284,32 @@ export function createSocialRouter(supabase: SupabaseClient): Router {
     }
   });
 
+  // ── HISTORY: manager_runs com source LIKE 'social_%' (cenários gerados) ──
+  router.get('/history', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const { data, error } = await supabase
+      .from('manager_runs')
+      .select('id, intent, "finalSummary", iterations, status, "startedAt", "finishedAt", source')
+      .eq('campaignId', campaignId)
+      .like('source', 'social%')
+      .order('startedAt', { ascending: false })
+      .limit(30);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ runs: data || [] });
+  });
+
+  // ── LAST CHANGE: o que o sync noturno detectou na campanha ───────────
+  router.get('/last-change', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const { data } = await supabase.from('social_sync_log')
+      .select('lastSyncedDate, lastSyncedAt, lastChangeDetected')
+      .eq('campaignId', campaignId)
+      .maybeSingle();
+    return res.json(data || {});
+  });
+
   // ── CLEANUP: limpa states expirados (chamado pelo routinesWorker) ─────
   router.post('/cleanup-expired-state', async (_req: Request, res: Response) => {
     const { error } = await supabase.from('social_oauth_state')
@@ -411,51 +321,3 @@ export function createSocialRouter(supabase: SupabaseClient): Router {
   return router;
 }
 
-// ── Renderizadores para o RAG (texto humano-friendly) ───────────────────
-
-function renderXSnapshotForRag(snap: any): string {
-  const lines = [
-    `Perfil do candidato no X (ex-Twitter):`,
-    `- @${snap.username} (${snap.name})`,
-    `- Seguidores: ${snap.followers ?? 'desconhecido'} | Seguindo: ${snap.following ?? 'desconhecido'}`,
-    `- Total de posts: ${snap.postsCount ?? 'desconhecido'}`,
-    snap.bio ? `- Bio: ${snap.bio}` : null,
-  ].filter(Boolean);
-  if (snap.recentTweets?.length) {
-    lines.push('\nÚltimos posts e métricas:');
-    snap.recentTweets.slice(0, 5).forEach((t: any, i: number) => {
-      lines.push(`${i + 1}. "${t.text.slice(0, 140)}" — ❤️ ${t.likeCount} 🔁 ${t.retweetCount} 💬 ${t.replyCount}${t.impressionCount ? ` 👁️ ${t.impressionCount}` : ''}`);
-    });
-  }
-  return lines.join('\n');
-}
-
-function renderLinkedInSnapshotForRag(snap: any): string {
-  const lines = [
-    `Perfil do candidato no LinkedIn:`,
-    `- Nome: ${snap.profile.name}`,
-    snap.profile.headline ? `- Posição: ${snap.profile.headline}` : null,
-    snap.profile.email ? `- E-mail registrado: ${snap.profile.email}` : null,
-  ].filter(Boolean);
-  if (snap.organizations?.length) {
-    lines.push('\nPáginas LinkedIn administradas pelo candidato:');
-    snap.organizations.forEach((o: any) => {
-      lines.push(`- ${o.name}: ${o.followers ?? 'sem dado'} seguidores`);
-    });
-  } else {
-    lines.push('\nNenhuma Company Page administrada (ou sem aprovação Marketing Developer).');
-  }
-  return lines.join('\n');
-}
-
-function renderKwaiSnapshotForRag(snap: any): string {
-  const lines = [
-    `Perfil público do candidato no Kwai:`,
-    `- @${snap.handle} (${snap.displayName ?? 'sem nome'})`,
-    `- URL: ${snap.profileUrl}`,
-    `- Seguidores: ${snap.followers ?? 'desconhecido'} | Seguindo: ${snap.following ?? 'desconhecido'}`,
-    `- Vídeos publicados: ${snap.videosCount ?? 'desconhecido'}`,
-    snap.bio ? `- Bio: ${snap.bio}` : null,
-  ].filter(Boolean);
-  return lines.join('\n');
-}

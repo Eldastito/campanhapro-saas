@@ -17,6 +17,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CronExpressionParser } from 'cron-parser';
 import { fireOrchestration } from '../../../lib/orchestrationTriggers';
+import { runSocialSync, detectSignificantChange, SyncProvider } from '../../../lib/socialSyncRunner';
 
 const TICK_MS = 60_000;        // 1 minuto
 const BATCH_LIMIT = 20;        // máximo de triggers por tick (proteção)
@@ -151,6 +152,114 @@ async function tickManualRuns(supabase: SupabaseClient) {
   }
 }
 
+/**
+ * Sync noturno de redes sociais (#124).
+ *
+ * Roda 1x/dia às 04h BR (sem cron-parser — checa relógio direto no tick).
+ * Pra cada campanha com social_tokens:
+ *   1. Lock atômico via social_sync_log (UPSERT condicionado a lastSyncedDate < hoje)
+ *   2. Pra cada provider conectado (x/linkedin/kwai) → runSocialSync
+ *   3. detectSignificantChange — se houver mudança ≥20% followers ou post viral,
+ *      dispara fireOrchestration. SE NÃO, encerra silencioso (zero tokens IA).
+ */
+const SYNC_HOUR_BR = 4;        // 04h BR
+const SYNC_PROVIDERS: SyncProvider[] = ['x', 'linkedin', 'kwai'];
+
+function getBRHour(): number {
+  // America/Sao_Paulo é UTC-3 (sem DST desde 2019)
+  const utc = new Date();
+  const sp = new Date(utc.getTime() - 3 * 60 * 60 * 1000);
+  return sp.getUTCHours();
+}
+
+function todayInBR(): string {
+  const utc = new Date();
+  const sp = new Date(utc.getTime() - 3 * 60 * 60 * 1000);
+  return sp.toISOString().slice(0, 10);
+}
+
+async function tickSocialSync(supabase: SupabaseClient) {
+  // Janela: só dispara entre 04h-05h BR (evita rodar 24h/dia depois da janela)
+  const hour = getBRHour();
+  if (hour < SYNC_HOUR_BR || hour > SYNC_HOUR_BR + 1) return;
+
+  const today = todayInBR();
+
+  // 1) Lista campanhas que TÊM social_tokens e ainda NÃO sincronizaram hoje.
+  //    Subconsulta seria mais limpa, mas o SDK do supabase-js não suporta —
+  //    pegamos as candidatas via DISTINCT e filtramos com JOIN manual.
+  const { data: tokens } = await supabase
+    .from('social_tokens')
+    .select('campaignId, provider')
+    .in('provider', SYNC_PROVIDERS as string[]);
+  if (!tokens?.length) return;
+
+  const byCampaign = new Map<string, SyncProvider[]>();
+  for (const t of tokens as any[]) {
+    const arr = byCampaign.get(t.campaignId) || [];
+    arr.push(t.provider as SyncProvider);
+    byCampaign.set(t.campaignId, arr);
+  }
+
+  for (const [campaignId, providers] of byCampaign) {
+    // 2) Lock atômico: tenta UPDATE WHERE lastSyncedDate < hoje (ou null).
+    //    Se nenhuma linha foi atualizada, outro worker já pegou — pula.
+    //    Primeiro garante que existe linha.
+    await supabase.from('social_sync_log')
+      .upsert({ campaignId, updatedAt: new Date().toISOString() }, { onConflict: 'campaignId' });
+
+    const { data: locked } = await supabase.from('social_sync_log')
+      .update({ lastSyncedDate: today, lastSyncedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+      .eq('campaignId', campaignId)
+      .or(`lastSyncedDate.is.null,lastSyncedDate.lt.${today}`)
+      .select('campaignId')
+      .maybeSingle();
+    if (!locked) continue; // outro worker já pegou hoje
+
+    console.log(`[social-sync] iniciando sync noturno campanha=${campaignId} providers=${providers.join(',')}`);
+
+    let synced = 0;
+    for (const p of providers) {
+      try {
+        await runSocialSync(supabase, campaignId, p);
+        synced++;
+      } catch (err: any) {
+        console.warn(`[social-sync] falha ${campaignId}/${p}:`, err?.message || err);
+      }
+    }
+    if (synced === 0) continue;
+
+    // 3) Detecta mudança significativa (compara hoje vs ontem)
+    let change: Awaited<ReturnType<typeof detectSignificantChange>> = null;
+    try {
+      change = await detectSignificantChange(supabase, campaignId);
+    } catch (err: any) {
+      console.warn('[social-sync] detect falhou:', err?.message);
+    }
+
+    if (change) {
+      // Persiste evidência da mudança (auditável + UI mostra "última detecção")
+      await supabase.from('social_sync_log').update({
+        lastChangeDetected: { detectedAt: new Date().toISOString(), ...change },
+        updatedAt: new Date().toISOString(),
+      }).eq('campaignId', campaignId);
+
+      const intent = `Mudança significativa detectada nas redes sociais do candidato: ${change.summary}.\n\n`
+        + `Investigue o que causou (qual post, qual canal, qual público), avalie se é oportunidade ou risco, e proponha 2-3 ações concretas pra equipe executar nas próximas 24h. Use os snapshots indexados no RAG (source=social:*).`;
+
+      fireOrchestration(supabase, {
+        campaignId,
+        intent,
+        source: 'social_auto_sync',
+      });
+
+      console.log(`[social-sync] mudança detectada campanha=${campaignId}: ${change.summary}`);
+    } else {
+      console.log(`[social-sync] sync noturno OK campanha=${campaignId} (sem mudança relevante — IA não disparada)`);
+    }
+  }
+}
+
 let _started = false;
 let _intervalHandle: NodeJS.Timeout | null = null;
 
@@ -167,6 +276,7 @@ export function startRoutinesWorker(supabase: SupabaseClient) {
     try {
       await tick(supabase);
       await tickManualRuns(supabase);
+      await tickSocialSync(supabase);
     } catch (e: any) {
       console.error('[routines-worker] erro no tick:', e?.message || e);
     }

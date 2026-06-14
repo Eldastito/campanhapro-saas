@@ -224,6 +224,8 @@ interface RunManagerOpts {
     campaignId: string;
     userId?: string | null;
     intent: string;
+    /** Origem do gatilho — persistida em manager_runs.source pra filtrar histórico por domínio. */
+    source?: string | null;
     onEvent?: (event: ManagerEvent) => void;
 }
 
@@ -232,7 +234,7 @@ const emit = (cb: ((e: ManagerEvent) => void) | undefined, type: ManagerEvent['t
 };
 
 export async function runManager({
-    supabaseAdmin, campaignId, userId, intent, onEvent
+    supabaseAdmin, campaignId, userId, intent, source, onEvent
 }: RunManagerOpts): Promise<ManagerRunResult> {
     if (!supabaseAdmin) throw new Error('supabaseAdmin necessário pro Manager');
 
@@ -243,6 +245,7 @@ export async function runManager({
         intent,
         status: 'running',
         plan: [],
+        source: source || null,
         startedAt: new Date().toISOString(),
     }).select('id').single();
     if (rowErr) throw new Error('Erro ao criar manager_run: ' + rowErr.message);

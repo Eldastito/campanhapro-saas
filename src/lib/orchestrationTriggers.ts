@@ -37,6 +37,7 @@ export function fireOrchestration(supabaseAdmin: any, opts: FireOrchestrationOpt
         campaignId: opts.campaignId,
         userId: opts.userId ?? null,
         intent: opts.intent,
+        source: opts.source,
       });
       console.log(`[trigger:${opts.source}] ok status=${r.status} cost=$${(r.totalCostCents / 100).toFixed(3)} iter=${r.iterations}`);
     } catch (e: any) {
