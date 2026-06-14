@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  MessageSquare, 
-  Instagram, 
-  Facebook, 
-  Video, 
-  CheckCircle2, 
-  AlertCircle, 
+import {
+  MessageSquare,
+  Instagram,
+  Facebook,
+  Video,
+  CheckCircle2,
+  AlertCircle,
   Link2,
   Settings,
   RefreshCw,
@@ -13,11 +13,30 @@ import {
   Key,
   Database,
   HelpCircle,
-  BookOpen
+  BookOpen,
+  Twitter,
+  Linkedin,
+  Sparkles
 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import WhatsAppInstancesPanel from './WhatsAppInstancesPanel';
+
+async function authFetch(url: string, init: RequestInit = {}): Promise<any> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  const r = await fetch(url, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+  return j;
+}
 
 interface ConnectionStatus {
   provider: string;
@@ -33,12 +52,18 @@ export const SocialConnectionsHub: React.FC = () => {
     instagram: { provider: 'instagram', connected: false },
     facebook: { provider: 'facebook', connected: false },
     tiktok: { provider: 'tiktok', connected: false },
+    x: { provider: 'x', connected: false },
+    linkedin: { provider: 'linkedin', connected: false },
+    kwai: { provider: 'kwai', connected: false },
   });
   const [loading, setLoading] = useState(true);
   const [configuring, setConfiguring] = useState<string | null>(null);
   const [waSettings, setWaSettings] = useState({ phoneNumberId: '', wabaId: '' });
   const [manualSettings, setManualSettings] = useState({ accessToken: '', accountId: '' });
+  const [kwaiHandle, setKwaiHandle] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
+  const [analyzingIA, setAnalyzingIA] = useState(false);
 
   useEffect(() => {
     if (configuring === 'whatsapp' && connections.whatsapp?.settings) {
@@ -79,6 +104,9 @@ export const SocialConnectionsHub: React.FC = () => {
         instagram: { provider: 'instagram', connected: false },
         facebook: { provider: 'facebook', connected: false },
         tiktok: { provider: 'tiktok', connected: false },
+        x: { provider: 'x', connected: false },
+        linkedin: { provider: 'linkedin', connected: false },
+        kwai: { provider: 'kwai', connected: false },
       };
 
       data?.forEach((token: any) => {
@@ -152,36 +180,72 @@ export const SocialConnectionsHub: React.FC = () => {
     }
   };
 
+  // ── OAuth & Kwai handlers (#123) ─────────────────────────────────────
+  const startOAuth = async (provider: 'x' | 'linkedin') => {
+    try {
+      const { authorizeUrl } = await authFetch(`/api/v1/social/connect/${provider}/start`, { method: 'POST' });
+      window.location.href = authorizeUrl;
+    } catch (err: any) {
+      alert(`Não consegui iniciar a conexão com ${provider}: ${err?.message || 'erro'}\n\nDica: cheque se o admin do projeto configurou as variáveis de ambiente do provedor.`);
+    }
+  };
+
+  const connectKwai = async () => {
+    if (!kwaiHandle.trim()) return alert('Informe o @ ou URL do perfil Kwai.');
+    try {
+      const res = await authFetch('/api/v1/social/connect/kwai', {
+        method: 'POST',
+        body: JSON.stringify({ handleOrUrl: kwaiHandle.trim() }),
+      });
+      alert(`Perfil Kwai conectado: @${res.handle}`);
+      setConfiguring(null);
+      setKwaiHandle('');
+      fetchConnections();
+    } catch (err: any) {
+      alert(`Falha ao conectar Kwai: ${err?.message || 'erro'}`);
+    }
+  };
+
+  const syncProvider = async (provider: string) => {
+    setSyncingProvider(provider);
+    try {
+      await authFetch(`/api/v1/social/sync/${provider}`, { method: 'POST' });
+      alert(`Sincronização de ${provider} concluída. Os agentes IA já podem analisar.`);
+      fetchConnections();
+    } catch (err: any) {
+      alert(`Falha ao sincronizar ${provider}: ${err?.message || 'erro'}`);
+    } finally {
+      setSyncingProvider(null);
+    }
+  };
+
+  const analyzeWithIA = async () => {
+    setAnalyzingIA(true);
+    try {
+      await authFetch('/api/v1/social/analyze', { method: 'POST', body: JSON.stringify({}) });
+      alert('Análise iniciada. O orquestrador delegou pros agentes (Estrategista, Social Media, Growth Hacker). Acompanhe no Quartel General > Histórico.');
+    } catch (err: any) {
+      alert(`Falha ao iniciar análise: ${err?.message || 'erro'}`);
+    } finally {
+      setAnalyzingIA(false);
+    }
+  };
+
   const providers = [
-    { 
-      id: 'whatsapp', 
-      name: 'WhatsApp Business', 
-      icon: MessageSquare, 
-      color: '#25D366', 
-      desc: 'Envio de convites e gestão de bases via API Cloud.',
-      requiresSettings: true
-    },
-    { 
-      id: 'instagram', 
-      name: 'Instagram', 
-      icon: Instagram, 
-      color: '#E4405F', 
-      desc: 'Análise de engajamento e resposta automática a comentários.' 
-    },
-    { 
-      id: 'facebook', 
-      name: 'Facebook Pages', 
-      icon: Facebook, 
-      color: '#1877F2', 
-      desc: 'Gestão de anúncios e posts na página oficial.' 
-    },
-    { 
-      id: 'tiktok', 
-      name: 'TikTok for Business', 
-      icon: Video, 
-      color: '#000000', 
-      desc: 'Monitoramento de trends e performance de vídeos.' 
-    },
+    { id: 'whatsapp', name: 'WhatsApp Business', icon: MessageSquare, color: '#25D366',
+      desc: 'Envio de convites e gestão de bases via API Cloud.', requiresSettings: true, mode: 'manual' as const },
+    { id: 'instagram', name: 'Instagram', icon: Instagram, color: '#E4405F',
+      desc: 'Análise de engajamento e resposta automática a comentários.', mode: 'manual' as const },
+    { id: 'facebook', name: 'Facebook Pages', icon: Facebook, color: '#1877F2',
+      desc: 'Gestão de anúncios e posts na página oficial.', mode: 'manual' as const },
+    { id: 'tiktok', name: 'TikTok for Business', icon: Video, color: '#000000',
+      desc: 'Monitoramento de trends e performance de vídeos.', mode: 'manual' as const },
+    { id: 'x', name: 'X (Twitter)', icon: Twitter, color: '#1DA1F2',
+      desc: 'OAuth oficial — métricas do perfil, posts recentes, engajamento.', mode: 'oauth' as const },
+    { id: 'linkedin', name: 'LinkedIn (Company Page)', icon: Linkedin, color: '#0A66C2',
+      desc: 'OAuth oficial — perfil + métricas da Company Page do candidato.', mode: 'oauth' as const },
+    { id: 'kwai', name: 'Kwai (perfil público)', icon: Video, color: '#FF6B00',
+      desc: 'Leitura pública do perfil — seguidores, vídeos, engajamento estimado.', mode: 'kwai' as const },
   ];
 
   if (loading) {
@@ -204,13 +268,24 @@ export const SocialConnectionsHub: React.FC = () => {
             <p className="text-xs text-slate-400">Conecte as redes sociais para postagem automática.</p>
           </div>
         </div>
-        <button 
-          onClick={() => setShowHelp(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-indigo-500/20"
-        >
-          <HelpCircle className="w-4 h-4" />
-          ONDE ENCONTRAR MEUS TOKENS?
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={analyzeWithIA}
+            disabled={analyzingIA}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-purple-500/20"
+            title="Dispara orquestrador IA com snapshots das redes sociais"
+          >
+            <Sparkles className={`w-4 h-4 ${analyzingIA ? 'animate-spin' : ''}`} />
+            {analyzingIA ? 'INICIANDO...' : 'ANALISAR COM IA'}
+          </button>
+          <button
+            onClick={() => setShowHelp(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-indigo-500/20"
+          >
+            <HelpCircle className="w-4 h-4" />
+            TOKENS
+          </button>
+        </div>
       </div>
 
       <WhatsAppInstancesPanel />
@@ -250,24 +325,41 @@ export const SocialConnectionsHub: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => setConfiguring(p.id)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
-                    status.connected 
-                      ? 'bg-slate-700 hover:bg-slate-600 text-white' 
-                      : 'bg-blue-600 hover:bg-blue-500 text-white'
-                  }`}
-                >
-                  <Settings className="w-4 h-4" />
-                  {status.connected ? 'Configurar' : 'Conectar via API'}
-                </button>
-                {status.connected && (
-                  <button 
-                    onClick={() => fetchConnections()}
-                    className="p-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
-                    title="Sincronizar"
+                {p.mode === 'oauth' && !status.connected ? (
+                  <button
+                    onClick={() => startOAuth(p.id as 'x' | 'linkedin')}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
                   >
-                    <RefreshCw className="w-4 h-4" />
+                    <Link2 className="w-4 h-4" />
+                    Conectar via OAuth
+                  </button>
+                ) : p.mode === 'kwai' && !status.connected ? (
+                  <button
+                    onClick={() => setConfiguring(p.id)}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Informar perfil público
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setConfiguring(p.id)}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-colors ${
+                      status.connected ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'
+                    }`}
+                  >
+                    <Settings className="w-4 h-4" />
+                    {status.connected ? 'Configurar' : 'Conectar via API'}
+                  </button>
+                )}
+                {status.connected && (p.mode === 'oauth' || p.mode === 'kwai') && (
+                  <button
+                    onClick={() => syncProvider(p.id)}
+                    disabled={syncingProvider === p.id}
+                    className="p-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg transition-colors"
+                    title="Sincronizar agora"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${syncingProvider === p.id ? 'animate-spin' : ''}`} />
                   </button>
                 )}
               </div>
@@ -300,7 +392,29 @@ export const SocialConnectionsHub: React.FC = () => {
               </button>
             </div>
 
-            {configuring === 'whatsapp' ? (
+            {configuring === 'kwai' ? (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Cole o <b>@usuário</b> ou a <b>URL</b> do perfil público do candidato no Kwai. Vamos ler os dados públicos (seguidores, vídeos, bio).
+                </p>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Perfil Kwai</label>
+                  <div className="relative">
+                    <Video className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
+                    <input
+                      type="text"
+                      value={kwaiHandle}
+                      onChange={(e) => setKwaiHandle(e.target.value)}
+                      placeholder="@candidato ou https://kwai.com/@candidato"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white focus:ring-2 focus:ring-orange-500 outline-none transition-all placeholder:text-slate-700"
+                    />
+                  </div>
+                </div>
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-[11px] text-amber-200/80">
+                  ⚠️ Kwai não tem API pública. Lemos via scraping leve do perfil público. Se o Kwai mudar o HTML, pode quebrar — a IA é avisada.
+                </div>
+              </div>
+            ) : configuring === 'whatsapp' ? (
               <div className="space-y-4">
                 <p className="text-sm text-slate-400 leading-relaxed">
                   Insira os identificadores da sua conta na <b>Meta Business Cloud API</b> para habilitar o envio de mensagens.
@@ -373,8 +487,12 @@ export const SocialConnectionsHub: React.FC = () => {
               >
                 Cancelar
               </button>
-              <button 
-                onClick={() => configuring === 'whatsapp' ? saveSettings('whatsapp', waSettings) : saveManualConnection(configuring!)}
+              <button
+                onClick={() => {
+                  if (configuring === 'kwai') return connectKwai();
+                  if (configuring === 'whatsapp') return saveSettings('whatsapp', waSettings);
+                  return saveManualConnection(configuring!);
+                }}
                 className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-500/20 transition-all active:scale-95"
               >
                 Salvar Configurações
