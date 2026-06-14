@@ -23,7 +23,9 @@ import crypto from 'crypto';
 import { audit } from '../observability/auditLogger';
 import { handleInboundForBot } from '../../../lib/voterBot';
 import { broadcastCallCenter } from '../callcenter/callCenterRouter';
-import { reconnectInstance } from '../integrations/evolutionApiClient';
+import { reconnectInstance, downloadMediaBase64 } from '../integrations/evolutionApiClient';
+import { transcribeAudio } from '../../../lib/whisperTranscribe';
+import { handleInboundForSecretary } from '../../../lib/secretaryBotWA';
 
 interface RawRequest extends Request {
   rawBody?: Buffer;
@@ -259,6 +261,11 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
         const { data: camp } = await supabaseAdmin.from('campaigns')
           .select('"voterBotEnabled", name, "electionRole"').eq('id', campaignId).maybeSingle();
         const botEnabled = !!(camp as any)?.voterBotEnabled && !!(inst as any).apiKey;
+        // Carrega o telefone PESSOAL do candidato (se configurado) — usado pra
+        // rotear comandos da AGENDA pela Secretária IA (#119 parte 2).
+        const { data: cfg } = await supabaseAdmin.from('campaign_configs')
+          .select('"candidatePhone"').eq('id', campaignId).maybeSingle();
+        const candidatePhoneRaw = String((cfg as any)?.candidatePhone || '').replace(/\D+/g, '');
         for (const m of msgs) {
           // Evolution GO (whatsmeow) usa data.Info (Sender/Chat/IsFromMe/PushName)
           // + data.Message. Evolution API/Node usa data.key + data.message.
@@ -317,9 +324,56 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
             broadcastCallCenter(campaignId, 'new_message', { conversationId: ingested.conversationId });
           }
 
-          // Bot ao vivo: responde mensagens INBOUND de eleitores (nunca grupos,
-          // nunca as próprias mensagens). Fire-and-forget — não trava o webhook.
-          if (botEnabled && direction === 'inbound' && !isGroup) {
+          // Roteamento candidato vs eleitor (#119 parte 2):
+          // - Mensagens INBOUND DO candidato (externalId == candidatePhone) →
+          //   Secretária IA (agenda). Suporta áudio (Whisper transcreve antes).
+          // - Outras → voterBot existente.
+          const isFromCandidate = direction === 'inbound' && !isGroup &&
+            candidatePhoneRaw.length > 0 && externalId === candidatePhoneRaw;
+
+          if (isFromCandidate && (inst as any).apiKey) {
+            // Fire-and-forget. Pode demorar (download de áudio + Whisper).
+            void (async () => {
+              try {
+                let cmdText = text;
+                // Se é áudio (audioMessage / pttMessage), baixa + transcreve
+                const audioBlob = (msgObj as any).audioMessage ?? (msgObj as any).AudioMessage
+                  ?? (msgObj as any).pttMessage ?? (msgObj as any).PttMessage;
+                if (audioBlob) {
+                  cmdText = '[mídia ou mensagem não-texto]'; // marca pra fluxo
+                  const dl = await downloadMediaBase64(
+                    (inst as any).instanceName || instanceName,
+                    (inst as any).apiKey,
+                    {
+                      id: providerMessageId,
+                      remoteJid: remoteJid,
+                      fromMe: false,
+                    },
+                  );
+                  if (dl) {
+                    const transcript = await transcribeAudio({
+                      audio: dl.buffer, mimeType: dl.mimeType, language: 'pt',
+                    });
+                    if (transcript) cmdText = transcript;
+                  }
+                }
+                if (!cmdText || cmdText.startsWith('[mídia')) {
+                  console.log('[secretaryWA] áudio sem transcrição — pulando');
+                  return;
+                }
+                await handleInboundForSecretary(supabaseAdmin, {
+                  campaignId,
+                  instanceName: (inst as any).instanceName || instanceName,
+                  apiKey: (inst as any).apiKey,
+                  phone: externalId,
+                  text: cmdText,
+                });
+              } catch (e: any) {
+                console.error('[secretaryWA] handler falhou:', e?.message || e);
+              }
+            })();
+          } else if (botEnabled && direction === 'inbound' && !isGroup) {
+            // Eleitor (não-candidato) → voterBot
             const { data: ct } = await supabaseAdmin.from('contacts')
               .select('id').eq('campaignId', campaignId).eq('phone', externalId).maybeSingle();
             void handleInboundForBot(supabaseAdmin, {

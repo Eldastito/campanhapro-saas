@@ -41,6 +41,8 @@ const SettingsPage = () => {
 
             <DailyBriefingSection />
 
+            <SecretaryWhatsappSection />
+
             {/* Memória externa da IA (#56) — task admin 1x/dia, fica junto das outras de IA */}
             <ExternalMemoryRefreshCard />
 
@@ -432,6 +434,87 @@ const MaintenanceSection = () => {
                 {syncing ? 'Sincronizando...' : 'Sincronizar Jornada do Eleitor'}
             </button>
             {result && <p className="mt-4 text-sm font-bold text-emerald-400">{result}</p>}
+        </Card>
+    );
+};
+
+// Seção pra setar o WhatsApp pessoal do candidato. Mensagens vindas DESSE
+// número são roteadas pra Secretária IA (agenda por voz). Outras vão pro
+// voterBot. Plano B: o botão "Voz" no Dashboard continua funcionando direto
+// pelo navegador.
+const SecretaryWhatsappSection = () => {
+    const { user } = useAuth();
+    const [phone, setPhone] = useState('');
+    const [original, setOriginal] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [savedAt, setSavedAt] = useState<number | null>(null);
+
+    useEffect(() => {
+        if (!user?.campaignId) return;
+        (async () => {
+            const { data } = await supabase.from('campaign_configs')
+                .select('"candidatePhone"').eq('id', user.campaignId).maybeSingle();
+            const cur = (data as any)?.candidatePhone || '';
+            setPhone(cur); setOriginal(cur);
+        })();
+    }, [user?.campaignId]);
+
+    const save = async () => {
+        if (!user?.campaignId) return;
+        setSaving(true);
+        try {
+            const cleaned = phone.replace(/\D+/g, '');
+            const { error } = await supabase.from('campaign_configs')
+                .update({ candidatePhone: cleaned || null })
+                .eq('id', user.campaignId);
+            if (error) throw error;
+            setOriginal(cleaned);
+            setSavedAt(Date.now());
+        } catch (e: any) {
+            alert('Erro ao salvar: ' + (e?.message || 'desconhecido'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const dirty = phone.replace(/\D+/g, '') !== original;
+    return (
+        <Card className="border-t-4 border-t-emerald-500">
+            <div className="flex items-center gap-3 mb-3">
+                <Brain className="w-6 h-6 text-emerald-400" />
+                <h3 className="text-lg font-bold text-slate-300">Secretária IA por voz no WhatsApp</h3>
+            </div>
+            <p className="text-sm text-slate-400 mb-4">
+                Quando o candidato mandar áudio do <b>WhatsApp pessoal dele</b> pro chip da
+                campanha, a Secretária IA transcreve e agenda automaticamente.
+                Exemplo: <i>"Amanhã 14h reunião com prefeito no gabinete"</i> → confirma e salva.
+                Plano B: continua funcionando o botão <b>Voz</b> no Dashboard (microfone do navegador).
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch">
+                <input
+                    type="tel"
+                    inputMode="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Ex: 5521999990000 (DDI + DDD + número, sem espaço)"
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
+                />
+                <button
+                    onClick={save}
+                    disabled={!dirty || saving}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold disabled:opacity-40">
+                    {saving ? 'Salvando…' : dirty ? 'Salvar' : 'Salvo'}
+                </button>
+            </div>
+            {savedAt && !dirty && (
+                <p className="text-xs text-emerald-400 mt-2 flex items-center gap-1">
+                    ✓ Salvo. A IA já roteia mensagens desse número pra agenda.
+                </p>
+            )}
+            <p className="text-[11px] text-slate-500 mt-3">
+                Em branco = desativado. Mensagens vindas do número configurado <b>não</b>
+                vão pro voterBot/Caixa de Entrada — vão direto pro fluxo da agenda.
+            </p>
         </Card>
     );
 };

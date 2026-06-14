@@ -349,6 +349,41 @@ export async function sendText(
 }
 
 /**
+ * Baixa o conteúdo bruto de uma mídia (áudio/imagem/vídeo/documento) pela
+ * chave da mensagem. Usado pra transcrever áudio do candidato pela
+ * Secretária IA WhatsApp.
+ *
+ * Endpoint Evolution GO: POST /chat/getBase64FromMediaMessage/{instance}
+ * body: { message: { key: { id, remoteJid, fromMe } } }
+ * resposta: { base64, mediaType, ... }
+ *
+ * Retorna { buffer, mimeType } ou null se falhar.
+ */
+export async function downloadMediaBase64(
+  instanceName: string,
+  apiKey: string,
+  messageKey: { id: string; remoteJid: string; fromMe?: boolean },
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  try {
+    const r = await callWithKeys<any>(
+      'POST',
+      '/chat/getBase64FromMediaMessage',
+      { message: { key: messageKey }, convertToMp4: false },
+      [apiKey, EVOLUTION_GLOBAL_API_KEY],
+      instanceName,
+    );
+    const b64 = r?.base64 ?? r?.Base64 ?? r?.data?.base64 ?? r?.data?.Base64;
+    const mime = String(r?.mimetype ?? r?.MimeType ?? r?.data?.mimetype ?? 'audio/ogg');
+    if (!b64 || typeof b64 !== 'string') return null;
+    const buffer = Buffer.from(b64, 'base64');
+    return { buffer, mimeType: mime };
+  } catch (err: any) {
+    console.warn('[Evolution] downloadMediaBase64 falhou:', err?.message);
+    return null;
+  }
+}
+
+/**
  * Re-register the webhook URL for an existing instance. In Evolution GO this
  * means calling /instance/connect again with the desired webhookUrl (there's
  * no separate /webhook/set endpoint).
