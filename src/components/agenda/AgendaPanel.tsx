@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Calendar, Plus, Edit2, Trash2, MapPin, BellRing, X, Clock, User,
-  ChevronLeft, ChevronRight, Check,
+  ChevronLeft, ChevronRight, Check, Sunrise, Sun, Moon, GripVertical,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
@@ -149,6 +149,85 @@ const AgendaPanel: React.FC<AgendaPanelProps> = ({ voiceSlot }) => {
             .sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
         [events, selectedDate]);
 
+    // Kanban: 3 colunas por turno (manhã 6-12h, tarde 12-18h, noite 18-24h).
+    // Drag-and-drop nativo HTML5 — sem dep extra. Soltar em outra coluna
+    // ajusta o horário (default 09/14/20) mantendo dia/duração. Soltar em
+    // outro dia (mini calendário) ajusta data mantendo hora.
+    const KANBAN_COLS: { key: 'morning'|'afternoon'|'evening'; label: string; range: string; defaultHour: number; icon: React.ReactNode; accent: string }[] = [
+        { key: 'morning',   label: 'Manhã',  range: '06h – 12h', defaultHour: 9,  icon: <Sunrise className="w-4 h-4" />, accent: 'border-amber-500/30 bg-amber-500/5' },
+        { key: 'afternoon', label: 'Tarde',  range: '12h – 18h', defaultHour: 14, icon: <Sun className="w-4 h-4" />,     accent: 'border-orange-500/30 bg-orange-500/5' },
+        { key: 'evening',   label: 'Noite',  range: '18h – 23h', defaultHour: 20, icon: <Moon className="w-4 h-4" />,     accent: 'border-indigo-500/30 bg-indigo-500/5' },
+    ];
+
+    const slotOf = (startsAt: string): 'morning' | 'afternoon' | 'evening' => {
+        const h = new Date(startsAt).getHours();
+        if (h < 12) return 'morning';
+        if (h < 18) return 'afternoon';
+        return 'evening';
+    };
+
+    const [dragId, setDragId] = React.useState<string | null>(null);
+    const [overSlot, setOverSlot] = React.useState<string | null>(null);
+    const [overDay, setOverDay] = React.useState<string | null>(null);
+    const [saving, setSaving] = React.useState<string | null>(null);
+
+    /** Salva no banco a nova data/hora de um evento arrastado. */
+    const persistMove = async (id: string, newStartsAt: string) => {
+        const prev = events.find(e => e.id === id);
+        // Optimistic: atualiza tela imediatamente
+        setEvents(es => es.map(e => e.id === id ? { ...e, startsAt: newStartsAt } : e));
+        setSaving(id);
+        try {
+            const { error } = await supabase
+                .from('agenda_events')
+                .update({ startsAt: newStartsAt })
+                .eq('id', id);
+            if (error) throw error;
+        } catch (err) {
+            console.error('[Agenda] persistMove falhou:', err);
+            // Rollback otimista
+            if (prev) setEvents(es => es.map(e => e.id === id ? prev : e));
+            alert('Não consegui salvar o novo horário. Tente novamente.');
+        } finally {
+            setSaving(null);
+        }
+    };
+
+    const moveToSlot = (id: string, slot: 'morning' | 'afternoon' | 'evening') => {
+        const ev = events.find(e => e.id === id);
+        if (!ev) return;
+        if (slotOf(ev.startsAt) === slot) return; // já está nessa coluna
+        const def = KANBAN_COLS.find(c => c.key === slot)!.defaultHour;
+        const d = new Date(ev.startsAt);
+        d.setHours(def, 0, 0, 0);
+        persistMove(id, d.toISOString());
+    };
+
+    const moveToDay = (id: string, newDayStr: string) => {
+        const ev = events.find(e => e.id === id);
+        if (!ev) return;
+        if (ev.startsAt.slice(0, 10) === newDayStr) return;
+        // Mantém horário; só troca data.
+        const cur = new Date(ev.startsAt);
+        const [y, m, dd] = newDayStr.split('-').map(Number);
+        const next = new Date(cur);
+        next.setFullYear(y, m - 1, dd);
+        persistMove(id, next.toISOString());
+    };
+
+    const onDragStart = (id: string) => (e: React.DragEvent) => {
+        setDragId(id);
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', id); } catch { /* */ }
+    };
+    const onDragEnd = () => { setDragId(null); setOverSlot(null); setOverDay(null); };
+
+    const eventsBySlot = React.useMemo(() => {
+        const buckets: Record<string, AgendaEvent[]> = { morning: [], afternoon: [], evening: [] };
+        for (const ev of dayEvents) buckets[slotOf(ev.startsAt)].push(ev);
+        return buckets;
+    }, [dayEvents]);
+
     const calDays = React.useMemo(() => getDaysInMonth(currentMonth), [currentMonth]);
     const monthLabel = currentMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
@@ -194,10 +273,21 @@ const AgendaPanel: React.FC<AgendaPanelProps> = ({ voiceSlot }) => {
                             const isToday = ds === today;
                             const isSelected = ds === selectedDate;
                             const hasEv = datesWithEvents.has(ds);
+                            const isDropTarget = dragId && overDay === ds;
                             return (
                                 <button key={i} onClick={() => setSelectedDate(ds)}
+                                    onDragOver={(e) => { if (dragId) { e.preventDefault(); setOverDay(ds); } }}
+                                    onDragLeave={() => setOverDay(d => d === ds ? null : d)}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        if (dragId) moveToDay(dragId, ds);
+                                        setOverDay(null);
+                                    }}
                                     className={`relative h-8 w-full rounded text-xs font-medium transition-all
-                                        ${isSelected ? 'bg-emerald-600 text-white' : isToday ? 'bg-emerald-600/20 text-emerald-400' : 'text-slate-400 hover:bg-slate-800'}`}>
+                                        ${isDropTarget ? 'ring-2 ring-emerald-400 bg-emerald-500/20' :
+                                         isSelected ? 'bg-emerald-600 text-white' :
+                                         isToday ? 'bg-emerald-600/20 text-emerald-400' :
+                                         'text-slate-400 hover:bg-slate-800'}`}>
                                     {day}
                                     {hasEv && !isSelected && (
                                         <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-emerald-500" />
@@ -260,28 +350,74 @@ const AgendaPanel: React.FC<AgendaPanelProps> = ({ voiceSlot }) => {
                     </div>
                 </div>
 
-                {/* Event list */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-3">
+                {/* Kanban — 3 colunas por turno. Arraste cards entre colunas
+                    (muda hora) ou pra dias do calendário à esquerda (muda data). */}
+                <div className="flex-1 overflow-y-auto p-4">
                     {loading ? (
                         <div className="flex items-center justify-center h-full text-slate-400">Carregando...</div>
-                    ) : dayEvents.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-center">
-                            <Calendar className="w-12 h-12 text-slate-700 mb-3" />
-                            <p className="text-slate-500 text-sm">Nenhum compromisso para este dia.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 h-full">
+                            {KANBAN_COLS.map(col => {
+                                const colEvents = eventsBySlot[col.key] || [];
+                                const isDropTarget = dragId && overSlot === col.key;
+                                return (
+                                    <div key={col.key}
+                                        onDragOver={(e) => { if (dragId) { e.preventDefault(); setOverSlot(col.key); } }}
+                                        onDragLeave={() => setOverSlot(s => s === col.key ? null : s)}
+                                        onDrop={(e) => {
+                                            e.preventDefault();
+                                            if (dragId) moveToSlot(dragId, col.key);
+                                            setOverSlot(null);
+                                        }}
+                                        className={`flex flex-col rounded-2xl border transition-all ${col.accent} ${
+                                            isDropTarget ? 'ring-2 ring-emerald-400 scale-[1.01]' : ''
+                                        }`}>
+                                        <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-slate-300">{col.icon}</span>
+                                                <span className="text-sm font-bold text-slate-200">{col.label}</span>
+                                                <span className="text-[10px] text-slate-500">{col.range}</span>
+                                            </div>
+                                            <span className="text-xs font-bold text-slate-400">{colEvents.length}</span>
+                                        </div>
+                                        <div className="flex-1 p-2 space-y-2 min-h-[200px]">
+                                            {colEvents.length === 0 ? (
+                                                <div className="flex flex-col items-center justify-center h-full text-center py-6 opacity-50">
+                                                    <Calendar className="w-6 h-6 text-slate-600 mb-2" />
+                                                    <p className="text-[11px] text-slate-500">
+                                                        {dragId ? 'Solte aqui pra mover' : 'Vazio'}
+                                                    </p>
+                                                </div>
+                                            ) : colEvents.map(ev => (
+                                                <div key={ev.id}
+                                                    draggable
+                                                    onDragStart={onDragStart(ev.id)}
+                                                    onDragEnd={onDragEnd}
+                                                    className={`${dragId === ev.id ? 'opacity-40' : ''} cursor-grab active:cursor-grabbing`}>
+                                                    <EventCard
+                                                        event={ev}
+                                                        compact
+                                                        saving={saving === ev.id}
+                                                        onEdit={() => { setEditing(ev); setShowForm(true); }}
+                                                        onDelete={() => handleDelete(ev.id)}
+                                                        onStatusChange={s => handleStatusUpdate(ev.id, s)}
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                    {!loading && dayEvents.length === 0 && (
+                        <div className="mt-4 text-center">
                             <button onClick={() => { setEditing(null); setShowForm(true); }}
-                                className="mt-3 text-emerald-400 text-sm hover:text-emerald-300 transition-colors">
-                                + Adicionar compromisso
+                                className="text-emerald-400 text-sm hover:text-emerald-300 transition-colors">
+                                + Adicionar compromisso pra este dia
                             </button>
                         </div>
-                    ) : dayEvents.map(ev => (
-                        <EventCard
-                            key={ev.id}
-                            event={ev}
-                            onEdit={() => { setEditing(ev); setShowForm(true); }}
-                            onDelete={() => handleDelete(ev.id)}
-                            onStatusChange={s => handleStatusUpdate(ev.id, s)}
-                        />
-                    ))}
+                    )}
                 </div>
             </div>
 
@@ -302,9 +438,13 @@ interface EventCardProps {
     onEdit: () => void;
     onDelete: () => void;
     onStatusChange: (s: AgendaEvent['status']) => void;
+    /** Modo compacto pro Kanban — esconde descrição e reduz padding. */
+    compact?: boolean;
+    /** Mostra spinner pequeno quando salvando após drag. */
+    saving?: boolean;
 }
 
-const EventCard: React.FC<EventCardProps> = ({ event, onEdit, onDelete, onStatusChange }) => {
+const EventCard: React.FC<EventCardProps> = ({ event, onEdit, onDelete, onStatusChange, compact, saving }) => {
     const dt = new Date(event.startsAt);
     const timeStr = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const cat = CATEGORIES.find(c => c.value === event.category)?.label;
@@ -312,14 +452,22 @@ const EventCard: React.FC<EventCardProps> = ({ event, onEdit, onDelete, onStatus
     const status = STATUS_OPTIONS.find(s => s.value === event.status);
 
     return (
-        <div className={`group bg-slate-900/60 border rounded-xl p-4 transition-all hover:border-slate-600
+        <div className={`group bg-slate-900/60 border rounded-xl ${compact ? 'p-2.5' : 'p-4'} transition-all hover:border-slate-600 relative
             ${event.priority === 'critica' ? 'border-red-500/30 hover:border-red-500/50' :
               event.priority === 'alta'    ? 'border-orange-500/20 hover:border-orange-500/40' :
               event.priority === 'media'   ? 'border-amber-500/15 hover:border-amber-500/30' :
               'border-slate-800'}`}>
 
+            {saving && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-400 animate-ping" title="Salvando..." />
+            )}
+
             <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                    {/* Handle de drag — só aparece no modo compact (Kanban) */}
+                    {compact && (
+                        <GripVertical className="w-3 h-3 text-slate-600 mt-1 flex-shrink-0" />
+                    )}
                     {prio && <div className={`mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${prio.dot}`} />}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -345,7 +493,7 @@ const EventCard: React.FC<EventCardProps> = ({ event, onEdit, onDelete, onStatus
                                     <MapPin className="w-3 h-3" /> {event.location}
                                 </p>
                             )}
-                            {event.description && (
+                            {event.description && !compact && (
                                 <p className="text-xs text-slate-500 italic mt-1 line-clamp-2">{event.description}</p>
                             )}
                         </div>
