@@ -6,6 +6,8 @@ import { calculateDaysRemaining, getNextElectionDate } from '../utils/helpers';
 import CalculatorForm from '../components/calculator/CalculatorForm';
 import CalculatorSummary from '../components/calculator/CalculatorSummary';
 import SavedScenariosList from '../components/calculator/SavedScenariosList';
+import CalculatorRealityCard from '../components/calculator/CalculatorRealityCard';
+import CalculatorAnalysisCard from '../components/calculator/CalculatorAnalysisCard';
 
 const CalculatorPage = () => {
   const {
@@ -47,7 +49,7 @@ const CalculatorPage = () => {
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-slate-200">Calculadora de Metas</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <CalculatorForm 
+        <CalculatorForm
           calcState={calcState}
           onChange={handleChange}
           onSetElection={setElectionToNextYear}
@@ -61,7 +63,13 @@ const CalculatorPage = () => {
           />
         </div>
       </div>
-      
+
+      {/* NOVO #134: Realidade (dados de campo) + Recomendação IA */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <CalculatorRealityCard planned={{ vpf: calcState.vpf, cap: calcState.cap, meta: calcState.meta }} />
+        <CalculatorAnalysisCard />
+      </div>
+
       {scenarios.length > 0 && (
         <SavedScenariosList
           scenarios={scenarios}
