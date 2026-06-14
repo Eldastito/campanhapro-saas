@@ -10,9 +10,9 @@ import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 function isAdmin(req: Request): boolean {
-  const t = (req as any).user?.type;
-  // Quem pode mexer no roteador: dono da campanha + coordenadores + líderes.
-  // Operador comum e fiscal NÃO entram. Supreme Admin entra (vê tudo).
+  // CUIDADO: o authMiddleware injeta `userType` (não `type`). Errar isso fazia
+  // TODOS os usuários receberem admin_required, inclusive o dono da campanha.
+  const t = (req as any).user?.userType;
   return t === 'Admin' || t === 'Coordenador' || t === 'Líder' || t === 'Candidato' || (req as any).user?.isSupremeAdmin === true;
 }
 

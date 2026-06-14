@@ -51,7 +51,7 @@ export function createFraudGuardsRouter(supabase: SupabaseClient): Router {
     try {
       const campaignId = (req as any).user?.campaignId;
       const userId = (req as any).user?.id;
-      const userType = (req as any).user?.type;
+      const userType = (req as any).user?.userType;
       if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
       if (userType !== 'Admin' && userType !== 'Coordenador' && userType !== 'Líder') {
         return res.status(403).json({ error: 'admin_required' });
