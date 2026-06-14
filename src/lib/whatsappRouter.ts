@@ -22,6 +22,65 @@ import crypto from 'crypto';
 import { sendText } from '../server/modules/integrations/evolutionApiClient';
 import { fireOrchestration } from './orchestrationTriggers';
 import { classifyMessage, ClassificationResult, RoutingIntent } from './whatsappClassifier';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+/**
+ * Aurora responde inline via Gemini Flash — não depende de voterBotEnabled
+ * nem de Argumentário cadastrado. Resposta curta (3-5 frases) e WhatsApp-friendly.
+ */
+async function respondAsAurora(opts: {
+  apiKey: string;
+  instanceName: string;
+  phone: string;
+  voterAgentName: string;
+  voterAgentTopics: string[];
+  userMessage: string;
+  candidatoNome?: string | null;
+  cargo?: string | null;
+}): Promise<void> {
+  try {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+      // Sem IA: resposta padrão simpática
+      await sendText(opts.instanceName, opts.apiKey, opts.phone,
+        `Recebi sua mensagem! Estou aqui pra falar sobre ${opts.voterAgentTopics.slice(0, 4).join(', ')} ` +
+        `e a candidatura. Pode me dar mais detalhe do que você quer saber? 🤝`);
+      return;
+    }
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: { temperature: 0.7, maxOutputTokens: 250 },
+    });
+    const cargoLine = opts.cargo ? `Cargo pretendido: ${opts.cargo}.` : '';
+    const candidatoLine = opts.candidatoNome ? `Nome do candidato: ${opts.candidatoNome}.` : '';
+    const systemPrompt = `Você é ${opts.voterAgentName}, assistente da campanha eleitoral. ${candidatoLine} ${cargoLine}
+
+REGRAS:
+- Responda de forma curta (3-5 frases), tom natural de WhatsApp.
+- Foque nos tópicos: ${opts.voterAgentTopics.join(', ')}.
+- Se o usuário perguntar sobre algo FORA de política/campanha (ex: pedido de produto, venda), responda: "Aqui no número da campanha eu cuido só de política. Se for sobre negócio, manda uma mensagem nova começando com 'Zapp' que a outra IA te atende."
+- NUNCA invente propostas ou fatos. Se não sabe, diga "Vou anotar pra responder com mais detalhe".
+- Use emoji moderado (1-2 por resposta).
+- Identifique-se como assistente quando perguntarem (compliance TSE).
+
+Mensagem do eleitor: "${opts.userMessage}"
+
+Sua resposta:`;
+    const result = await model.generateContent(systemPrompt);
+    const text = result.response.text().trim().slice(0, 1000);
+    if (text) {
+      await sendText(opts.instanceName, opts.apiKey, opts.phone, text);
+    }
+  } catch (err: any) {
+    console.warn('[aurora] resposta falhou, fallback genérico:', err?.message);
+    try {
+      await sendText(opts.instanceName, opts.apiKey, opts.phone,
+        `Recebi sua mensagem! Posso te ajudar com qualquer dúvida sobre o candidato e a campanha. ` +
+        `Manda sua pergunta com mais detalhe? 🙂`);
+    } catch {}
+  }
+}
 
 export type RouteDecision =
   | 'orchestrator'
@@ -50,7 +109,7 @@ interface RoutingConfig {
   zapflowForwardSecret: string | null;
 }
 
-const LOCK_TTL_MIN = 10;
+const LOCK_TTL_MIN = 5;
 // Thresholds assimétricos: Aurora é o default da campanha (mais permissiva).
 // Forward pro Zapp exige confiança maior pra não silenciar eleitores por engano.
 const AURORA_CONFIDENCE_THRESHOLD = 0.55;
@@ -135,12 +194,18 @@ async function log(
   classification: ClassificationResult | undefined,
   latencyMs: number,
 ) {
-  void supabase.from('whatsapp_routing_log').insert({
-    campaignId, remoteJid, message: message.slice(0, 500),
-    decision,
-    classification: classification || null,
-    latencyMs,
-  });
+  // CUIDADO: builders supabase-js são thenables — sem await/then NÃO disparam
+  // a HTTP request. Usar try/catch pra não derrubar o fluxo principal.
+  try {
+    await supabase.from('whatsapp_routing_log').insert({
+      campaignId, remoteJid, message: message.slice(0, 500),
+      decision,
+      classification: classification || null,
+      latencyMs,
+    });
+  } catch (err: any) {
+    console.warn('[router] log insert falhou:', err?.message || err);
+  }
 }
 
 async function forwardToZapflow(
@@ -231,8 +296,17 @@ export async function routeIncomingMessage(input: RouteInput): Promise<RouteResu
     }
   }
   if (lockIa === 'aurora') {
+    // Aurora responde inline — não delegamos pro voterBot (que pode estar desligado)
+    if (apiKey) {
+      await respondAsAurora({
+        apiKey, instanceName, phone,
+        voterAgentName: cfg.voterAgentName,
+        voterAgentTopics: cfg.voterAgentTopics,
+        userMessage: text,
+      });
+    }
     await log(supabase, campaignId, remoteJid, text, 'aurora', undefined, Date.now() - t0);
-    return { handled: false, decision: 'aurora' }; // libera o voterBot existente
+    return { handled: true, decision: 'aurora' };
   }
 
   // 4) Saudação simples (oi/bom dia/etc) → Aurora cumprimenta e puxa conversa
@@ -279,9 +353,18 @@ export async function routeIncomingMessage(input: RouteInput): Promise<RouteResu
     classification.intent === 'indefinido';
 
   if (auroraAssume) {
+    // Aurora responde inline (sem depender do voterBot legado)
+    if (apiKey) {
+      await respondAsAurora({
+        apiKey, instanceName, phone,
+        voterAgentName: cfg.voterAgentName,
+        voterAgentTopics: cfg.voterAgentTopics,
+        userMessage: text,
+      });
+    }
     await setLock(supabase, campaignId, remoteJid, 'aurora');
     await log(supabase, campaignId, remoteJid, text, 'aurora', classification, Date.now() - t0);
-    return { handled: false, decision: 'aurora', classification }; // libera o voterBot
+    return { handled: true, decision: 'aurora', classification };
   }
 
   // Caso EXTREMAMENTE raro (negocio com confiança 0.55-0.75 e SEM lock anterior): pede esclarecimento UMA vez
