@@ -11,6 +11,7 @@
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fireOrchestration } from '../../../lib/orchestrationTriggers';
+import { validateContact } from '../../../lib/fraudGuards';
 
 /** Colunas nativas de `contacts` que um campo do form pode preencher. */
 const CONTACT_COLUMN_MAP = new Set(['name', 'email', 'phone', 'neighborhood', 'city']);
@@ -109,6 +110,33 @@ export function createPublicFormsRouter(supabaseAdmin: SupabaseClient) {
       if (!contactRow.name || String(contactRow.name).trim() === '') {
         contactRow.name = contactRow.email || contactRow.phone || 'Lead (formulário)';
       }
+
+      // ANTIFRAUDE multi-camada (#121): rejeita lixo estrutural ANTES do INSERT.
+      // - block → 422 (não chega ao banco)
+      // - review → entra com auditStatus='pending_review' pra admin avaliar
+      // - pass → entra com 'approved'
+      const validation = await validateContact(supabaseAdmin, {
+        campaignId: form.campaign_id,
+        phone: contactRow.phone,
+        email: contactRow.email,
+        birthDate: contactRow.birthDate,
+        zipCode: contactRow.zipCode,
+        neighborhood: contactRow.neighborhood,
+        city: contactRow.city,
+      });
+      if (validation.severity === 'block') {
+        return res.status(422).json({
+          error: 'data_invalid',
+          reasons: validation.reasons,
+          message: validation.reasons.map(r => r.message).join(' '),
+        });
+      }
+      // Aplica enrich do ViaCEP se vier (preenche city/uf quando o form não capturou)
+      if (validation.enrichments?.city && !contactRow.city) contactRow.city = validation.enrichments.city;
+
+      contactRow.auditStatus = validation.severity === 'review' ? 'pending_review' : 'approved';
+      contactRow.auditReasons = validation.reasons.length > 0 ? validation.reasons : null;
+      contactRow.auditedAt = new Date().toISOString();
 
       const { data: contact, error: cErr } = await supabaseAdmin
         .from('contacts')

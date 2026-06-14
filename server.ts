@@ -49,6 +49,7 @@ import { createRoutinesRouter } from './src/server/modules/routines/routinesRout
 import { createBudgetRouter } from './src/server/modules/budget/budgetRouter';
 import { createMeetingsRouter } from './src/server/modules/meetings/meetingsRouter';
 import { createIntelRouter } from './src/server/modules/intel/intelRouter';
+import { createFraudGuardsRouter } from './src/server/modules/fraudGuards/fraudGuardsRouter';
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
@@ -277,6 +278,7 @@ async function startServer() {
     app.use('/api/v1/budget', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'budget_ceo'), createBudgetRouter(supabaseAdmin, requireAiBudget(supabaseAdmin)));
     app.use('/api/v1/meetings', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'meetings'), createMeetingsRouter(supabaseAdmin));
     app.use('/api/v1/intel', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'intelligence'), requireAiBudget(supabaseAdmin), createIntelRouter(supabaseAdmin));
+    app.use('/api/v1/fraud-guards', requireAuth, mutationLimiter, createFraudGuardsRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));
@@ -405,11 +407,20 @@ async function startServer() {
           systemInstruction,
           // Cada agente só enxerga as ferramentas pertinentes à sua função (registry).
           tools: toolsForAgent(AGENT_TOOLS, agentId),
+          // Antifraude (#121): NÃO persiste resposta do Auditor no RAG. Senão
+          // a próxima execução recupera o que ele escreveu como "memória ancorada"
+          // e reforça a acusação sem nova evidência (loop alucinatório).
+          noRagPersist: agentId === 'fraud',
       });
       let textResult = aiResponse.text;
 
       // Executar tools que o modelo chamou.
       const toolResults: { tool_call_id: string; output: any }[] = [];
+
+      // Rate-limit antifraude (#121): impede que o LLM crie 50 alertas falsos
+      // numa só resposta. Limite por tool, por chamada.
+      const FRAUD_FLAG_LIMIT_PER_CALL = 5;
+      let fraudFlagCount = 0;
 
       for (const tool of aiResponse.toolCalls || []) {
           const args = JSON.parse(tool.function.arguments || '{}');
@@ -455,18 +466,59 @@ async function startServer() {
               }
               toolOutput = { territorial_alerts: alerts };
           } else if (tool.function.name === 'flag_fraudulent_data') {
-              if (supabaseAdmin) {
-                  await supabaseAdmin.from('fraud_audit_logs').insert({
-                      campaignId,
-                      entityType: args.entity_type,
-                      entityId: args.entity_id,
-                      detectedBy: agentId,
-                      riskLevel: args.risk_level,
-                      description: args.reason,
-                      metadata: { source: 'agent_tool', original_args: args },
-                  });
+              // SALVAGUARDAS ANTIFRAUDE (#121):
+              // 1) Rate-limit por chamada (LLM não pode flag 50 em uma resposta).
+              // 2) Validar que entity_id EXISTE no banco antes de criar alerta —
+              //    impede UUID inventado pelo LLM virar registro "PENDENTE".
+              // 3) Marca como 'ai_unverified' + requer aprovação humana antes
+              //    de aparecer no painel como confirmado.
+              if (fraudFlagCount >= FRAUD_FLAG_LIMIT_PER_CALL) {
+                  toolOutput = { success: false, message: `Limite de ${FRAUD_FLAG_LIMIT_PER_CALL} flags por análise atingido.` };
+              } else if (!supabaseAdmin) {
+                  toolOutput = { success: false, message: 'DB indisponível.' };
+              } else {
+                  // Valida entity_id existe na tabela correspondente
+                  const entityType = String(args.entity_type || '').toLowerCase();
+                  const entityId = String(args.entity_id || '');
+                  const allowedTables: Record<string, string> = {
+                      voters: 'voters', voter: 'voters',
+                      contacts: 'contacts', contact: 'contacts',
+                      street_reports: 'street_reports', report: 'street_reports',
+                      visits: 'visits', visit: 'visits',
+                  };
+                  const targetTable = allowedTables[entityType];
+                  let entityExists = false;
+                  if (targetTable && entityId) {
+                      try {
+                          const { data: found } = await supabaseAdmin
+                              .from(targetTable).select('id').eq('id', entityId).maybeSingle();
+                          entityExists = !!found;
+                      } catch { entityExists = false; }
+                  }
+                  if (!entityExists) {
+                      console.warn(`[fraud-guard] LLM tentou flag entity_id inexistente: ${entityType}/${entityId} — IGNORADO`);
+                      toolOutput = {
+                          success: false,
+                          message: `Registro ${entityType}/${entityId} não existe no banco. Alerta NÃO criado.`,
+                      };
+                  } else {
+                      await supabaseAdmin.from('fraud_audit_logs').insert({
+                          campaignId,
+                          entityType: entityType,
+                          entityId: entityId,
+                          detectedBy: agentId,
+                          riskLevel: args.risk_level,
+                          description: String(args.reason || '').slice(0, 1000),
+                          metadata: {
+                              source: 'ai_unverified',
+                              requires_human_confirmation: true,
+                              original_args: args,
+                          },
+                      });
+                      fraudFlagCount++;
+                      toolOutput = { success: true, message: `Registro ${entityType}/${entityId} sinalizado como ${args.risk_level} — aguarda confirmação humana.` };
+                  }
               }
-              toolOutput = { success: true, message: `Registro ${args.entity_type}/${args.entity_id} flagged como ${args.risk_level}.` };
           } else if (tool.function.name === 'get_competitive_intel') {
               if (supabaseAdmin) {
                   const { data } = await supabaseAdmin.from('competitor_intel')
