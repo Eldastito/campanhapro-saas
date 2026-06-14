@@ -51,6 +51,7 @@ import { createMeetingsRouter } from './src/server/modules/meetings/meetingsRout
 import { createIntelRouter } from './src/server/modules/intel/intelRouter';
 import { createFraudGuardsRouter } from './src/server/modules/fraudGuards/fraudGuardsRouter';
 import { createSocialRouter } from './src/server/modules/social/socialRouter';
+import { createWhatsappRoutingRouter } from './src/server/modules/whatsappRouting/whatsappRoutingRouter';
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
@@ -281,6 +282,7 @@ async function startServer() {
     app.use('/api/v1/intel', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'intelligence'), requireAiBudget(supabaseAdmin), createIntelRouter(supabaseAdmin));
     app.use('/api/v1/fraud-guards', requireAuth, mutationLimiter, createFraudGuardsRouter(supabaseAdmin));
     app.use('/api/v1/social', requireAuth, mutationLimiter, createSocialRouter(supabaseAdmin));
+    app.use('/api/v1/whatsapp-routing', requireAuth, mutationLimiter, createWhatsappRoutingRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));

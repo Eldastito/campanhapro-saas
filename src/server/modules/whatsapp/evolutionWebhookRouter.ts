@@ -26,6 +26,7 @@ import { broadcastCallCenter } from '../callcenter/callCenterRouter';
 import { reconnectInstance, downloadMediaBase64 } from '../integrations/evolutionApiClient';
 import { transcribeAudio } from '../../../lib/whisperTranscribe';
 import { handleInboundForSecretary } from '../../../lib/secretaryBotWA';
+import { routeIncomingMessage } from '../../../lib/whatsappRouter';
 
 interface RawRequest extends Request {
   rawBody?: Buffer;
@@ -330,6 +331,28 @@ export function createEvolutionWebhookRouter(supabaseAdmin: SupabaseClient) {
           // - Outras → voterBot existente.
           const isFromCandidate = direction === 'inbound' && !isGroup &&
             candidatePhoneRaw.length > 0 && externalId === candidatePhoneRaw;
+
+          // Roteador 2-IAs (#125) — só aplica em msgs INBOUND, não-grupo, não do candidato.
+          // Se o roteador "handled", já tomou a decisão (forward, orchestrator, etc) e o fluxo abaixo é pulado.
+          if (direction === 'inbound' && !isGroup && !isFromCandidate && text && !text.startsWith('[mídia')) {
+            try {
+              const route = await routeIncomingMessage({
+                supabase: supabaseAdmin,
+                campaignId,
+                text,
+                phone: externalId,
+                remoteJid,
+                instanceName: (inst as any).instanceName || instanceName,
+                apiKey: (inst as any).apiKey || null,
+                originalPayload: req.body,
+              });
+              if (route.handled) continue; // decisão tomada pelo roteador
+              // route.decision === 'aurora' ou 'pass_through' → segue voterBot abaixo
+            } catch (err: any) {
+              console.warn('[router] erro, seguindo fluxo legado:', err?.message || err);
+              // não bloqueia o webhook — segue voterBot legado
+            }
+          }
 
           if (isFromCandidate && (inst as any).apiKey) {
             // Fire-and-forget. Pode demorar (download de áudio + Whisper).

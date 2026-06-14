@@ -22,6 +22,7 @@ import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import WhatsAppInstancesPanel from './WhatsAppInstancesPanel';
 import SocialScenariosPanel from './SocialScenariosPanel';
+import WhatsappRoutingPanel from './WhatsappRoutingPanel';
 
 async function authFetch(url: string, init: RequestInit = {}): Promise<any> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -290,6 +291,8 @@ export const SocialConnectionsHub: React.FC = () => {
       </div>
 
       <WhatsAppInstancesPanel />
+
+      <WhatsappRoutingPanel />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {providers.map((p) => {
