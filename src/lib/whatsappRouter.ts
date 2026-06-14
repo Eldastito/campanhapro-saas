@@ -23,61 +23,101 @@ import { sendText } from '../server/modules/integrations/evolutionApiClient';
 import { fireOrchestration } from './orchestrationTriggers';
 import { classifyMessage, ClassificationResult, RoutingIntent } from './whatsappClassifier';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { retrieveContext } from '../server/modules/rag/knowledgeIngest';
 
 /**
- * Aurora responde inline via Gemini Flash — não depende de voterBotEnabled
- * nem de Argumentário cadastrado. Resposta curta (3-5 frases) e WhatsApp-friendly.
+ * Aurora responde inline via Gemini Flash. Antes: tinha regra "se não sabe,
+ * diga 'vou anotar pra responder'" que virou comportamento padrão (Aurora
+ * prometia voltar mas nunca voltava). Refatorado:
+ *   - Busca contexto no RAG da campanha (Argumentário, dossiês, propostas)
+ *   - Prompt PROÍBE prometer voltar depois — responde SEMPRE na hora
+ *   - Se não sabe específico: reconhece tema + pergunta o que interessa
+ *   - Tom WhatsApp, 2-4 frases
  */
 async function respondAsAurora(opts: {
+  supabase: SupabaseClient;
   apiKey: string;
   instanceName: string;
+  campaignId: string;
   phone: string;
   voterAgentName: string;
   voterAgentTopics: string[];
+  zapflowWakeWord: string;
   userMessage: string;
   candidatoNome?: string | null;
   cargo?: string | null;
 }): Promise<void> {
   try {
+    // Busca RAG em paralelo com setup do Gemini — best-effort, max 3s.
+    const ragPromise = Promise.race([
+      retrieveContext(opts.supabase, opts.campaignId, opts.userMessage, 4),
+      new Promise<string>((res) => setTimeout(() => res(''), 3000)),
+    ]).catch(() => '');
+
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) {
-      // Sem IA: resposta padrão simpática
       await sendText(opts.instanceName, opts.apiKey, opts.phone,
-        `Recebi sua mensagem! Estou aqui pra falar sobre ${opts.voterAgentTopics.slice(0, 4).join(', ')} ` +
-        `e a candidatura. Pode me dar mais detalhe do que você quer saber? 🤝`);
+        `Recebi sua mensagem! Sobre o que da campanha você quer falar — ${opts.voterAgentTopics.slice(0, 4).join(', ')}? Me dá um detalhe que eu te respondo. 🤝`);
       return;
     }
+
+    const ragContext = await ragPromise;
     const genAI = new GoogleGenerativeAI(geminiKey);
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
-      generationConfig: { temperature: 0.7, maxOutputTokens: 250 },
+      generationConfig: { temperature: 0.7, maxOutputTokens: 300 },
     });
-    const cargoLine = opts.cargo ? `Cargo pretendido: ${opts.cargo}.` : '';
-    const candidatoLine = opts.candidatoNome ? `Nome do candidato: ${opts.candidatoNome}.` : '';
-    const systemPrompt = `Você é ${opts.voterAgentName}, assistente da campanha eleitoral. ${candidatoLine} ${cargoLine}
 
-REGRAS:
-- Responda de forma curta (3-5 frases), tom natural de WhatsApp.
-- Foque nos tópicos: ${opts.voterAgentTopics.join(', ')}.
-- Se o usuário perguntar sobre algo FORA de política/campanha (ex: pedido de produto, venda), responda: "Aqui no número da campanha eu cuido só de política. Se for sobre negócio, manda uma mensagem nova começando com 'Zapp' que a outra IA te atende."
-- NUNCA invente propostas ou fatos. Se não sabe, diga "Vou anotar pra responder com mais detalhe".
-- Use emoji moderado (1-2 por resposta).
-- Identifique-se como assistente quando perguntarem (compliance TSE).
+    const candidatoLine = opts.candidatoNome ? `Candidato: ${opts.candidatoNome}.` : '';
+    const cargoLine = opts.cargo ? ` Cargo: ${opts.cargo}.` : '';
+    const ragSection = ragContext
+      ? `\n\nCONTEXTO DA CAMPANHA (use APENAS esses fatos, não invente):\n${ragContext}`
+      : '\n\n(Nenhum material da campanha ainda — responda só com posicionamento geral sobre o tema, sem inventar propostas concretas.)';
+
+    const systemPrompt = `Você é ${opts.voterAgentName}, assistente AUTOMATIZADO da campanha eleitoral.
+${candidatoLine}${cargoLine}
+Tópicos: ${opts.voterAgentTopics.join(', ')}.
+
+REGRAS INVIOLÁVEIS:
+
+1. RESPONDA SEMPRE NA HORA. NUNCA prometa voltar depois. NUNCA diga "vou anotar", "vou pesquisar", "trago em alguns minutos", "deixa eu verificar". Você responde JÁ.
+
+2. Se a pergunta é sobre tema POLÍTICO mas você não tem dado específico no contexto:
+   - Reconheça a importância do tema em 1 frase
+   - Faça UMA pergunta específica pra entender o que a pessoa quer ("qual aspecto te preocupa mais?")
+   - NUNCA invente propostas, números ou compromissos concretos
+
+3. Se a pergunta é sobre algo PESSOAL do candidato (família, religião, gostos) que você não sabe:
+   - Diga que pra esse tipo de assunto é melhor falar com o time humano
+   - Não invente
+
+4. Se a pergunta é sobre NEGÓCIO/PRODUTO/VENDA/PEDIDO/AGENDAMENTO comercial:
+   - Diga: "Aqui no canal da campanha eu cuido só de política. Pra negócio/pedido, manda uma mensagem nova começando com '${opts.zapflowWakeWord}' que a outra IA te atende."
+
+5. TOM: WhatsApp natural, 2-4 frases curtas. 1 emoji opcional. Direto ao ponto.
+
+6. COMPLIANCE TSE: se perguntarem "você é robô/IA?", responda: "Sim, sou assistente automatizado da campanha. Pra atendimento humano posso te conectar com o time."${ragSection}
 
 Mensagem do eleitor: "${opts.userMessage}"
 
-Sua resposta:`;
+Sua resposta (curta, direta, NA HORA):`;
+
     const result = await model.generateContent(systemPrompt);
-    const text = result.response.text().trim().slice(0, 1000);
-    if (text) {
-      await sendText(opts.instanceName, opts.apiKey, opts.phone, text);
+    let textOut = result.response.text().trim().slice(0, 1000);
+    // Defesa adicional: se ainda assim a IA prometeu voltar, troca por
+    // pergunta de detalhe (acontece raro mas previne UX ruim).
+    const promiseRx = /(vou (anotar|pesquisar|verificar|trazer|consultar|buscar)|trago em|volto em|aguarda um (minuto|segundo|momento))/i;
+    if (promiseRx.test(textOut)) {
+      textOut = `Sobre "${opts.userMessage.slice(0, 60)}" — me dá um detalhe a mais do que você quer saber? Posso te dar nosso posicionamento sobre o tema. 🙂`;
+    }
+    if (textOut) {
+      await sendText(opts.instanceName, opts.apiKey, opts.phone, textOut);
     }
   } catch (err: any) {
     console.warn('[aurora] resposta falhou, fallback genérico:', err?.message);
     try {
       await sendText(opts.instanceName, opts.apiKey, opts.phone,
-        `Recebi sua mensagem! Posso te ajudar com qualquer dúvida sobre o candidato e a campanha. ` +
-        `Manda sua pergunta com mais detalhe? 🙂`);
+        `Tô aqui pra falar sobre a campanha (${opts.voterAgentTopics.slice(0, 3).join(', ')}). Me dá um detalhe específico do que você quer saber? 🙂`);
     } catch {}
   }
 }
@@ -299,9 +339,11 @@ export async function routeIncomingMessage(input: RouteInput): Promise<RouteResu
     // Aurora responde inline — não delegamos pro voterBot (que pode estar desligado)
     if (apiKey) {
       await respondAsAurora({
+        supabase, campaignId,
         apiKey, instanceName, phone,
         voterAgentName: cfg.voterAgentName,
         voterAgentTopics: cfg.voterAgentTopics,
+        zapflowWakeWord: cfg.zapflowWakeWord,
         userMessage: text,
       });
     }
@@ -309,11 +351,11 @@ export async function routeIncomingMessage(input: RouteInput): Promise<RouteResu
     return { handled: true, decision: 'aurora' };
   }
 
-  // 4) Saudação simples (oi/bom dia/etc) → Aurora cumprimenta e puxa conversa
+  // 4) Saudação simples (oi/bom dia/etc) → cumprimenta + lock aurora
   if (isGreeting(text)) {
     if (apiKey) {
-      void sendText(instanceName, apiKey, phone,
-        `Oi! Aqui é o ${cfg.voterAgentName} 👋\n\nPosso te ajudar com qualquer dúvida sobre o candidato, propostas e a eleição. Manda sua pergunta!`);
+      await sendText(instanceName, apiKey, phone,
+        `Oi! Aqui é ${cfg.voterAgentName} 👋\n\nPosso te ajudar com qualquer dúvida sobre o candidato, propostas e a eleição. Manda sua pergunta!`);
     }
     await setLock(supabase, campaignId, remoteJid, 'aurora');
     await log(supabase, campaignId, remoteJid, text, 'aurora', undefined, Date.now() - t0);
@@ -356,9 +398,11 @@ export async function routeIncomingMessage(input: RouteInput): Promise<RouteResu
     // Aurora responde inline (sem depender do voterBot legado)
     if (apiKey) {
       await respondAsAurora({
+        supabase, campaignId,
         apiKey, instanceName, phone,
         voterAgentName: cfg.voterAgentName,
         voterAgentTopics: cfg.voterAgentTopics,
+        zapflowWakeWord: cfg.zapflowWakeWord,
         userMessage: text,
       });
     }
