@@ -221,6 +221,47 @@ export const getPipelineHistory = async (campaignId: string, maxResults: number 
     }
 };
 
+/**
+ * Run do Orquestrador (Manager) — uma análise completa que decompõe a
+ * intenção, delega aos sub-agentes (Estrategista, CRM, Growth, etc) e
+ * consolida o resultado.
+ */
+export interface ManagerRun {
+    id: string;
+    intent: string;
+    finalSummary: string | null;
+    iterations: number;
+    status: 'running' | 'done' | 'error' | 'budget_exceeded' | 'max_iterations' | string;
+    startedAt: string;
+    finishedAt: string | null;
+    /** Custo em centavos USD — NÃO mostrar pro usuário (#111). Só Supreme vê. */
+    totalCostCentsUsd?: number;
+}
+
+/**
+ * Histórico de execuções do Orquestrador (Quartel General de IA).
+ * Fonte canônica: tabela manager_runs (populada pelo managerAgent.ts).
+ *
+ * Substituiu getPipelineHistory que lia agent_outputs filtrado por
+ * agentType='war-room-pipeline' (pipeline legado, tabela vazia em produção).
+ */
+export const getManagerRuns = async (campaignId: string, limit = 20): Promise<ManagerRun[]> => {
+    if (!campaignId) return [];
+    try {
+        const headers = await getAuthHeaders();
+        const r = await fetch(`/api/agents/manager/runs?campaignId=${encodeURIComponent(campaignId)}&limit=${limit}`, { headers });
+        if (!r.ok) {
+            console.warn('[getManagerRuns] status', r.status);
+            return [];
+        }
+        const json = await r.json();
+        return (json?.runs || []) as ManagerRun[];
+    } catch (e: any) {
+        console.error('Erro ao buscar histórico do Manager', e);
+        return [];
+    }
+};
+
 export const createProductionOrder = async (campaignId: string, originAgent: string, targetAgent: string, content: string) => {
     const headers = await getAuthHeaders();
     const response = await fetch('/api/agents/production-order', {

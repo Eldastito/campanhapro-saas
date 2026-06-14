@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Bot, TrendingUp, Share2, Map, Send, Loader2, LayoutDashboard, Ticket, ArrowRight, CheckCircle2, Link as LinkIcon, ShieldCheck, Sparkles as SparklesIcon, History, Shield, Zap, X, BellRing, Trash2, Brain } from 'lucide-react';
 import AiMemoryPanel from '../components/ai/AiMemoryPanel';
 import { supabase } from '../lib/supabaseClient';
-import { askStrategist, askGrowthHacker, askSocialMedia, askFieldCommander, askCreativeProducer, askBackupAgent, askFraudAuditor, runFullPipeline, getPipelineHistory, PipelineResult, generateCreativeImage, createProductionOrder, publishToSocialMedia } from '../services/agentsClientService';
+import { askStrategist, askGrowthHacker, askSocialMedia, askFieldCommander, askCreativeProducer, askBackupAgent, askFraudAuditor, runFullPipeline, getPipelineHistory, PipelineResult, generateCreativeImage, createProductionOrder, publishToSocialMedia, getManagerRuns, ManagerRun } from '../services/agentsClientService';
 import { createBackup, restoreBackup, BackupData } from '../services/backupService';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfilePermissions } from '../contexts/PermissionsContext';
@@ -873,40 +873,110 @@ const WarRoom: React.FC<{ getContextData: (type: any) => Promise<string>; isLimi
     );
 };
 
+/**
+ * Histórico de Análises do Orquestrador.
+ * Lê de manager_runs via /api/agents/manager/runs.
+ * Antes lia agent_outputs (pipeline legado, vazio em produção) → sempre
+ * mostrava "Sem histórico".
+ */
+const STATUS_META: Record<string, { label: string; cls: string }> = {
+    done:             { label: 'Concluído',       cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+    running:          { label: 'Em execução',     cls: 'bg-sky-500/20 text-sky-300 border-sky-500/30' },
+    error:            { label: 'Erro',            cls: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
+    budget_exceeded:  { label: 'Cota atingida',   cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
+    max_iterations:   { label: 'Limite de passos', cls: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
+};
+
 const PipelineHistory: React.FC<{ campaignId: string }> = ({ campaignId }) => {
-    const [history, setHistory] = useState<PipelineResult[]>([]);
+    const [runs, setRuns] = useState<ManagerRun[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [expanded, setExpanded] = useState<string | null>(null);
+
     useEffect(() => {
-        const fetchHistory = async () => {
-            if (!campaignId) { setIsLoading(false); return; }
-            try { const data = await getPipelineHistory(campaignId, 10); setHistory(data); } catch (err) { console.error(err); } finally { setIsLoading(false); }
-        };
-        fetchHistory();
+        if (!campaignId) { setIsLoading(false); return; }
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await getManagerRuns(campaignId, 20);
+                if (!cancelled) setRuns(data);
+            } catch (err) { console.error(err); }
+            finally { if (!cancelled) setIsLoading(false); }
+        })();
+        return () => { cancelled = true; };
     }, [campaignId]);
-    if (isLoading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>;
+
+    if (isLoading) {
+        return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-indigo-500" /></div>;
+    }
+
     return (
         <div className="space-y-6">
-            <div className="flex items-center gap-3 mb-4"><History className="w-6 h-6 text-indigo-400" /><div><h3 className="text-xl font-bold text-slate-50">Histórico</h3><p className="text-sm text-slate-400">Análises passadas.</p></div></div>
-            {history.length === 0 ? <div className="text-center p-12 bg-slate-900 border border-slate-700 rounded-xl">Sem histórico.</div> : (
-                <div className="space-y-4">
-                    {history.map((r, idx) => (
-                        <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                            <div className="flex justify-between items-center mb-3">
-                                <h4 className="font-bold text-slate-400 text-xs uppercase tracking-widest">Análise de IA</h4>
-                                <span className="text-[10px] text-slate-50">{r.createdAt ? new Date(r.createdAt).toLocaleString('pt-BR') : 'Data Indisponível'}</span>
+            <div className="flex items-center gap-3 mb-4">
+                <History className="w-6 h-6 text-indigo-400" />
+                <div>
+                    <h3 className="text-xl font-bold text-slate-50">Histórico de Análises do Orquestrador</h3>
+                    <p className="text-sm text-slate-400">Cada análise aciona Estrategista, CRM, Growth e outros agentes em sequência. Clique pra expandir.</p>
+                </div>
+            </div>
+            {runs.length === 0 ? (
+                <div className="text-center p-12 bg-slate-900 border border-slate-700 rounded-xl text-slate-400">
+                    <p>Nenhuma análise ainda.</p>
+                    <p className="text-xs mt-2 text-slate-500">Use <b>Análise Manual</b> ou aguarde o Briefing Diário (manhã).</p>
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    {runs.map((r) => {
+                        const meta = STATUS_META[r.status] || { label: r.status, cls: 'bg-slate-500/20 text-slate-300 border-slate-500/30' };
+                        const isOpen = expanded === r.id;
+                        const intentPreview = (r.intent || '').slice(0, 120);
+                        return (
+                            <div key={r.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                                <button onClick={() => setExpanded(isOpen ? null : r.id)}
+                                    className="w-full text-left p-4 hover:bg-slate-800/40 transition-colors">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${meta.cls}`}>
+                                                {meta.label}
+                                            </span>
+                                            <span className="text-[10px] font-bold text-slate-500 uppercase">
+                                                {r.iterations} {r.iterations === 1 ? 'rodada' : 'rodadas'}
+                                            </span>
+                                        </div>
+                                        <span className="text-[11px] text-slate-400 shrink-0">
+                                            {new Date(r.startedAt).toLocaleString('pt-BR')}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-slate-200 mt-2 line-clamp-2">
+                                        {intentPreview}{(r.intent || '').length > 120 ? '…' : ''}
+                                    </p>
+                                </button>
+                                {isOpen && (
+                                    <div className="px-4 pb-4 pt-2 border-t border-slate-800/60 space-y-3 bg-slate-950/40">
+                                        <div>
+                                            <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 mb-1">Pedido</p>
+                                            <p className="text-sm text-slate-300 whitespace-pre-wrap">{r.intent}</p>
+                                        </div>
+                                        {r.finalSummary && (
+                                            <div>
+                                                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-1">Conclusão</p>
+                                                <div className="text-sm text-slate-200 whitespace-pre-wrap bg-emerald-500/5 border border-emerald-500/20 rounded p-3 leading-relaxed">
+                                                    {r.finalSummary}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {!r.finalSummary && r.status === 'error' && (
+                                            <p className="text-xs text-rose-300">Esta análise terminou em erro — nenhum resumo foi gerado.</p>
+                                        )}
+                                        {r.finishedAt && (
+                                            <p className="text-[10px] text-slate-500">
+                                                Início: {new Date(r.startedAt).toLocaleString('pt-BR')} · Fim: {new Date(r.finishedAt).toLocaleString('pt-BR')}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-blue-500/70 uppercase">Estrategista</p>
-                                    <div className="text-xs text-slate-300 line-clamp-3 bg-slate-800/50 p-2 rounded border border-slate-700/50 italic">"{r.strategist}"</div>
-                                </div>
-                                <div className="space-y-1">
-                                    <p className="text-[9px] font-bold text-green-500/70 uppercase">Growth</p>
-                                    <div className="text-xs text-slate-300 line-clamp-3 bg-slate-800/50 p-2 rounded border border-slate-700/50 italic">"{r.growth}"</div>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>
