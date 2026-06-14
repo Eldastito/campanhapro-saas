@@ -86,7 +86,7 @@ async function loadConfig(supabase: SupabaseClient, campaignId: string): Promise
     orchestratorWakeWord: r.orchestratorWakeWord || null,
     orchestratorAuthorizedPhones: Array.isArray(r.orchestratorAuthorizedPhones)
       ? r.orchestratorAuthorizedPhones.map(normPhone) : [],
-    zapflowWakeWord: r.zapflowWakeWord || 'Terra',
+    zapflowWakeWord: r.zapflowWakeWord || 'Zapp',
     zapflowForwardUrl: r.zapflowForwardUrl || null,
     zapflowForwardSecret: r.zapflowForwardSecret || null,
   };

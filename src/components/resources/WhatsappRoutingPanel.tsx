@@ -5,7 +5,7 @@
  *  - On/off do roteador (default off — preserva fluxo legado)
  *  - Nome da Aurora + tópicos políticos
  *  - Nome do Orquestrador + lista de telefones autorizados
- *  - Nome da Terra + URL de forward do ZappFlow + segredo HMAC
+ *  - Nome do Zapp + URL de forward do ZappFlow + segredo HMAC
  *
  * Mostra também log das últimas 50 decisões pra debug.
  */
@@ -54,7 +54,7 @@ async function authFetch(url: string, init: RequestInit = {}): Promise<any> {
 const DECISION_LABELS: Record<string, { label: string; cls: string }> = {
   orchestrator: { label: 'Orquestrador (coordenador)', cls: 'bg-purple-500/20 text-purple-300' },
   aurora: { label: 'Aurora respondeu', cls: 'bg-blue-500/20 text-blue-300' },
-  forwarded_zapflow: { label: 'Forward → Terra', cls: 'bg-orange-500/20 text-orange-300' },
+  forwarded_zapflow: { label: 'Forward → Zapp', cls: 'bg-orange-500/20 text-orange-300' },
   disambiguation: { label: 'Pediu esclarecimento', cls: 'bg-amber-500/20 text-amber-300' },
   silence: { label: 'Silêncio', cls: 'bg-slate-600/20 text-slate-300' },
   wake_unauthorized: { label: 'Wake sem permissão', cls: 'bg-red-500/20 text-red-300' },
@@ -164,7 +164,7 @@ const WhatsappRoutingPanel: React.FC = () => {
         {!cfg.enabled && (
           <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 mb-4 text-[11px] text-amber-200/80 flex gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>Roteador desativado. O voterBot legado responde tudo. Ative pra rotear entre Aurora (campanha), Terra (ZappFlow) e Orquestrador.</span>
+            <span>Roteador desativado. O voterBot legado responde tudo. Ative pra rotear entre Aurora (campanha), Zapp (ZappFlow) e Orquestrador.</span>
           </div>
         )}
 
@@ -215,13 +215,13 @@ const WhatsappRoutingPanel: React.FC = () => {
           </Field>
         </Section>
 
-        {/* TERRA / ZAPFLOW */}
-        <Section title="🟠 Terra — IA do negócio (ZappFlow)">
-          <Field label="Palavra-chave que aciona a Terra">
+        {/* ZAPP / ZAPFLOW */}
+        <Section title="🟠 Zapp — IA do negócio (ZappFlow)">
+          <Field label="Palavra-chave que aciona o Zapp">
             <input
               type="text" value={cfg.zapflowWakeWord}
               onChange={(e) => setCfg({ ...cfg, zapflowWakeWord: e.target.value })}
-              className="input" placeholder="Terra"
+              className="input" placeholder="Zapp"
             />
           </Field>
           <Field label="URL do webhook do ZappFlow">

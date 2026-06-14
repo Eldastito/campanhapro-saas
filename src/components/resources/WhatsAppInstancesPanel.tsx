@@ -279,9 +279,9 @@ export const WhatsAppInstancesPanel: React.FC = () => {
           <button
             onClick={() => setManualOpen(true)}
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:bg-indigo-600/30 transition-colors"
-            title="Registrar uma instância criada à mão no painel do Evolution (mais confiável)"
+            title="Já tem uma instância no Evolution Go usada por outro sistema (ex: ZappFlow)? Adote ela aqui sem reparear o celular."
           >
-            🔌 Conectar manual
+            🔌 Adotar instância existente
           </button>
           <button
             onClick={() => setAdding(true)}
@@ -297,10 +297,16 @@ export const WhatsAppInstancesPanel: React.FC = () => {
       {manualOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !manualBusy && setManualOpen(false)}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
-            <h4 className="font-bold text-white mb-1">Conectar instância manual</h4>
+            <h4 className="font-bold text-white mb-1">Adotar instância existente</h4>
             <p className="text-xs text-slate-400 mb-3">
-              Crie a instância <b>no painel do Evolution GO</b> (1 por celular) e informe o <b>nome exato</b> dela aqui.
-              Nós verificamos o status e registramos o webhook automaticamente.
+              Use isto quando o celular <b>já está pareado</b> em outro sistema (ex: ZappFlow)
+              e você quer que o CampanhaPro também receba as mensagens — <b>sem reparear</b> o chip.
+            </p>
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-[10px] text-amber-200/90 mb-3 leading-relaxed">
+              <b>⚠️ Importante:</b> só UM sistema por vez pode "responder" no número, senão dá resposta duplicada. Se for ativar o Roteador 2-IAs, deixe o CampanhaPro como dono do webhook e configure o forward pra outra plataforma na seção 🟠.
+            </div>
+            <p className="text-[11px] text-slate-500 mb-3">
+              No painel do Evolution Go, copie o <b>nome exato</b> da instância e (opcional) o <b>token</b> dela.
             </p>
             <div className="space-y-2 mb-3">
               <input value={manualName} onChange={(e) => setManualName(e.target.value)} placeholder="Nome da instância (igual ao painel) *"

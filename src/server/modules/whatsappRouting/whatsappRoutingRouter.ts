@@ -38,7 +38,7 @@ export function createWhatsappRoutingRouter(supabase: SupabaseClient): Router {
       orchestratorWakeWord: r.orchestratorWakeWord ?? null,
       orchestratorAuthorizedPhones: Array.isArray(r.orchestratorAuthorizedPhones)
         ? r.orchestratorAuthorizedPhones : [],
-      zapflowWakeWord: r.zapflowWakeWord ?? 'Terra',
+      zapflowWakeWord: r.zapflowWakeWord ?? 'Zapp',
       zapflowForwardUrl: r.zapflowForwardUrl ?? null,
       // Segredo: só devolve se está setado (sem expor o valor)
       zapflowForwardSecretSet: !!r.zapflowForwardSecret,
@@ -69,7 +69,7 @@ export function createWhatsappRoutingRouter(supabase: SupabaseClient): Router {
         .filter((x: string) => x.length >= 10 && x.length <= 15);
     }
     if (typeof b.zapflowWakeWord === 'string') {
-      update.zapflowWakeWord = b.zapflowWakeWord.trim().slice(0, 40) || 'Terra';
+      update.zapflowWakeWord = b.zapflowWakeWord.trim().slice(0, 40) || 'Zapp';
     }
     if (typeof b.zapflowForwardUrl === 'string') {
       const url = b.zapflowForwardUrl.trim();
