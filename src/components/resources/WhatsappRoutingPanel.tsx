@@ -35,20 +35,34 @@ interface LogEntry {
   createdAt: string;
 }
 
-async function authFetch(url: string, init: RequestInit = {}): Promise<any> {
+async function authFetch(url: string, init: RequestInit = {}, timeoutMs = 15000): Promise<any> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
-  const r = await fetch(url, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-  return j;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      ...init,
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = j?.error || `HTTP ${r.status} ${r.statusText}`;
+      console.error('[whatsapp-routing] request failed:', url, msg, j);
+      throw new Error(msg);
+    }
+    return j;
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw new Error('timeout (>15s)');
+    throw err;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 const DECISION_LABELS: Record<string, { label: string; cls: string }> = {
@@ -90,16 +104,30 @@ const WhatsappRoutingPanel: React.FC = () => {
     if (!cfg) return;
     setSaving(true);
     try {
-      const payload: any = { ...cfg };
-      if (secretEdit) payload.zapflowForwardSecret = secretEdit;
+      // Monta payload SÓ com os campos que o backend aceita — evita mandar
+      // 'zapflowForwardSecretSet' (boolean derivado) e outros lixos.
+      const payload: Record<string, any> = {
+        enabled: cfg.enabled,
+        voterAgentName: cfg.voterAgentName,
+        voterAgentTopics: cfg.voterAgentTopics,
+        orchestratorWakeWord: cfg.orchestratorWakeWord,
+        orchestratorAuthorizedPhones: cfg.orchestratorAuthorizedPhones,
+        zapflowWakeWord: cfg.zapflowWakeWord,
+        zapflowForwardUrl: cfg.zapflowForwardUrl,
+      };
+      if (secretEdit && secretEdit.trim()) payload.zapflowForwardSecret = secretEdit.trim();
+
       await authFetch('/api/v1/whatsapp-routing/config', {
         method: 'PUT', body: JSON.stringify(payload),
       });
       setSecretEdit('');
-      await load();
-      alert('Configurações salvas!');
+      // Atualiza só o flag visual — NÃO recarrega tudo (isso trocava
+      // o form pelo spinner global e parecia loop).
+      setCfg(prev => prev ? { ...prev, zapflowForwardSecretSet: !!secretEdit.trim() || prev.zapflowForwardSecretSet } : prev);
+      alert('✅ Configurações salvas!');
     } catch (err: any) {
-      alert('Falha ao salvar: ' + err.message);
+      console.error('[whatsapp-routing] save failed:', err);
+      alert('❌ Falha ao salvar: ' + (err?.message || 'erro desconhecido') + '\n\nVeja o console (F12) pra mais detalhes.');
     } finally {
       setSaving(false);
     }
