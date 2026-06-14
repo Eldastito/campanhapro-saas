@@ -30,11 +30,27 @@ const POLITICA_KEYWORDS = [
 ];
 
 const NEGOCIO_KEYWORDS = [
-  'comprar', 'preço', 'preco', 'orçamento', 'orcamento', 'estoque',
-  'vendi', 'vendido', 'pedido', 'frete', 'entrega', 'produto',
-  'serviço', 'servico', 'agendar', 'horário', 'consulta',
+  // Comercial genérico
+  'comprar', 'compra', 'preço', 'preco', 'valor', 'quanto custa', 'quanto é',
+  'orçamento', 'orcamento', 'estoque', 'vendi', 'vendido', 'pedido', 'pedir',
+  'frete', 'entrega', 'entregar', 'produto', 'mercadoria',
+  'serviço', 'servico', 'agendar', 'agendamento', 'horário', 'horario',
+  'consulta', 'reserva', 'reservar',
+  // Gestão/relatórios (quando dono pergunta pro próprio sistema)
   'relatório', 'relatorio', 'balanço', 'balanco', 'movimentação',
   'movimentacao', 'caixa', 'fatura', 'nota fiscal',
+  // Produtos comuns de varejo/lanchonete/restaurante
+  'bolo', 'pão', 'pao', 'doce', 'salgado', 'lanche', 'almoço', 'almoco',
+  'jantar', 'café', 'cafe', 'pizza', 'hambúrguer', 'hamburguer', 'açaí', 'acai',
+  'bebida', 'cerveja', 'refrigerante', 'água', 'agua', 'suco',
+  // Operacional comercial
+  'aberto', 'fechado', 'funcionamento', 'atendimento', 'delivery', 'tele entrega',
+  'cardápio', 'cardapio', 'menu', 'promoção', 'promocao', 'desconto', 'cupom',
+  'pagamento', 'pix', 'cartão', 'cartao', 'parcela', 'parcelar', 'boleto',
+  'reclamação', 'reclamacao', 'troca', 'devolução', 'devolucao',
+  // "vocês têm", "vc tem" etc — padrão de pergunta de compra. Sem "tem" sozinho
+  // pra não pegar "tem proposta sobre saúde?".
+  'vocês têm', 'voces tem', 'vc tem',
 ];
 
 function heuristic(text: string): ClassificationResult {

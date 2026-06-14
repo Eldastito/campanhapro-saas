@@ -51,7 +51,16 @@ interface RoutingConfig {
 }
 
 const LOCK_TTL_MIN = 10;
-const CONFIDENCE_THRESHOLD = 0.7;
+// Thresholds assimétricos: Aurora é o default da campanha (mais permissiva).
+// Forward pro Zapp exige confiança maior pra não silenciar eleitores por engano.
+const AURORA_CONFIDENCE_THRESHOLD = 0.55;
+const ZAPP_CONFIDENCE_THRESHOLD = 0.75;
+
+// Saudações simples que NUNCA viram disambiguation — Aurora puxa conversa.
+const GREETING_RX = /^(oi|olá|ola|hi|hey|opa|alô|alo|bom dia|boa tarde|boa noite|tudo bem|tudo certo|e ai|e aí|salve)[\s!?.,]*$/i;
+function isGreeting(text: string): boolean {
+  return GREETING_RX.test(text.trim().slice(0, 80));
+}
 
 function normPhone(s: string | null | undefined): string {
   return String(s || '').replace(/\D+/g, '');
@@ -226,17 +235,22 @@ export async function routeIncomingMessage(input: RouteInput): Promise<RouteResu
     return { handled: false, decision: 'aurora' }; // libera o voterBot existente
   }
 
-  // 4) Classificador IA
-  const classification = await classifyMessage(text, cfg.voterAgentTopics, process.env.GEMINI_API_KEY);
-
-  // 5) Decisão
-  if (classification.intent === 'politica' && classification.confidence >= CONFIDENCE_THRESHOLD) {
+  // 4) Saudação simples (oi/bom dia/etc) → Aurora cumprimenta e puxa conversa
+  if (isGreeting(text)) {
+    if (apiKey) {
+      void sendText(instanceName, apiKey, phone,
+        `Oi! Aqui é o ${cfg.voterAgentName} 👋\n\nPosso te ajudar com qualquer dúvida sobre o candidato, propostas e a eleição. Manda sua pergunta!`);
+    }
     await setLock(supabase, campaignId, remoteJid, 'aurora');
-    await log(supabase, campaignId, remoteJid, text, 'aurora', classification, Date.now() - t0);
-    return { handled: false, decision: 'aurora', classification }; // voterBot trata
+    await log(supabase, campaignId, remoteJid, text, 'aurora', undefined, Date.now() - t0);
+    return { handled: true, decision: 'aurora' };
   }
 
-  if (classification.intent === 'negocio' && classification.confidence >= CONFIDENCE_THRESHOLD) {
+  // 5) Classificador IA
+  const classification = await classifyMessage(text, cfg.voterAgentTopics, process.env.GEMINI_API_KEY);
+
+  // 6) Forward pro Zapp: só com confiança ALTA (evita silenciar eleitor por engano)
+  if (classification.intent === 'negocio' && classification.confidence >= ZAPP_CONFIDENCE_THRESHOLD) {
     if (cfg.zapflowForwardUrl) {
       const ok = await forwardToZapflow(cfg.zapflowForwardUrl, cfg.zapflowForwardSecret, originalPayload);
       if (ok) {
@@ -245,22 +259,37 @@ export async function routeIncomingMessage(input: RouteInput): Promise<RouteResu
         return { handled: true, decision: 'forwarded_zapflow', classification };
       }
     }
-    // sem URL ou forward falhou: Aurora pede pra acionar Terra
+    // Sem URL ou forward falhou: Aurora explica e oferece passar pro Zapp
     if (apiKey) {
       void sendText(instanceName, apiKey, phone,
-        `Acho que você queria falar com a Terra sobre o negócio. ` +
-        `Diga "${cfg.zapflowWakeWord}" no início da próxima mensagem que ela te atende. ` +
-        `Aqui sou a ${cfg.voterAgentName}, atendimento da campanha.`);
+        `Pelo que entendi, você queria falar sobre negócio/produto. Aqui no número da campanha quem cuida disso é o ${cfg.zapflowWakeWord}. ` +
+        `Manda uma mensagem nova começando com "${cfg.zapflowWakeWord}" que ele te atende. ` +
+        `\n\nAqui é o ${cfg.voterAgentName}, da campanha — se for sobre o candidato, eleição ou propostas, é comigo. 🤝`);
     }
     await log(supabase, campaignId, remoteJid, text, 'silence', classification, Date.now() - t0);
     return { handled: true, decision: 'silence', classification };
   }
 
-  // Indefinido ou baixa confiança → pergunta de volta (e fica no lock 'disambiguation')
+  // 7) Política OU baixa confiança OU lock=disambiguation → Aurora ASSUME (não pergunta de novo)
+  //    Aurora é o default — chato repetir disambiguação. Se errar, usuário corrige com wake word.
+  const wasDisambiguating = lockIa === 'disambiguation';
+  const isPolitica = classification.intent === 'politica';
+  const auroraAssume = isPolitica || wasDisambiguating ||
+    classification.confidence < AURORA_CONFIDENCE_THRESHOLD ||
+    classification.intent === 'indefinido';
+
+  if (auroraAssume) {
+    await setLock(supabase, campaignId, remoteJid, 'aurora');
+    await log(supabase, campaignId, remoteJid, text, 'aurora', classification, Date.now() - t0);
+    return { handled: false, decision: 'aurora', classification }; // libera o voterBot
+  }
+
+  // Caso EXTREMAMENTE raro (negocio com confiança 0.55-0.75 e SEM lock anterior): pede esclarecimento UMA vez
   if (apiKey) {
     void sendText(instanceName, apiKey, phone,
-      `Oi! Sou a ${cfg.voterAgentName}, da campanha. Posso te ajudar com qualquer dúvida sobre o candidato, propostas e eleição. ` +
-      `Se for sobre negócio/pedido, diga "${cfg.zapflowWakeWord}" que a outra IA assume.`);
+      `Oi! Aqui é o ${cfg.voterAgentName}, da campanha 👋\n\n` +
+      `Você quer falar sobre **a campanha** (candidato, propostas, eleição) ou sobre **negócio/produto**? ` +
+      `Se for negócio, diga "${cfg.zapflowWakeWord}" no início da próxima mensagem.`);
   }
   await setLock(supabase, campaignId, remoteJid, 'disambiguation');
   await log(supabase, campaignId, remoteJid, text, 'disambiguation', classification, Date.now() - t0);
