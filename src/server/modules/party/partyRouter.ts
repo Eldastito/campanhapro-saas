@@ -744,6 +744,63 @@ Saída JSON estrito (sem markdown):
     return res.json({ checkin: data });
   });
 
+  // Recalcula os caches de total recebido/alocado de um candidato (#145).
+  async function recalcCandidateTotals(candidateId: string) {
+    const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', candidateId);
+    const totalRecebido = (all || []).reduce((s: number, r: any) => s + Number(r.valor || 0), 0);
+    const totalAlocado = (all || []).reduce((s: number, r: any) =>
+      s + (Array.isArray(r.itens) ? r.itens.reduce((a: number, it: any) => a + Number(it.valor || 0), 0) : 0), 0);
+    await supabase.from('party_candidates').update({
+      valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
+    }).eq('id', candidateId);
+  }
+
+  // Valida que um repasse pertence a um candidato do partido do presidente.
+  async function repasseOfPresident(userId: string, repasseId: string) {
+    const party = await partyOf(userId);
+    if (!party) return null;
+    const { data: rep } = await supabase.from('party_repasses')
+      .select('*').eq('id', repasseId).eq('partyId', party.id).maybeSingle();
+    return rep ? { party, repasse: rep as any } : null;
+  }
+
+  // ── EDITAR repasse (#145) ──────────────────────────────────────────────
+  router.patch('/repasses/:id', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const found = await repasseOfPresident(userId, req.params.id);
+    if (!found) return res.status(404).json({ error: 'not_found' });
+
+    const { valor, descricao, data } = req.body || {};
+    const patch: any = { updatedAt: new Date().toISOString() };
+    if (valor !== undefined) {
+      const v = Number(valor);
+      if (!(v > 0)) return res.status(400).json({ error: 'valor_invalido' });
+      patch.valor = v;
+    }
+    if (descricao !== undefined) patch.descricao = descricao?.toString().trim() || null;
+    if (data !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(data)) patch.data = data;
+
+    const { error } = await supabase.from('party_repasses').update(patch).eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    await recalcCandidateTotals(found.repasse.candidateId);
+    broadcastTelao(found.party.id);
+    return res.json({ ok: true });
+  });
+
+  // ── EXCLUIR repasse (#145) ─────────────────────────────────────────────
+  router.delete('/repasses/:id', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const found = await repasseOfPresident(userId, req.params.id);
+    if (!found) return res.status(404).json({ error: 'not_found' });
+    const { error } = await supabase.from('party_repasses').delete().eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    await recalcCandidateTotals(found.repasse.candidateId);
+    broadcastTelao(found.party.id);
+    return res.json({ ok: true });
+  });
+
   // ── RELATÓRIO DE REPASSES (#144) — agregado do partido pra impressão ──
   router.get('/repasses-report', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
@@ -860,16 +917,19 @@ Saída JSON estrito (sem markdown):
 
 Responda SEMPRE em JSON válido (nada fora do JSON):
 {
-  "intent": "consulta" | "lancar_repasse" | "gerar_relatorio" | "acao_nao_suportada",
+  "intent": "consulta" | "lancar_repasse" | "editar_repasse" | "excluir_repasse" | "gerar_relatorio" | "acao_nao_suportada",
   "message": "texto curto pro presidente",
-  "draft": null OU { "candidateName": "nome do beneficiário citado", "valor": numero_em_reais, "descricao": "finalidade" }
+  "draft": null OU { "candidateName": "nome citado", "valor": numero_em_reais, "descricao": "finalidade" }
 }
 
 REGRAS:
 - "consulta": o presidente pergunta sobre dados. Responda em message usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
-- "lancar_repasse": o presidente quer LANÇAR/ADICIONAR/REPASSAR um valor a um candidato. Extraia candidateName, valor (número, ex: "5 mil"=5000), descricao. message = frase confirmando a intenção. Se faltar valor ou candidato, use intent "consulta" e peça o que falta.
-- "gerar_relatorio": o presidente quer GERAR/IMPRIMIR/BAIXAR um RELATÓRIO de repasses. message = "Gerei o relatório de repasses, abrindo aqui." draft = null.
-- "acao_nao_suportada": EDITAR, ALTERAR, APAGAR, EXCLUIR repasse/candidato, ou qualquer outra escrita. message explica que ainda não executa isso e oriente usar os botões da tela. NUNCA finja que fez.
+- "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR um valor a um candidato. Extraia candidateName, valor, descricao. Se faltar valor ou candidato, use "consulta" e peça o que falta.
+- "editar_repasse": ALTERAR/EDITAR/MUDAR/CORRIGIR o valor de um repasse de um candidato. Extraia candidateName e o NOVO valor (campo "valor"). descricao opcional.
+- "excluir_repasse": APAGAR/EXCLUIR/REMOVER/CANCELAR um repasse de um candidato. Extraia candidateName. valor/descricao = null.
+- "gerar_relatorio": GERAR/IMPRIMIR/BAIXAR RELATÓRIO de repasses. message = "Gerei o relatório, abrindo aqui." draft = null.
+- "acao_nao_suportada": qualquer outra escrita (editar candidato, apagar candidato, mexer em metas, etc). message explica que ainda não executa e oriente usar os botões. NUNCA finja que fez.
+- "valor" sempre número (ex: "8 mil"=8000).
 - Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
 - Valores sempre em R$. Tom direto, chat.
 
@@ -922,6 +982,55 @@ JSON:`;
             valor, descricao, data: hojeIso,
           };
           message = `Vou lançar um repasse de ${brl(valor)} para ${cand.displayName}${descricao ? ` (${descricao})` : ''}. Confirma?`;
+        }
+      }
+
+      // EDITAR ou EXCLUIR repasse: resolve candidato → repasse mais recente
+      if ((intent === 'editar_repasse' || intent === 'excluir_repasse') && parsed.draft) {
+        const wantName = String(parsed.draft.candidateName || '').trim().toLowerCase();
+        const { data: allCands } = await supabase.from('party_candidates')
+          .select('id, displayName').eq('partyId', party.id);
+        const matches = (allCands || []).filter((c: any) =>
+          c.displayName.toLowerCase().includes(wantName) || (wantName && wantName.includes(c.displayName.toLowerCase())));
+
+        if (!wantName) {
+          message = 'De qual candidato é o repasse? Me diga o nome.';
+        } else if (matches.length === 0) {
+          message = `Não encontrei candidato "${parsed.draft.candidateName}". Confira na lista.`;
+        } else if (matches.length > 1) {
+          message = `Há mais de um parecido com "${parsed.draft.candidateName}": ${matches.map((c: any) => c.displayName).join(', ')}. Qual deles?`;
+        } else {
+          const cand = matches[0];
+          // Pega o repasse MAIS RECENTE do candidato
+          const { data: reps } = await supabase.from('party_repasses')
+            .select('id, valor, data, descricao').eq('candidateId', cand.id)
+            .order('data', { ascending: false, nullsFirst: false }).limit(1);
+          const rep = (reps || [])[0] as any;
+          if (!rep) {
+            message = `${cand.displayName} não tem repasses registrados pra ${intent === 'editar_repasse' ? 'editar' : 'excluir'}.`;
+          } else if (intent === 'editar_repasse') {
+            const novoValor = Number(parsed.draft.valor) || 0;
+            if (novoValor <= 0) {
+              message = `Qual o novo valor do repasse de ${cand.displayName} (atual: ${brl(Number(rep.valor) || 0)})?`;
+            } else {
+              draft = {
+                type: 'edit_repasse',
+                repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
+                valorAntigo: Number(rep.valor) || 0, valor: novoValor,
+                descricao: parsed.draft.descricao ? String(parsed.draft.descricao).slice(0, 300) : (rep.descricao || ''),
+                data: rep.data,
+              };
+              message = `Vou alterar o repasse mais recente de ${cand.displayName} de ${brl(Number(rep.valor) || 0)} para ${brl(novoValor)}. Confirma? (Se for outro repasse, edite pela aba Repasses.)`;
+            }
+          } else {
+            // excluir
+            draft = {
+              type: 'delete_repasse',
+              repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
+              valor: Number(rep.valor) || 0, descricao: rep.descricao || '', data: rep.data,
+            };
+            message = `⚠️ Vou EXCLUIR o repasse mais recente de ${cand.displayName}: ${brl(Number(rep.valor) || 0)}${rep.descricao ? ` (${rep.descricao})` : ''}. Esta ação não pode ser desfeita. Confirma?`;
+          }
         }
       }
 

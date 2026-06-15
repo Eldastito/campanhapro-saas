@@ -27,12 +27,14 @@ function speak(text: string) {
 }
 
 interface RepasseDraft {
-  type: 'create_repasse';
+  type: 'create_repasse' | 'edit_repasse' | 'delete_repasse';
   candidateId: string;
   candidateName: string;
   valor: number;
+  valorAntigo?: number;
   descricao: string;
-  data: string;
+  data: string | null;
+  repasseId?: string;
 }
 interface Msg { role: 'user' | 'assistant'; text: string; draft?: RepasseDraft | null }
 
@@ -86,7 +88,7 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
       const j = await r.json().catch(() => ({}));
       const reply = j.message || j.error || 'Não consegui responder agora.';
       // Se a IA propôs um lançamento, anexa o draft à mensagem (vira card de confirmação)
-      const draft: RepasseDraft | null = j.intent === 'lancar_repasse' && j.draft ? j.draft : null;
+      const draft: RepasseDraft | null = ['lancar_repasse', 'editar_repasse', 'excluir_repasse'].includes(j.intent) && j.draft ? j.draft : null;
       setMsgs((m) => [...m, { role: 'assistant', text: reply, draft }]);
       // Pediu relatório → abre o overlay imprimível
       if (j.intent === 'gerar_relatorio') setShowReport(true);
@@ -98,25 +100,38 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
     }
   };
 
-  // Executa o draft confirmado pelo presidente (reusa o endpoint de repasse existente)
+  // Executa o draft confirmado (lançar/editar/excluir). Reusa endpoints existentes.
   const confirmDraft = async (draft: RepasseDraft, msgIdx: number) => {
     setExecuting(true);
     try {
-      const r = await authedFetch(`/api/v1/party/candidates/${draft.candidateId}/repasses`, {
-        method: 'POST',
-        body: JSON.stringify({ valor: draft.valor, data: draft.data, descricao: draft.descricao, itens: [] }),
-      });
+      let r: Response;
+      let okMsg: string;
+      if (draft.type === 'create_repasse') {
+        r = await authedFetch(`/api/v1/party/candidates/${draft.candidateId}/repasses`, {
+          method: 'POST',
+          body: JSON.stringify({ valor: draft.valor, data: draft.data, descricao: draft.descricao, itens: [] }),
+        });
+        okMsg = `✅ Repasse de ${brl(draft.valor)} lançado para ${draft.candidateName}.`;
+      } else if (draft.type === 'edit_repasse') {
+        r = await authedFetch(`/api/v1/party/repasses/${draft.repasseId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ valor: draft.valor, descricao: draft.descricao }),
+        });
+        okMsg = `✅ Repasse de ${draft.candidateName} alterado para ${brl(draft.valor)}.`;
+      } else {
+        r = await authedFetch(`/api/v1/party/repasses/${draft.repasseId}`, { method: 'DELETE' });
+        okMsg = `✅ Repasse de ${brl(draft.valor)} de ${draft.candidateName} excluído.`;
+      }
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
-        setMsgs((m) => [...m, { role: 'assistant', text: `Não consegui lançar: ${j.error || 'erro'}.` }]);
+        setMsgs((m) => [...m, { role: 'assistant', text: `Não consegui concluir: ${j.error || 'erro'}.` }]);
       } else {
-        // Remove o draft da mensagem (vira confirmado) + mensagem de sucesso
         setMsgs((m) => m.map((msg, i) => i === msgIdx ? { ...msg, draft: null } : msg)
-          .concat({ role: 'assistant', text: `✅ Repasse de ${brl(draft.valor)} lançado para ${draft.candidateName}.` }));
+          .concat({ role: 'assistant', text: okMsg }));
         onRepasseDone?.();
       }
     } catch {
-      setMsgs((m) => [...m, { role: 'assistant', text: 'Erro de conexão ao lançar.' }]);
+      setMsgs((m) => [...m, { role: 'assistant', text: 'Erro de conexão.' }]);
     } finally {
       setExecuting(false);
     }
@@ -208,19 +223,30 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                   </div>
                   {m.role === 'user' && <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center shrink-0 mt-0.5"><User className="w-3.5 h-3.5 text-slate-300" /></div>}
                 </div>
-                {/* Card de confirmação de lançamento (Fase 4) */}
-                {m.draft && (
-                  <div className="ml-8 w-[85%] bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
-                    <p className="text-[10px] font-bold text-amber-300 uppercase tracking-widest mb-1.5">Confirmar lançamento</p>
+                {/* Card de confirmação (Fase 4/4b): lançar / editar / excluir */}
+                {m.draft && (() => {
+                  const isDelete = m.draft.type === 'delete_repasse';
+                  const isEdit = m.draft.type === 'edit_repasse';
+                  const cls = isDelete ? 'bg-red-500/10 border-red-500/40' : 'bg-amber-500/10 border-amber-500/30';
+                  const titleCls = isDelete ? 'text-red-300' : 'text-amber-300';
+                  const title = isDelete ? '⚠️ Confirmar EXCLUSÃO' : isEdit ? 'Confirmar alteração' : 'Confirmar lançamento';
+                  return (
+                  <div className={`ml-8 w-[85%] border rounded-xl p-3 ${cls}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${titleCls}`}>{title}</p>
                     <div className="text-xs text-slate-200 space-y-0.5 mb-2.5">
-                      <p><b>{brl(m.draft.valor)}</b> para <b>{m.draft.candidateName}</b></p>
+                      {isEdit ? (
+                        <p><b>{m.draft.candidateName}</b>: <span className="line-through text-slate-500">{brl(m.draft.valorAntigo || 0)}</span> → <b className="text-emerald-300">{brl(m.draft.valor)}</b></p>
+                      ) : (
+                        <p><b>{brl(m.draft.valor)}</b> {isDelete ? 'de' : 'para'} <b>{m.draft.candidateName}</b></p>
+                      )}
                       {m.draft.descricao && <p className="text-slate-400">Finalidade: {m.draft.descricao}</p>}
-                      <p className="text-slate-500 text-[10px]">Data: {new Date(m.draft.data).toLocaleDateString('pt-BR')}</p>
+                      {m.draft.data && <p className="text-slate-500 text-[10px]">Data: {new Date(m.draft.data).toLocaleDateString('pt-BR')}</p>}
+                      {isDelete && <p className="text-red-300/80 text-[10px] font-bold">Esta ação não pode ser desfeita.</p>}
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => confirmDraft(m.draft!, i)} disabled={executing}
-                        className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg">
-                        {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Confirmar
+                        className={`flex-1 flex items-center justify-center gap-1 py-1.5 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg ${isDelete ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+                        {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} {isDelete ? 'Excluir' : 'Confirmar'}
                       </button>
                       <button onClick={() => cancelDraft(i)} disabled={executing}
                         className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-[11px] font-bold rounded-lg">
@@ -228,7 +254,8 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                       </button>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
               </div>
             ))}
             {state === 'thinking' && (
