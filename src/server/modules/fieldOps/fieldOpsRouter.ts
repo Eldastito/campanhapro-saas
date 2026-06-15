@@ -274,5 +274,56 @@ export function createFieldOpsRouter(supabase: SupabaseClient): Router {
     }
   });
 
+  // ── INACTIVITY: líderes parados há ≥N dias (#139) ─────────────────────
+  router.get('/inactivity', async (req: Request, res: Response) => {
+    try {
+      const campaignId = (req as any).user?.campaignId;
+      if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+      const cutoffDays = Math.max(2, Math.min(60, Number(req.query.days) || 7));
+      const sinceCutoff = new Date(Date.now() - cutoffDays * 86_400_000).toISOString().slice(0, 10);
+
+      const { data: members } = await supabase
+        .from('team_members')
+        .select('id, name, role')
+        .eq('campaignId', campaignId)
+        .in('role', ['Líder', 'Coordenador']);
+
+      const { data: visits } = await supabase
+        .from('visits')
+        .select('lider, "leaderId", data')
+        .eq('campaignId', campaignId)
+        .eq('realizada', 'sim')
+        .order('data', { ascending: false });
+
+      // Última visita por nome do líder
+      const lastByLeader = new Map<string, string>();
+      for (const v of (visits || []) as any[]) {
+        const name = (v.lider || '').trim();
+        if (!name) continue;
+        if (!lastByLeader.has(name)) lastByLeader.set(name, v.data);
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const inactive: Array<{ name: string; role: string | null; lastVisit: string | null; daysInactive: number | null }> = [];
+      for (const m of (members || []) as any[]) {
+        const last = lastByLeader.get((m.name || '').trim()) || null;
+        if (!last) {
+          inactive.push({ name: m.name, role: m.role, lastVisit: null, daysInactive: null });
+          continue;
+        }
+        if (last < sinceCutoff) {
+          const days = Math.floor((new Date(today).getTime() - new Date(last).getTime()) / 86_400_000);
+          inactive.push({ name: m.name, role: m.role, lastVisit: last, daysInactive: days });
+        }
+      }
+      inactive.sort((a, b) => (b.daysInactive ?? 9999) - (a.daysInactive ?? 9999));
+
+      return res.json({ inactive, cutoffDays, total: inactive.length });
+    } catch (err: any) {
+      console.error('[field-ops] inactivity:', err);
+      return res.status(500).json({ error: err?.message });
+    }
+  });
+
   return router;
 }

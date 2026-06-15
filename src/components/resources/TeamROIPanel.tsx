@@ -50,8 +50,14 @@ async function authFetch(url: string): Promise<any> {
 
 const fmtBRL = (v: number | null) => v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
-const TeamROIPanel: React.FC = () => {
-  const [days, setDays] = useState<30 | 60 | 90 | 180>(30);
+interface TeamROIPanelProps {
+  /** Quando passado, oculta o seletor interno e usa esse valor. */
+  daysProp?: number;
+}
+
+const TeamROIPanel: React.FC<TeamROIPanelProps> = ({ daysProp }) => {
+  const [daysLocal, setDaysLocal] = useState<30 | 60 | 90 | 180>(30);
+  const days = daysProp ?? daysLocal;
   const [members, setMembers] = useState<MemberROI[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,13 +103,15 @@ const TeamROIPanel: React.FC = () => {
           <h3 className="text-sm font-bold text-white uppercase tracking-wider">ROI por Membro</h3>
         </div>
         <div className="flex items-center gap-2">
-          <select value={days} onChange={(e) => setDays(Number(e.target.value) as any)}
-                  className="bg-slate-800 border border-slate-700 rounded text-xs text-white px-2 py-1">
-            <option value={30}>30 dias</option>
-            <option value={60}>60 dias</option>
-            <option value={90}>90 dias</option>
-            <option value={180}>6 meses</option>
-          </select>
+          {daysProp === undefined && (
+            <select value={daysLocal} onChange={(e) => setDaysLocal(Number(e.target.value) as any)}
+                    className="bg-slate-800 border border-slate-700 rounded text-xs text-white px-2 py-1">
+              <option value={30}>30 dias</option>
+              <option value={60}>60 dias</option>
+              <option value={90}>90 dias</option>
+              <option value={180}>6 meses</option>
+            </select>
+          )}
           <button onClick={load} className="p-1.5 hover:bg-slate-800 rounded text-slate-400">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>

@@ -47,7 +47,12 @@ async function authFetch(url: string, init: RequestInit = {}): Promise<any> {
   return j;
 }
 
-const TeamGamificationPanel: React.FC = () => {
+interface TeamGamificationPanelProps {
+  /** Reservado pra rodadas futuras de filtro temporal — hoje calcula tudo do histórico. */
+  daysProp?: number;
+}
+
+const TeamGamificationPanel: React.FC<TeamGamificationPanelProps> = (_props) => {
   const [members, setMembers] = useState<MemberProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [evaluating, setEvaluating] = useState(false);
