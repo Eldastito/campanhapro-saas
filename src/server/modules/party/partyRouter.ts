@@ -805,39 +805,89 @@ Saída JSON estrito (sem markdown):
           `- ${r.data} · ${brl(Number(r.valor) || 0)} · ${repMap[r.candidateId] || '?'} · ${r.descricao || 's/descrição'}`),
       ].join('\n');
 
-      // 2. Gemini interpreta (sem RAG pesado, sem escrita)
+      // 2. Gemini interpreta — retorna JSON estruturado (consulta OU intenção de lançar repasse)
       const geminiKey = process.env.GEMINI_API_KEY;
       if (!geminiKey) {
-        return res.json({ message: 'A IA consultiva está temporariamente indisponível (sem chave). Mas posso te dizer: o total repassado é ' + brl(totalRepassado) + ' entre ' + candidates.length + ' candidatos.' });
+        return res.json({ intent: 'consulta', message: 'A IA está temporariamente indisponível. Total repassado: ' + brl(totalRepassado) + ' entre ' + candidates.length + ' candidatos.', draft: null });
       }
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0.4, maxOutputTokens: 500 } });
-      const prompt = `Você é o assistente conversacional do Centro de Comando do partido, falando com o PRESIDENTE.
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0.2, maxOutputTokens: 500 } });
+      const hojeIso = new Date().toISOString().slice(0, 10);
+      const prompt = `Você é o assistente do Centro de Comando do partido, falando com o PRESIDENTE.
+
+Responda SEMPRE em JSON válido (nada fora do JSON):
+{
+  "intent": "consulta" | "lancar_repasse" | "acao_nao_suportada",
+  "message": "texto curto pro presidente",
+  "draft": null OU { "candidateName": "nome do beneficiário citado", "valor": numero_em_reais, "descricao": "finalidade" }
+}
 
 REGRAS:
-- Responda usando APENAS os dados do snapshot abaixo. NUNCA invente valores, nomes ou datas.
-- Se a informação não está no snapshot, diga que não tem esse dado ainda.
-- Tom direto e profissional, formato de chat (3-6 frases ou lista curta). Valores sempre em R$.
-- Você é SÓ CONSULTA nesta versão: se pedirem pra LANÇAR, EDITAR ou APAGAR algo, responda que ainda não executa alterações — oriente a usar os botões da tela. NUNCA finja que alterou.
-- Se perguntarem se você é IA/robô: "Sim, sou o assistente automatizado do seu Centro de Comando."
+- "consulta": o presidente pergunta sobre dados. Responda em message usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
+- "lancar_repasse": o presidente quer LANÇAR/ADICIONAR/REPASSAR um valor a um candidato. Extraia candidateName, valor (número, ex: "5 mil"=5000), descricao. message = frase confirmando a intenção. Se faltar valor ou candidato, use intent "consulta" e peça o que falta.
+- "acao_nao_suportada": EDITAR, ALTERAR, APAGAR, EXCLUIR repasse/candidato, ou qualquer outra escrita. message explica que ainda não executa isso e oriente usar os botões da tela. NUNCA finja que fez.
+- Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
+- Valores sempre em R$. Tom direto, chat.
 
-SNAPSHOT ATUAL DO PARTIDO:
+SNAPSHOT ATUAL DO PARTIDO (hoje: ${hojeIso}):
 ${snapshot}
 
-PERGUNTA DO PRESIDENTE: "${text}"
+PEDIDO DO PRESIDENTE: "${text}"
 
-Sua resposta:`;
+JSON:`;
       const result = await model.generateContent(prompt);
-      const message = result.response.text().trim().slice(0, 2000);
+      const raw = result.response.text().trim();
 
-      // Log leve (auditoria de comando — sem dados sensíveis além da pergunta)
+      // Parse defensivo: extrai o primeiro {...}. Se falhar, trata como consulta.
+      let parsed: any = null;
+      try {
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) parsed = JSON.parse(m[0]);
+      } catch { /* fallback abaixo */ }
+      if (!parsed || typeof parsed !== 'object') {
+        return res.json({ intent: 'consulta', message: raw.slice(0, 2000), draft: null });
+      }
+
+      const intent = ['consulta', 'lancar_repasse', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
+      let message = String(parsed.message || '').slice(0, 2000);
+      let draft: any = null;
+
+      // 3. Se for lançar repasse: resolve candidato + valida (backend manda no draft)
+      if (intent === 'lancar_repasse' && parsed.draft) {
+        const wantName = String(parsed.draft.candidateName || '').trim().toLowerCase();
+        const valor = Number(parsed.draft.valor) || 0;
+        const descricao = String(parsed.draft.descricao || '').slice(0, 300);
+
+        const { data: allCands } = await supabase.from('party_candidates')
+          .select('id, displayName').eq('partyId', party.id);
+        const matches = (allCands || []).filter((c: any) =>
+          c.displayName.toLowerCase().includes(wantName) || wantName.includes(c.displayName.toLowerCase()));
+
+        if (!wantName || valor <= 0) {
+          message = 'Pra lançar um repasse eu preciso do nome do candidato e do valor. Pode repetir? Ex: "lance 5 mil pra Maria, material gráfico".';
+        } else if (matches.length === 0) {
+          message = `Não encontrei nenhum candidato chamado "${parsed.draft.candidateName}". Confira o nome na lista de candidatos.`;
+        } else if (matches.length > 1) {
+          message = `Há mais de um candidato parecido com "${parsed.draft.candidateName}": ${matches.map((c: any) => c.displayName).join(', ')}. Qual deles?`;
+        } else {
+          const cand = matches[0];
+          draft = {
+            type: 'create_repasse',
+            candidateId: cand.id,
+            candidateName: cand.displayName,
+            valor, descricao, data: hojeIso,
+          };
+          message = `Vou lançar um repasse de ${brl(valor)} para ${cand.displayName}${descricao ? ` (${descricao})` : ''}. Confirma?`;
+        }
+      }
+
       await supabase.from('party_ai_command_logs').insert({
         partyId: party.id, userId, inputType: (req.body || {}).inputType || 'text',
-        userCommand: text.slice(0, 500), detectedIntent: 'consulta', actionStatus: 'ok',
+        userCommand: text.slice(0, 500), detectedIntent: intent, actionStatus: draft ? 'draft' : 'ok',
       }).then(() => {}, () => {});
 
-      return res.json({ message });
+      return res.json({ intent, message, draft });
     } catch (err: any) {
       console.error('[party] ai/command:', err);
       return res.status(500).json({ error: err?.message || 'ai_failed', message: 'Não consegui processar agora. Tente reformular.' });
