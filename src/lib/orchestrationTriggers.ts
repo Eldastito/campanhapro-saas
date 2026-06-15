@@ -13,6 +13,7 @@
  * (ex.: só para campanhas com IA proativa habilitada). Aqui só executamos.
  */
 import { runManager } from './managerAgent';
+import { isCampaignPaused } from './campaignPauseGate';
 
 export interface FireOrchestrationOpts {
   campaignId: string;
@@ -31,6 +32,12 @@ export function fireOrchestration(supabaseAdmin: any, opts: FireOrchestrationOpt
   if (!supabaseAdmin || !opts.campaignId || !opts.intent) return;
   void (async () => {
     try {
+      // Modo Campanha Pausada (#137): se setado, IA não dispara.
+      const paused = await isCampaignPaused(supabaseAdmin, opts.campaignId);
+      if (paused) {
+        console.log(`[trigger:${opts.source}] campanha ${opts.campaignId} PAUSADA — skip`);
+        return;
+      }
       console.log(`[trigger:${opts.source}] disparando orquestrador p/ campanha ${opts.campaignId}`);
       const r = await runManager({
         supabaseAdmin,

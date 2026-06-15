@@ -11,6 +11,7 @@ import { Brain, AlertTriangle } from 'lucide-react';
 import AgendaPanel from '../components/agenda/AgendaPanel';
 import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
 import ExternalMemoryRefreshCard from '../components/dashboard/ExternalMemoryRefreshCard';
+import CampaignPauseCard from '../components/settings/CampaignPauseCard';
 
 const SettingsPage = () => {
     const { campaignDetails, updateCampaignDetails } = useSettings();
@@ -21,6 +22,9 @@ const SettingsPage = () => {
                 <CogIcon className="h-8 w-8 text-sky-400" />
                 <h2 className="text-2xl font-bold text-slate-200">Configurações da Campanha</h2>
             </div>
+
+            {/* Modo Campanha Pausada (#137) — botão de pânico no topo */}
+            <CampaignPauseCard />
 
             <Card>
                 <h3 className="text-lg font-bold text-slate-300 mb-4">Dados do Candidato e Orçamento</h3>

@@ -18,6 +18,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { CronExpressionParser } from 'cron-parser';
 import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 import { runSocialSync, detectSignificantChange, SyncProvider } from '../../../lib/socialSyncRunner';
+import { createSnapshot, shouldRunBackupToday } from '../controlPanel/backupService';
 
 const TICK_MS = 60_000;        // 1 minuto
 const BATCH_LIMIT = 20;        // máximo de triggers por tick (proteção)
@@ -260,6 +261,40 @@ async function tickSocialSync(supabase: SupabaseClient) {
   }
 }
 
+/**
+ * Backup automático noturno (#137).
+ *
+ * Roda 1x/dia entre 03h-04h BR (antes do sync social das 04h). Pra cada
+ * campanha com WhatsApp conectado OU visits/eventos recentes, gera um
+ * snapshot de auditoria. Skip campanhas pausadas (aiGloballyPausedAt).
+ */
+const BACKUP_HOUR_BR = 3;
+
+async function tickDailyBackup(supabase: SupabaseClient) {
+  const hour = getBRHour();
+  if (hour < BACKUP_HOUR_BR || hour > BACKUP_HOUR_BR + 1) return;
+
+  // Lista campanhas ativas (com ao menos 1 visita ou 1 ação de engajamento alguma vez)
+  const { data: campaigns } = await supabase
+    .from('campaigns')
+    .select('id, "aiGloballyPausedAt"')
+    .limit(200);
+
+  if (!campaigns?.length) return;
+
+  for (const c of campaigns as any[]) {
+    if (c.aiGloballyPausedAt) continue; // pausada → não faz backup
+    try {
+      const need = await shouldRunBackupToday(supabase, c.id);
+      if (!need) continue;
+      const snap = await createSnapshot(supabase, c.id);
+      console.log(`[backup] campanha=${c.id} criado snapshot tamanho=${(snap.sizeBytes / 1024).toFixed(0)}KB`);
+    } catch (err: any) {
+      console.warn(`[backup] falha campanha=${c.id}:`, err?.message);
+    }
+  }
+}
+
 let _started = false;
 let _intervalHandle: NodeJS.Timeout | null = null;
 
@@ -277,6 +312,7 @@ export function startRoutinesWorker(supabase: SupabaseClient) {
       await tick(supabase);
       await tickManualRuns(supabase);
       await tickSocialSync(supabase);
+      await tickDailyBackup(supabase);
     } catch (e: any) {
       console.error('[routines-worker] erro no tick:', e?.message || e);
     }

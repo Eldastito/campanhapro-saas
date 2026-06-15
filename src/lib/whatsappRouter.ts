@@ -24,6 +24,7 @@ import { fireOrchestration } from './orchestrationTriggers';
 import { classifyMessage, ClassificationResult, RoutingIntent } from './whatsappClassifier';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { retrieveContext } from '../server/modules/rag/knowledgeIngest';
+import { isCampaignPaused } from './campaignPauseGate';
 
 /**
  * Aurora responde inline via Gemini Flash. Antes: tinha regra "se não sabe,
@@ -287,6 +288,11 @@ export interface RouteInput {
 export async function routeIncomingMessage(input: RouteInput): Promise<RouteResult> {
   const t0 = Date.now();
   const { supabase, campaignId, text, phone, remoteJid, instanceName, apiKey, originalPayload } = input;
+
+  // Modo Campanha Pausada (#137): nem o roteador 2-IAs roda
+  if (await isCampaignPaused(supabase, campaignId)) {
+    return { handled: true, decision: 'silence' };
+  }
 
   const cfg = await loadConfig(supabase, campaignId);
   if (!cfg || !cfg.enabled) {

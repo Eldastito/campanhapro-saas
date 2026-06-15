@@ -10,6 +10,7 @@ import { usePermissions } from '../hooks/usePermissions';
 import ImageUpload from '../components/ui/ImageUpload';
 import { useAuth } from '../contexts/AuthContext';
 import { createBackup, restoreBackup } from '../services/backupService';
+import AutoBackupCard from '../components/tools/AutoBackupCard';
 
 const ToolsPage = () => {
   const { user } = useAuth();
@@ -48,6 +49,9 @@ const ToolsPage = () => {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-slate-200">Ferramentas e Configurações</h2>
+
+      {/* Backup automático noturno (#137) */}
+      <AutoBackupCard />
 
       <Card>
         <h3 className="font-bold text-lg text-slate-300 mb-4">Personalização Visual</h3>
