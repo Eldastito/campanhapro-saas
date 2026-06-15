@@ -54,6 +54,7 @@ import { createSocialRouter } from './src/server/modules/social/socialRouter';
 import { createWhatsappRoutingRouter } from './src/server/modules/whatsappRouting/whatsappRoutingRouter';
 import { createCalculatorRouter } from './src/server/modules/calculator/calculatorRouter';
 import { createFieldOpsRouter } from './src/server/modules/fieldOps/fieldOpsRouter';
+import { createTeamGamificationRouter } from './src/server/modules/teamGamification/teamGamificationRouter';
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
@@ -287,6 +288,7 @@ async function startServer() {
     app.use('/api/v1/whatsapp-routing', requireAuth, mutationLimiter, createWhatsappRoutingRouter(supabaseAdmin));
     app.use('/api/v1/calculator', requireAuth, mutationLimiter, createCalculatorRouter(supabaseAdmin));
     app.use('/api/v1/field-ops', requireAuth, mutationLimiter, createFieldOpsRouter(supabaseAdmin));
+    app.use('/api/v1/team-gamification', requireAuth, mutationLimiter, createTeamGamificationRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));

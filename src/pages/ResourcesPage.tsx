@@ -3,6 +3,7 @@ import TeamManager from '../components/resources/TeamManager';
 import LocationsManager from '../components/resources/LocationsManager';
 import TeamResourcesManager from '../components/resources/TeamResourcesManager';
 import TeamGoalsManager from '../components/resources/TeamGoalsManager';
+import TeamGamificationPanel from '../components/resources/TeamGamificationPanel';
 import { UsersGroupIcon, MapPinIcon, ArchiveBoxIcon } from '../components/icons';
 import { Target } from 'lucide-react';
 
@@ -22,7 +23,10 @@ const ResourcesPage = () => {
                 Gerencie os cadastros essenciais da sua campanha. Mantenha as informações da sua equipe e áreas de atuação sempre atualizadas.
             </p>
             <Tabs tabs={tabs} iconMap={iconMap} mode="state">
-                <TeamManager />
+                <div className="space-y-6">
+                    <TeamGamificationPanel />
+                    <TeamManager />
+                </div>
                 <TeamGoalsManager />
                 <LocationsManager />
                 <TeamResourcesManager />
