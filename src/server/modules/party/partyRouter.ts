@@ -744,6 +744,106 @@ Saída JSON estrito (sem markdown):
     return res.json({ checkin: data });
   });
 
+  // ── ORB CONVERSACIONAL (#142) — IA consultiva (só LEITURA nesta fase) ──
+  //
+  // Segurança: a IA NUNCA toca o banco direto. O backend monta um snapshot
+  // determinístico (SQL controlado, escopado ao partido do presidente) e injeta
+  // no prompt. O Gemini só interpreta/formata — não inventa (dados no contexto)
+  // e não escreve nada. Compliance: identifica-se como assistente.
+  router.post('/ai/command', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+
+    const text = String((req.body || {}).text || '').trim().slice(0, 800);
+    if (!text) return res.status(400).json({ error: 'texto_vazio' });
+
+    try {
+      // 1. Snapshot determinístico do partido (escopado por partyId)
+      const { data: cands } = await supabase.from('party_candidates')
+        .select('displayName, cargo, regiao, status, valorRecebido, repasseStatus')
+        .eq('partyId', party.id).order('valorRecebido', { ascending: false });
+      const candidates = cands || [];
+      const totalRepassado = candidates.reduce((s: number, c: any) => s + (Number(c.valorRecebido) || 0), 0);
+      const cadastrados = candidates.filter((c: any) => c.status === 'active').length;
+      const pendentes = candidates.filter((c: any) => c.status === 'pending').length;
+
+      const { data: repasses } = await supabase.from('party_repasses')
+        .select('valor, data, descricao, candidateId')
+        .eq('partyId', party.id).order('data', { ascending: false }).limit(15);
+
+      const candById: Record<string, string> = {};
+      candidates.forEach((c: any, i: number) => { candById[i] = c.displayName; });
+      const candNameByRepasse = async () => {
+        // mapeia candidateId → nome (1 query extra leve)
+        const ids = [...new Set((repasses || []).map((r: any) => r.candidateId).filter(Boolean))];
+        if (!ids.length) return {} as Record<string, string>;
+        const { data } = await supabase.from('party_candidates').select('id, displayName').in('id', ids);
+        const m: Record<string, string> = {};
+        (data || []).forEach((c: any) => { m[c.id] = c.displayName; });
+        return m;
+      };
+      const repMap = await candNameByRepasse();
+
+      const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      const snapshot = [
+        `PARTIDO: ${party.name}`,
+        `Candidatos: ${candidates.length} (${cadastrados} cadastrados, ${pendentes} pendentes)`,
+        `Total repassado: ${brl(totalRepassado)}`,
+        ``,
+        `CANDIDATOS (nome · cargo · região · status · valor recebido):`,
+        ...candidates.slice(0, 30).map((c: any) =>
+          `- ${c.displayName} · ${c.cargo || 's/cargo'} · ${c.regiao || 's/região'} · ${c.status} · ${brl(Number(c.valorRecebido) || 0)}`),
+        ``,
+        `REPASSES RECENTES (data · valor · candidato · descrição):`,
+        ...(repasses || []).map((r: any) =>
+          `- ${r.data} · ${brl(Number(r.valor) || 0)} · ${repMap[r.candidateId] || '?'} · ${r.descricao || 's/descrição'}`),
+      ].join('\n');
+
+      // 2. Gemini interpreta (sem RAG pesado, sem escrita)
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (!geminiKey) {
+        return res.json({ message: 'A IA consultiva está temporariamente indisponível (sem chave). Mas posso te dizer: o total repassado é ' + brl(totalRepassado) + ' entre ' + candidates.length + ' candidatos.' });
+      }
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0.4, maxOutputTokens: 500 } });
+      const prompt = `Você é o assistente conversacional do Centro de Comando do partido, falando com o PRESIDENTE.
+
+REGRAS:
+- Responda usando APENAS os dados do snapshot abaixo. NUNCA invente valores, nomes ou datas.
+- Se a informação não está no snapshot, diga que não tem esse dado ainda.
+- Tom direto e profissional, formato de chat (3-6 frases ou lista curta). Valores sempre em R$.
+- Você é SÓ CONSULTA nesta versão: se pedirem pra LANÇAR, EDITAR ou APAGAR algo, responda que ainda não executa alterações — oriente a usar os botões da tela. NUNCA finja que alterou.
+- Se perguntarem se você é IA/robô: "Sim, sou o assistente automatizado do seu Centro de Comando."
+
+SNAPSHOT ATUAL DO PARTIDO:
+${snapshot}
+
+PERGUNTA DO PRESIDENTE: "${text}"
+
+Sua resposta:`;
+      const result = await model.generateContent(prompt);
+      const message = result.response.text().trim().slice(0, 2000);
+
+      // Log leve (auditoria de comando — sem dados sensíveis além da pergunta)
+      await supabase.from('party_ai_command_logs').insert({
+        partyId: party.id, userId, inputType: (req.body || {}).inputType || 'text',
+        userCommand: text.slice(0, 500), detectedIntent: 'consulta', actionStatus: 'ok',
+      }).then(() => {}, () => {});
+
+      return res.json({ message });
+    } catch (err: any) {
+      console.error('[party] ai/command:', err);
+      return res.status(500).json({ error: err?.message || 'ai_failed', message: 'Não consegui processar agora. Tente reformular.' });
+    }
+  });
+
   // ── BOTÃO DE EMERGÊNCIA (#141) — zera dados OPERACIONAIS do partido ────
   //
   // Apaga repasses, candidatos, comitês, check-ins e log da válvula + fotos do

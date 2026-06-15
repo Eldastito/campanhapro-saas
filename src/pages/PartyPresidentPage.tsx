@@ -8,6 +8,7 @@ import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
 import PartyEmergencyWipe from '../components/party/PartyEmergencyWipe';
+import PartyAIOrb from '../components/party/PartyAIOrb';
 
 /**
  * Centro de Comando do Presidente de Partido (produto PARTIDO).
@@ -599,6 +600,9 @@ const PartyPresidentPage: React.FC = () => {
           onWiped={() => { setTab('Candidatos'); load(); }}
         />
       )}
+
+      {/* ORB Conversacional (#142) — assistente flutuante do partido */}
+      <PartyAIOrb />
 
       {/* Modal: novo candidato */}
       {addOpen && (
