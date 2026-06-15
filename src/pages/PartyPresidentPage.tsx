@@ -593,7 +593,11 @@ const PartyPresidentPage: React.FC = () => {
       })()}
 
       {tab === 'Segurança' && (
-        <PartyEmergencyWipe partyName={party.name} onWiped={() => { setTab('Candidatos'); load(); }} />
+        <PartyEmergencyWipe
+          partyName={party.name}
+          hasData={candidates.length > 0 || totalRepassado > 0}
+          onWiped={() => { setTab('Candidatos'); load(); }}
+        />
       )}
 
       {/* Modal: novo candidato */}

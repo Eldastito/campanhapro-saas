@@ -11,7 +11,7 @@
  *   6. Backend revalida role 'Presidente de Partido' + ownership + confirmationText
  */
 import React, { useEffect, useState } from 'react';
-import { ShieldAlert, AlertTriangle, Loader2, Lock, X } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Loader2, Lock, X, ShieldCheck } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
@@ -19,7 +19,7 @@ import { useAuth } from '../../contexts/AuthContext';
 const CONFIRM_PHRASE = 'APAGAR TUDO';
 const COUNTDOWN_SECONDS = 5;
 
-const PartyEmergencyWipe: React.FC<{ partyName: string; onWiped: () => void }> = ({ partyName, onWiped }) => {
+const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWiped: () => void }> = ({ partyName, hasData, onWiped }) => {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [phrase, setPhrase] = useState('');
@@ -82,6 +82,21 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; onWiped: () => void }> =
     }
   };
 
+  // Sem dados operacionais → esconde a Zona de Perigo. Não há o que apagar
+  // (estado pós-wipe ou partido recém-criado). Reaparece quando houver dados.
+  if (!hasData) {
+    return (
+      <div className="bg-gradient-to-br from-emerald-600/10 to-teal-600/5 border border-emerald-500/20 rounded-3xl p-6 text-center">
+        <ShieldCheck className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
+        <h3 className="text-lg font-bold text-emerald-300">Nenhum dado operacional</h3>
+        <p className="text-sm text-slate-400 mt-1 max-w-md mx-auto">
+          Este partido ainda não tem candidatos, repasses ou registros pra proteger.
+          A <b>Zona de Perigo</b> (apagar dados) aparece automaticamente assim que houver dados cadastrados.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="bg-gradient-to-br from-red-600/10 to-rose-600/5 border border-red-500/20 rounded-3xl p-5">
@@ -129,12 +144,19 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; onWiped: () => void }> =
                   check-ins, metas, rankings e dados do telão. <b className="text-slate-300">A conta e o login permanecem.</b>
                 </div>
 
+                {/* Honeypots: absorvem o autofill do navegador (que tentava preencher
+                    email+senha nos campos reais). Invisíveis e ignorados. */}
+                <input type="text" name="username" autoComplete="username" className="hidden" tabIndex={-1} aria-hidden="true" />
+                <input type="password" name="password" autoComplete="current-password" className="hidden" tabIndex={-1} aria-hidden="true" />
+
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
                   Digite <span className="text-red-400">{CONFIRM_PHRASE}</span> para confirmar
                 </label>
                 <input
-                  value={phrase} onChange={(e) => setPhrase(e.target.value)}
+                  value={phrase} onChange={(e) => setPhrase(e.target.value.toUpperCase())}
                   placeholder={CONFIRM_PHRASE}
+                  autoComplete="off" autoCorrect="off" autoCapitalize="characters" spellCheck={false}
+                  name="cp_confirm_phrase" data-lpignore="true" data-form-type="other"
                   className={`w-full bg-slate-950 border rounded-xl px-3 py-2.5 text-white mb-3 ${phraseOk ? 'border-emerald-500/50' : 'border-white/10'}`}
                 />
 
@@ -144,6 +166,8 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; onWiped: () => void }> =
                 <input
                   type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                   placeholder="Senha da sua conta"
+                  autoComplete="new-password" data-lpignore="true"
+                  name="cp_reauth_password"
                   className={`w-full bg-slate-950 border rounded-xl px-3 py-2.5 text-white mb-4 ${passwordOk ? 'border-emerald-500/50' : 'border-white/10'}`}
                 />
 
