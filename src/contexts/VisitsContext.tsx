@@ -266,10 +266,34 @@ export const VisitsProvider = ({ children }: { children?: React.ReactNode }) => 
                     lastInteractionAt: now,
                     createdAt: now,
                 }));
+                let insertedContacts: any[] = [];
                 try {
-                    await supabase.from('contacts').insert(rows);
+                    const { data: ins } = await supabase.from('contacts').insert(rows).select('id, name, phone, neighborhood');
+                    insertedContacts = ins || [];
                 } catch (e) {
                     console.warn('[engagement→CRM] falha inserindo contatos identificados:', e);
+                }
+
+                // Cria follow-ups automáticos (#135) — re-contato em 3 dias
+                if (insertedContacts.length > 0) {
+                    const dueDate = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+                    const followups = insertedContacts.map((c, i) => ({
+                        campaignId: user.campaignId,
+                        engagementActionId: created.id,
+                        contactId: c.id,
+                        personName: c.name,
+                        personPhone: c.phone,
+                        personNeighborhood: c.neighborhood,
+                        personType: identified[i]?.tipo || 'indeciso',
+                        dueDate,
+                        status: 'pending',
+                        assignedTo: action.apoiador || null,
+                    }));
+                    try {
+                        await supabase.from('engagement_followups').insert(followups);
+                    } catch (e) {
+                        console.warn('[engagement→followup] falha:', e);
+                    }
                 }
             }
 

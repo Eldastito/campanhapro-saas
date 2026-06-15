@@ -9,6 +9,7 @@ import Card from '../components/ui/Card';
 import Input from '../components/ui/Input';
 import VisitForm from '../components/visits/VisitForm';
 import VisitsTable from '../components/visits/VisitsTable';
+import VisitsLeaderRanking from '../components/visits/VisitsLeaderRanking';
 import { usePermissions } from '../hooks/usePermissions';
 import { ClipboardListIcon, CalendarIcon } from '../components/icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -63,6 +64,9 @@ const VisitsPage = () => {
                  </div>
                  <Button onClick={openAddModal}>Agendar / Adicionar Visita</Button>
             </div>
+
+            {/* Ranking de líderes (#135) */}
+            <VisitsLeaderRanking />
 
             <div className="flex gap-4 border-b border-slate-700">
                 <button 

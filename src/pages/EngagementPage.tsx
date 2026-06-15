@@ -6,6 +6,7 @@ import { useVisits } from '../contexts/VisitsContext';
 import { EngagementAction } from '../types/engagement';
 import EngagementForm from '../components/engagement/EngagementForm';
 import EngagementsTable from '../components/engagement/EngagementsTable';
+import EngagementFollowupPanel from '../components/engagement/EngagementFollowupPanel';
 
 const emptyAction: Omit<EngagementAction, 'id'> = {
     data: new Date().toISOString().split('T')[0],
@@ -38,6 +39,10 @@ const EngagementPage = () => {
                 </div>
                 <Button onClick={() => setIsModalOpen(true)}>Registrar Nova Ação</Button>
             </div>
+
+            {/* Follow-up de pessoas identificadas (#135) */}
+            <EngagementFollowupPanel />
+
             <Card>
                 <EngagementsTable actions={engagementActions} />
             </Card>
