@@ -2,10 +2,12 @@ import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned, ShieldCheck,
   Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle, Search, Pencil, Trash2,
+  Eye, EyeOff,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
+import PartyEmergencyWipe from '../components/party/PartyEmergencyWipe';
 
 /**
  * Centro de Comando do Presidente de Partido (produto PARTIDO).
@@ -43,15 +45,28 @@ const STATUS_BADGE: Record<string, string> = {
 };
 const STATUS_LABEL: Record<string, string> = { pending: 'Aguardando cadastro', active: 'Cadastrado', concluded: 'Concluído' };
 
-const TABS = ['Candidatos', 'Ranking', 'Repasses', 'Comprovação', 'Telão'];
+const TABS = ['Candidatos', 'Ranking', 'Repasses', 'Comprovação', 'Telão', 'Segurança'];
 
-const Stat: React.FC<{ icon: any; label: string; value: React.ReactNode; from: string; to: string }> = ({ icon: Icon, label, value, from, to }) => (
+const Stat: React.FC<{
+  icon: any; label: string; value: React.ReactNode; from: string; to: string;
+  // Campo sensível (#141): mostra olho + render condicional (valor real NÃO vai pro DOM quando oculto).
+  sensitive?: boolean; hidden?: boolean; onToggleHidden?: () => void;
+}> = ({ icon: Icon, label, value, from, to, sensitive, hidden, onToggleHidden }) => (
   <div className={`bg-gradient-to-br ${from} ${to} p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-white/10`}>
     <div className="flex items-center justify-between gap-2">
       <p className="text-[10px] sm:text-xs text-slate-300 font-bold uppercase tracking-wider truncate">{label}</p>
-      <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white/70 shrink-0" />
+      <div className="flex items-center gap-1.5 shrink-0">
+        {sensitive && (
+          <button onClick={onToggleHidden} className="text-white/60 hover:text-white transition-colors" title={hidden ? 'Mostrar valor' : 'Ocultar valor'}>
+            {hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        )}
+        <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white/70" />
+      </div>
     </div>
-    <p className="text-xl sm:text-3xl font-black text-white mt-1 sm:mt-2 break-words leading-tight">{value}</p>
+    <p className="text-xl sm:text-3xl font-black text-white mt-1 sm:mt-2 break-words leading-tight">
+      {sensitive && hidden ? 'R$ ••••••' : value}
+    </p>
   </div>
 );
 
@@ -88,6 +103,15 @@ const PartyPresidentPage: React.FC = () => {
   const [party, setParty] = React.useState<Party | null>(null);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [tab, setTab] = React.useState('Candidatos');
+  // Sigilo financeiro (#141): oculto por padrão, preferência por navegador.
+  const [financialVisible, setFinancialVisible] = React.useState<boolean>(() => {
+    try { return localStorage.getItem('party_financial_visible') === 'true'; } catch { return false; }
+  });
+  const toggleFinancial = () => setFinancialVisible((v) => {
+    const nv = !v;
+    try { localStorage.setItem('party_financial_visible', String(nv)); } catch { /* ok */ }
+    return nv;
+  });
   const [provName, setProvName] = React.useState('');
   const [provBusy, setProvBusy] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
@@ -291,7 +315,8 @@ const PartyPresidentPage: React.FC = () => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
         <Stat icon={Users} label="Candidatos" value={candidates.length} from="from-indigo-600/20" to="to-blue-600/10" />
         <Stat icon={CheckCircle2} label="Já cadastrados" value={cadastrados} from="from-emerald-600/20" to="to-teal-600/10" />
-        <Stat icon={Wallet} label="Total repassado" value={brl(totalRepassado)} from="from-amber-600/20" to="to-orange-600/10" />
+        <Stat icon={Wallet} label="Total repassado" value={brl(totalRepassado)} from="from-amber-600/20" to="to-orange-600/10"
+          sensitive hidden={!financialVisible} onToggleHidden={toggleFinancial} />
         <Stat icon={Target} label="Metas cumpridas" value={`${metasDoneTotal}/${metasTotalTotal || 0}`} from="from-purple-600/20" to="to-fuchsia-600/10" />
       </div>
 
@@ -566,6 +591,10 @@ const PartyPresidentPage: React.FC = () => {
           </div>
         );
       })()}
+
+      {tab === 'Segurança' && (
+        <PartyEmergencyWipe partyName={party.name} onWiped={() => { setTab('Candidatos'); load(); }} />
+      )}
 
       {/* Modal: novo candidato */}
       {addOpen && (

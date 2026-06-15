@@ -744,5 +744,84 @@ Saída JSON estrito (sem markdown):
     return res.json({ checkin: data });
   });
 
+  // ── BOTÃO DE EMERGÊNCIA (#141) — zera dados OPERACIONAIS do partido ────
+  //
+  // Apaga repasses, candidatos, comitês, check-ins e log da válvula + fotos do
+  // storage. NÃO apaga: a conta `parties`, o usuário presidente, plano/assinatura.
+  //
+  // Segurança em camadas:
+  //   1. Sessão autenticada (requireAuth já validou o JWT antes daqui)
+  //   2. Role 'Presidente de Partido' + dono do partido (parties.presidentId)
+  //   3. confirmationText === 'APAGAR TUDO' (digitado pelo usuário)
+  //   4. Reautenticação de senha: feita NO CLIENTE via signInWithPassword antes
+  //      de chamar isto — a senha NUNCA trafega pro nosso backend (LGPD/segurança).
+  //      O cliente só chama este endpoint se a senha conferir.
+  router.post('/emergency-wipe', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+
+    const confirmationText = String((req.body || {}).confirmationText || '').trim();
+    if (confirmationText !== 'APAGAR TUDO') {
+      return res.status(400).json({ error: 'confirmacao_invalida', detail: 'Digite exatamente APAGAR TUDO.' });
+    }
+
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req as any).ip || null;
+    const userAgent = (req.headers['user-agent'] as string)?.slice(0, 300) || null;
+    const summary: Record<string, number> = {};
+
+    try {
+      // IDs dos candidatos (pra apagar dependências + contar fotos)
+      const { data: cands } = await supabase.from('party_candidates')
+        .select('id').eq('partyId', party.id);
+      const candIds = (cands || []).map((c: any) => c.id);
+      summary.candidates = candIds.length;
+
+      // 1. Fotos do storage (comitês + check-ins) — best-effort
+      try {
+        const { data: files } = await supabase.storage.from(PROOF_BUCKET).list(`party/${party.id}`);
+        if (files?.length) {
+          const paths = files.map((f: any) => `party/${party.id}/${f.name}`);
+          await supabase.storage.from(PROOF_BUCKET).remove(paths);
+          summary.storageFiles = paths.length;
+        }
+      } catch (e: any) { console.warn('[wipe] storage:', e?.message); }
+
+      // 2. Tabelas dependentes primeiro (FK-safe), depois candidatos
+      const delCount = async (table: string, col: string, val: string): Promise<number> => {
+        const { count } = await supabase.from(table).delete({ count: 'exact' }).eq(col, val);
+        return count || 0;
+      };
+      summary.repasses = await delCount('party_repasses', 'partyId', party.id);
+      summary.committees = await delCount('party_committees', 'partyId', party.id);
+      summary.checkins = await delCount('party_checkins', 'partyId', party.id);
+      summary.valveLog = await delCount('party_valve_log', 'partyId', party.id);
+      summary.candidatesDeleted = await delCount('party_candidates', 'partyId', party.id);
+
+      // 3. Auditoria (resumo quantitativo, sem conteúdo sensível)
+      await supabase.from('party_wipe_audit').insert({
+        partyId: party.id, executedBy: userId,
+        deletedSummary: summary, scope: 'operational', status: 'success',
+        ip, userAgent,
+      });
+
+      return res.json({ success: true, message: 'Dados operacionais do partido apagados.', deletedSummary: summary });
+    } catch (err: any) {
+      console.error('[party] emergency-wipe:', err);
+      await supabase.from('party_wipe_audit').insert({
+        partyId: party.id, executedBy: userId,
+        deletedSummary: summary, scope: 'operational', status: 'error',
+        errorMessage: err?.message?.slice(0, 300) || 'erro', ip, userAgent,
+      }).then(() => {}, () => {});
+      return res.status(500).json({ error: err?.message || 'wipe_failed', partial: summary });
+    }
+  });
+
   return router;
 }
