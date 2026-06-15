@@ -744,6 +744,48 @@ Saída JSON estrito (sem markdown):
     return res.json({ checkin: data });
   });
 
+  // ── RELATÓRIO DE REPASSES (#144) — agregado do partido pra impressão ──
+  router.get('/repasses-report', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+
+    const { data: cands } = await supabase.from('party_candidates')
+      .select('id, displayName, cargo, regiao').eq('partyId', party.id);
+    const candMap: Record<string, any> = {};
+    (cands || []).forEach((c: any) => { candMap[c.id] = c; });
+
+    const { data: reps } = await supabase.from('party_repasses')
+      .select('valor, data, descricao, candidateId, itens')
+      .eq('partyId', party.id).order('data', { ascending: false, nullsFirst: false });
+
+    const items = (reps || []).map((r: any) => {
+      const c = candMap[r.candidateId] || {};
+      return {
+        candidato: c.displayName || '—',
+        cargo: c.cargo || '',
+        regiao: c.regiao || '',
+        valor: Number(r.valor) || 0,
+        data: r.data || null,
+        descricao: r.descricao || '',
+      };
+    });
+    const totalGeral = items.reduce((s: number, i: any) => s + i.valor, 0);
+
+    return res.json({
+      partyName: party.name,
+      geradoEm: new Date().toISOString(),
+      totalGeral,
+      totalRepasses: items.length,
+      items,
+    });
+  });
+
   // ── ORB CONVERSACIONAL (#142) — IA consultiva (só LEITURA nesta fase) ──
   //
   // Segurança: a IA NUNCA toca o banco direto. O backend monta um snapshot
@@ -818,7 +860,7 @@ Saída JSON estrito (sem markdown):
 
 Responda SEMPRE em JSON válido (nada fora do JSON):
 {
-  "intent": "consulta" | "lancar_repasse" | "acao_nao_suportada",
+  "intent": "consulta" | "lancar_repasse" | "gerar_relatorio" | "acao_nao_suportada",
   "message": "texto curto pro presidente",
   "draft": null OU { "candidateName": "nome do beneficiário citado", "valor": numero_em_reais, "descricao": "finalidade" }
 }
@@ -826,6 +868,7 @@ Responda SEMPRE em JSON válido (nada fora do JSON):
 REGRAS:
 - "consulta": o presidente pergunta sobre dados. Responda em message usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
 - "lancar_repasse": o presidente quer LANÇAR/ADICIONAR/REPASSAR um valor a um candidato. Extraia candidateName, valor (número, ex: "5 mil"=5000), descricao. message = frase confirmando a intenção. Se faltar valor ou candidato, use intent "consulta" e peça o que falta.
+- "gerar_relatorio": o presidente quer GERAR/IMPRIMIR/BAIXAR um RELATÓRIO de repasses. message = "Gerei o relatório de repasses, abrindo aqui." draft = null.
 - "acao_nao_suportada": EDITAR, ALTERAR, APAGAR, EXCLUIR repasse/candidato, ou qualquer outra escrita. message explica que ainda não executa isso e oriente usar os botões da tela. NUNCA finja que fez.
 - Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
 - Valores sempre em R$. Tom direto, chat.
@@ -849,7 +892,7 @@ JSON:`;
         return res.json({ intent: 'consulta', message: raw.slice(0, 2000), draft: null });
       }
 
-      const intent = ['consulta', 'lancar_repasse', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
+      const intent = ['consulta', 'lancar_repasse', 'gerar_relatorio', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
       let message = String(parsed.message || '').slice(0, 2000);
       let draft: any = null;
 

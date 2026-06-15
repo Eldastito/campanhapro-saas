@@ -9,8 +9,22 @@
  * Segurança: backend valida role + escopa tudo ao partido. IA nunca escreve.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, X, Send, Mic, Loader2, Bot, User, CheckCircle2, XCircle } from 'lucide-react';
+import { Sparkles, X, Send, Mic, Loader2, Bot, User, CheckCircle2, XCircle, Volume2, FileText } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
+import PartyRepasseReport from './PartyRepasseReport';
+
+// TTS leve (Web Speech) — lê a resposta da IA em voz alta.
+function speak(text: string) {
+  try {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text.slice(0, 600));
+    u.lang = 'pt-BR';
+    u.rate = 1.05;
+    synth.speak(u);
+  } catch { /* ok */ }
+}
 
 interface RepasseDraft {
   type: 'create_repasse';
@@ -39,7 +53,7 @@ function getRecognition(): SpeechRec | null {
 const SUGESTOES = [
   'Qual o total repassado até agora?',
   'Quais os repasses mais recentes?',
-  'Quais candidatos estão pendentes?',
+  'Gere o relatório de repasses',
   'Quem recebeu mais até agora?',
 ];
 
@@ -52,6 +66,7 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const recRef = useRef<SpeechRec | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -73,6 +88,8 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
       // Se a IA propôs um lançamento, anexa o draft à mensagem (vira card de confirmação)
       const draft: RepasseDraft | null = j.intent === 'lancar_repasse' && j.draft ? j.draft : null;
       setMsgs((m) => [...m, { role: 'assistant', text: reply, draft }]);
+      // Pediu relatório → abre o overlay imprimível
+      if (j.intent === 'gerar_relatorio') setShowReport(true);
       setState('idle');
     } catch (err: any) {
       setMsgs((m) => [...m, { role: 'assistant', text: 'Erro de conexão. Tente de novo.' }]);
@@ -181,7 +198,14 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                   {m.role === 'assistant' && <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0 mt-0.5"><Bot className="w-3.5 h-3.5 text-indigo-300" /></div>}
                   <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed ${
                     m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-200'
-                  }`}>{m.text}</div>
+                  }`}>
+                    {m.text}
+                    {m.role === 'assistant' && (
+                      <button onClick={() => speak(m.text)} className="ml-2 inline-flex align-middle text-slate-400 hover:text-indigo-300" title="Ouvir">
+                        <Volume2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                   {m.role === 'user' && <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center shrink-0 mt-0.5"><User className="w-3.5 h-3.5 text-slate-300" /></div>}
                 </div>
                 {/* Card de confirmação de lançamento (Fase 4) */}
@@ -243,10 +267,13 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                 <Send className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-[9px] text-slate-600 mt-1.5 text-center">Assistente automatizado · só consulta (não altera dados)</p>
+            <p className="text-[9px] text-slate-600 mt-1.5 text-center">Assistente automatizado · consulta + lançar repasse com confirmação</p>
           </div>
         </div>
       )}
+
+      {/* Relatório de repasses imprimível (#144) */}
+      {showReport && <PartyRepasseReport onClose={() => setShowReport(false)} />}
     </>
   );
 };
