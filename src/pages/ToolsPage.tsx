@@ -11,6 +11,8 @@ import ImageUpload from '../components/ui/ImageUpload';
 import { useAuth } from '../contexts/AuthContext';
 import { createBackup, restoreBackup } from '../services/backupService';
 import AutoBackupCard from '../components/tools/AutoBackupCard';
+import FAQManagerCard from '../components/tools/FAQManagerCard';
+import CsvImportCard from '../components/tools/CsvImportCard';
 
 const ToolsPage = () => {
   const { user } = useAuth();
@@ -49,6 +51,12 @@ const ToolsPage = () => {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-slate-200">Ferramentas e Configurações</h2>
+
+      {/* Banco de Respostas Aprovadas (#140) — alimenta Aurora via RAG */}
+      <FAQManagerCard />
+
+      {/* Import CSV (#140) — contatos e equipe em massa */}
+      <CsvImportCard />
 
       {/* Backup automático noturno (#137) */}
       <AutoBackupCard />
