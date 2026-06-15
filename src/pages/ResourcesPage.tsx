@@ -4,6 +4,7 @@ import LocationsManager from '../components/resources/LocationsManager';
 import TeamResourcesManager from '../components/resources/TeamResourcesManager';
 import TeamGoalsManager from '../components/resources/TeamGoalsManager';
 import TeamGamificationPanel from '../components/resources/TeamGamificationPanel';
+import TeamROIPanel from '../components/resources/TeamROIPanel';
 import { UsersGroupIcon, MapPinIcon, ArchiveBoxIcon } from '../components/icons';
 import { Target } from 'lucide-react';
 
@@ -24,6 +25,7 @@ const ResourcesPage = () => {
             </p>
             <Tabs tabs={tabs} iconMap={iconMap} mode="state">
                 <div className="space-y-6">
+                    <TeamROIPanel />
                     <TeamGamificationPanel />
                     <TeamManager />
                 </div>

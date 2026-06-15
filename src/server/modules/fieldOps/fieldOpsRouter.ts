@@ -148,5 +148,131 @@ export function createFieldOpsRouter(supabase: SupabaseClient): Router {
     }
   });
 
+  // ── ROI: custo × produção por membro (#138) ───────────────────────────
+  router.get('/team-roi', async (req: Request, res: Response) => {
+    try {
+      const campaignId = (req as any).user?.campaignId;
+      if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+
+      const days = Math.max(7, Math.min(365, Number(req.query.days) || 30));
+      const sinceIso = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+      const monthsInPeriod = +(days / 30).toFixed(2);
+
+      // 1) Membros + custo mensal
+      const { data: members } = await supabase
+        .from('team_members')
+        .select('id, name, role, cost')
+        .eq('campaignId', campaignId);
+
+      // 2) Visitas no período
+      const { data: visits } = await supabase
+        .from('visits')
+        .select('lider, resp, apoiador, votos, "leaderId"')
+        .eq('campaignId', campaignId)
+        .eq('realizada', 'sim')
+        .gte('data', sinceIso);
+
+      // 3) Follow-ups convertidos no período
+      const { data: followups } = await supabase
+        .from('engagement_followups')
+        .select('assignedTo, status, "resolvedAt"')
+        .eq('campaignId', campaignId)
+        .eq('status', 'converted')
+        .gte('resolvedAt', sinceIso);
+
+      const byMember = new Map<string, any>();
+      const ensure = (name: string, id?: string | null, role?: string | null, cost?: number | null) => {
+        const key = (name || '').trim();
+        if (!key) return null;
+        if (!byMember.has(key)) {
+          byMember.set(key, {
+            name: key,
+            id: id || null,
+            role: role || null,
+            costMensal: cost ?? null,
+            visitas: 0, apoiadores: 0, votos: 0, followupsConvertidos: 0,
+          });
+        }
+        return byMember.get(key);
+      };
+
+      // Seed: todos os membros cadastrados (mesmo sem atividade aparecem)
+      for (const m of (members || []) as any[]) {
+        ensure(m.name, m.id, m.role, Number(m.cost) || 0);
+      }
+
+      // Agrega visitas
+      for (const v of (visits || []) as any[]) {
+        const name = (v.lider || v.resp || '').trim();
+        const s = ensure(name);
+        if (!s) continue;
+        s.visitas += 1;
+        s.votos += Number(v.votos) || 0;
+        const a = String(v.apoiador || '').toLowerCase();
+        if (a === 'apoiador' || a === 'sim' || a.includes('apoiad')) s.apoiadores += 1;
+      }
+
+      // Agrega follow-ups
+      for (const f of (followups || []) as any[]) {
+        const name = (f.assignedTo || '').trim();
+        const s = ensure(name);
+        if (!s) continue;
+        s.followupsConvertidos += 1;
+      }
+
+      // Calcula ROI métricas
+      const roiList = [...byMember.values()].map(s => {
+        const custoNoPeriodo = (s.costMensal != null ? s.costMensal : 0) * monthsInPeriod;
+        const totalApoiadoresEquivalente = s.apoiadores + s.followupsConvertidos * 1.5; // follow-up convertido pesa 1.5×
+        const custoPorApoiador = totalApoiadoresEquivalente > 0
+          ? +(custoNoPeriodo / totalApoiadoresEquivalente).toFixed(2)
+          : null;
+        const custoPorVoto = s.votos > 0
+          ? +(custoNoPeriodo / s.votos).toFixed(2)
+          : null;
+        // ROI score: apoiadores equivalentes por R$1000 gastos. Sem custo = null.
+        const roiScore = custoNoPeriodo > 0
+          ? +((totalApoiadoresEquivalente / custoNoPeriodo) * 1000).toFixed(2)
+          : null;
+        return {
+          ...s,
+          custoNoPeriodo: +custoNoPeriodo.toFixed(2),
+          totalApoiadoresEquivalente: +totalApoiadoresEquivalente.toFixed(1),
+          custoPorApoiador,
+          custoPorVoto,
+          roiScore,
+        };
+      });
+
+      // Ordena por ROI (melhor → pior). Sem custo vai pro fim.
+      roiList.sort((a, b) => {
+        if (a.roiScore == null && b.roiScore == null) return b.visitas - a.visitas;
+        if (a.roiScore == null) return 1;
+        if (b.roiScore == null) return -1;
+        return b.roiScore - a.roiScore;
+      });
+
+      // Totais da campanha
+      const totalCusto = roiList.reduce((s, m) => s + m.custoNoPeriodo, 0);
+      const totalApoiadores = roiList.reduce((s, m) => s + m.totalApoiadoresEquivalente, 0);
+      const totalVotos = roiList.reduce((s, m) => s + m.votos, 0);
+
+      return res.json({
+        members: roiList,
+        totals: {
+          custo: +totalCusto.toFixed(2),
+          apoiadoresEquivalentes: +totalApoiadores.toFixed(1),
+          votos: totalVotos,
+          custoPorApoiador: totalApoiadores > 0 ? +(totalCusto / totalApoiadores).toFixed(2) : null,
+          custoPorVoto: totalVotos > 0 ? +(totalCusto / totalVotos).toFixed(2) : null,
+        },
+        period: { days, monthsInPeriod, since: sinceIso },
+      });
+    } catch (err: any) {
+      console.error('[field-ops] team-roi:', err);
+      return res.status(500).json({ error: err?.message });
+    }
+  });
+
   return router;
 }
