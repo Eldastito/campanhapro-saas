@@ -221,6 +221,89 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     return res.json({ created: (data || []).length });
   });
 
+  // Import assistido por IA (#147d): recebe uma planilha colada "suja" (com
+  // cabeçalho, colunas extras tipo CPF/e-mail/observações, ordem qualquer) e
+  // devolve SÓ os campos do candidato, pra PREVIEW. NÃO salva nada — o presidente
+  // confere e confirma via /candidates/import (regra de ouro: IA não grava direto).
+  router.post('/candidates/parse-ai', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+
+    const text = String((req.body || {}).text || '').slice(0, 16000);
+    if (!text.trim()) return res.status(400).json({ error: 'texto_vazio' });
+
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) return res.status(503).json({ error: 'ia_indisponivel', message: 'A IA está indisponível agora. Use o modo "Colar simples".' });
+
+    try {
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 8192 } });
+      const prompt = `Você recebe o conteúdo BRUTO de uma planilha/tabela de candidatos colada por um usuário. Pode ter cabeçalho, colunas a mais (CPF, e-mail, partido, observações, etc.), ordem qualquer, separadores variados (vírgula, ponto-e-vírgula, tab) e linhas vazias.
+
+Sua tarefa: extrair a lista de candidatos pegando APENAS estes campos:
+- displayName: nome da pessoa (obrigatório)
+- cargo: cargo pretendido (Vereador, Prefeito, Deputado...) se houver
+- regiao: a CIDADE/município se houver
+- estado: a UF/estado (sigla de 2 letras quando der: RJ, SP...) se houver
+- phone: telefone/WhatsApp — só os dígitos
+
+Responda SOMENTE em JSON válido (nada fora do JSON):
+{
+  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "" } ],
+  "colunasIgnoradas": ["nome das colunas extras que você descartou"]
+}
+
+REGRAS:
+- IGNORE a linha de cabeçalho e linhas vazias — não vire candidato.
+- Não invente dados: se um campo não existe na planilha, deixe "".
+- NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os 5 campos acima.
+- phone só com dígitos (remova (), -, espaços).
+- Liste TODOS os candidatos encontrados.
+
+CONTEÚDO COLADO:
+"""
+${text}
+"""
+
+JSON:`;
+      const result = await model.generateContent(prompt);
+      const raw = result.response.text().trim();
+
+      let parsed: any = null;
+      try { parsed = JSON.parse(raw); } catch { /* */ }
+      if (!parsed) { try { const m = raw.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); } catch { /* */ } }
+      const listRaw = Array.isArray(parsed) ? parsed : (parsed?.candidatos || parsed?.candidates || []);
+      const ignored = (parsed?.colunasIgnoradas || parsed?.ignored || []).filter((x: any) => typeof x === 'string').slice(0, 20);
+
+      const candidates = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => ({
+        displayName: String(r?.displayName || r?.nome || '').trim().slice(0, 160),
+        cargo: String(r?.cargo || '').trim().slice(0, 80),
+        regiao: String(r?.regiao || r?.cidade || '').trim().slice(0, 80),
+        estado: normalizeUF(r?.estado || r?.uf) || '',
+        phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
+      })).filter((r: any) => r.displayName).slice(0, 500);
+
+      // Log leve pra observabilidade (não bloqueia, custo escondido do usuário).
+      supabase.from('party_ai_command_logs').insert({
+        partyId: party.id, userId, inputType: 'import_parse',
+        userCommand: `import IA: ${text.length} chars`, detectedIntent: 'import_parse',
+        actionStatus: candidates.length ? 'preview' : 'vazio',
+      }).then(() => {}, () => {});
+
+      return res.json({ candidates, ignored, total: candidates.length });
+    } catch (err: any) {
+      console.error('[party] candidates/parse-ai:', err);
+      return res.status(500).json({ error: 'parse_failed', message: 'Não consegui organizar a planilha. Tente colar de novo ou use o modo "Colar simples".' });
+    }
+  });
+
   // Garante que o candidato é do partido do presidente logado.
   async function candidateOfPresident(userId: string, candidateId: string) {
     const party = await partyOf(userId);

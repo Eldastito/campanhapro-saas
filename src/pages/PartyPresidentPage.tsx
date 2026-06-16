@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned, ShieldCheck,
   Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle, Search, Pencil, Trash2,
-  Eye, EyeOff,
+  Eye, EyeOff, Sparkles,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -142,6 +142,12 @@ const PartyPresidentPage: React.FC = () => {
   const [importOpen, setImportOpen] = React.useState(false);
   const [importText, setImportText] = React.useState('');
   const [importing, setImporting] = React.useState(false);
+  // Import assistido por IA (#147d): cola planilha "suja" → IA extrai → preview → confirma.
+  const [importMode, setImportMode] = React.useState<'manual' | 'ia'>('manual');
+  const [aiParsing, setAiParsing] = React.useState(false);
+  const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string }[] | null>(null);
+  const [aiIgnored, setAiIgnored] = React.useState<string[]>([]);
+  const [aiError, setAiError] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [repasseFor, setRepasseFor] = React.useState<Candidate | null>(null);
   const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
@@ -274,6 +280,35 @@ const PartyPresidentPage: React.FC = () => {
       const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
       if (r.ok) { setImportText(''); setImportOpen(false); await load(); }
     } finally { setImporting(false); }
+  };
+
+  // IA: extrai candidatos de uma planilha "suja" → preview (não salva ainda).
+  const parseWithAI = async () => {
+    if (!importText.trim()) return;
+    setAiParsing(true); setAiError(null); setAiPreview(null); setAiIgnored([]);
+    try {
+      const r = await authedFetch('/api/v1/party/candidates/parse-ai', { method: 'POST', body: JSON.stringify({ text: importText }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.message || j?.error || 'Falha ao organizar');
+      setAiPreview(j.candidates || []);
+      setAiIgnored(j.ignored || []);
+      if (!(j.candidates || []).length) setAiError('Não encontrei candidatos nessa planilha. Confira o conteúdo colado.');
+    } catch (e: any) {
+      setAiError(e?.message || 'Erro ao organizar com IA.');
+    } finally { setAiParsing(false); }
+  };
+  // Confirma o preview da IA → grava de fato via o mesmo endpoint de import.
+  const importParsed = async () => {
+    if (!aiPreview?.length) return;
+    setImporting(true);
+    try {
+      const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows: aiPreview }) });
+      if (r.ok) { closeImport(); await load(); }
+    } finally { setImporting(false); }
+  };
+  const closeImport = () => {
+    setImportOpen(false); setImportText(''); setImportMode('manual');
+    setAiPreview(null); setAiIgnored([]); setAiError(null);
   };
 
   const inviteUrl = (token: string) => `${window.location.origin}/cadastro/partido/${token}`;
@@ -774,22 +809,83 @@ const PartyPresidentPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: importar planilha (cola) */}
+      {/* Modal: importar planilha (cola simples OU organizada por IA) */}
       {importOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !importing && setImportOpen(false)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-2">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !importing && !aiParsing && closeImport()}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
               <h4 className="font-bold text-white">Importar candidatos</h4>
-              <button onClick={() => setImportOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+              <button onClick={closeImport} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-xs text-slate-400 mb-2">Cole uma linha por candidato, separando por vírgula:<br /><span className="text-slate-500">Nome, Cargo, Cidade, Estado (UF), Telefone</span></p>
-            <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={8}
-              placeholder={'João Silva, Vereador, Niterói, RJ, 21999990000\nMaria Souza, Prefeita, São Gonçalo, RJ, 21988880000'}
-              className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono" />
-            <p className="text-[11px] text-slate-500 mt-1">O partido pode ter candidatos em qualquer estado do Brasil. Se não informar a UF, importa sem estado (você edita depois).</p>
-            <button onClick={importRows} disabled={importing || !importText.trim()} className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
-              {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Importar candidatos
-            </button>
+
+            {/* Seletor de modo */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 border border-white/10 rounded-xl mb-3">
+              {([['manual', 'Colar simples'], ['ia', '🤖 Organizar com IA']] as const).map(([m, label]) => (
+                <button key={m} onClick={() => { setImportMode(m); setAiPreview(null); setAiError(null); }}
+                  className={`text-xs font-bold py-2 rounded-lg transition-colors ${importMode === m ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>{label}</button>
+              ))}
+            </div>
+
+            {importMode === 'manual' ? (
+              <>
+                <p className="text-xs text-slate-400 mb-2">Cole uma linha por candidato, separando por vírgula:<br /><span className="text-slate-500">Nome, Cargo, Cidade, Estado (UF), Telefone</span></p>
+                <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={8}
+                  placeholder={'João Silva, Vereador, Niterói, RJ, 21999990000\nMaria Souza, Prefeita, São Gonçalo, RJ, 21988880000'}
+                  className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono" />
+                <p className="text-[11px] text-slate-500 mt-1">O partido pode ter candidatos em qualquer estado do Brasil. Se não informar a UF, importa sem estado (você edita depois).</p>
+                <button onClick={importRows} disabled={importing || !importText.trim()} className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+                  {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Importar candidatos
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-slate-400 mb-2">Cole a planilha <b>do jeito que ela está</b> — com cabeçalho, colunas extras (CPF, e-mail, observações), ordem qualquer. A IA acha sozinha o nome, cargo, cidade, UF e telefone. Você confere antes de salvar.</p>
+                <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={7} disabled={aiParsing}
+                  placeholder={'Cole aqui (ex: copie direto do Excel/Google Sheets)\nNome\tCPF\tCargo\tCidade\tUF\tWhatsApp\tObs\nJoão Silva\t000...\tVereador\tNiterói\tRJ\t21999990000\tamigo do diretório'}
+                  className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono disabled:opacity-60" />
+
+                {!aiPreview && (
+                  <button onClick={parseWithAI} disabled={aiParsing || !importText.trim()} className="w-full mt-3 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+                    {aiParsing ? <><Loader2 className="w-4 h-4 animate-spin" /> Organizando…</> : <><Sparkles className="w-4 h-4" /> Organizar com IA</>}
+                  </button>
+                )}
+                {aiError && <p className="text-xs text-rose-400 mt-2">{aiError}</p>}
+
+                {/* Preview do que a IA extraiu */}
+                {aiPreview && aiPreview.length > 0 && (
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-bold text-emerald-300">✅ {aiPreview.length} candidato(s) encontrado(s) — confira:</p>
+                      <button onClick={() => { setAiPreview(null); setAiIgnored([]); }} className="text-[11px] text-slate-400 hover:text-white underline">Refazer</button>
+                    </div>
+                    {aiIgnored.length > 0 && (
+                      <p className="text-[11px] text-slate-500 mb-1.5">Colunas ignoradas: {aiIgnored.join(', ')}.</p>
+                    )}
+                    <div className="max-h-52 overflow-y-auto rounded-xl border border-white/10">
+                      <table className="w-full text-[11px]">
+                        <thead className="sticky top-0 bg-slate-800 text-slate-400">
+                          <tr><th className="text-left px-2 py-1.5">Nome</th><th className="text-left px-2 py-1.5">Cargo</th><th className="text-left px-2 py-1.5">Cidade/UF</th><th className="text-left px-2 py-1.5">Telefone</th></tr>
+                        </thead>
+                        <tbody>
+                          {aiPreview.map((c, i) => (
+                            <tr key={i} className="border-t border-white/5">
+                              <td className="px-2 py-1.5 text-white font-medium">{c.displayName}</td>
+                              <td className="px-2 py-1.5 text-slate-300">{c.cargo || '—'}</td>
+                              <td className="px-2 py-1.5 text-slate-300">{[c.regiao, c.estado].filter(Boolean).join('/') || '—'}</td>
+                              <td className="px-2 py-1.5 text-slate-300">{c.phone || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <button onClick={importParsed} disabled={importing} className="w-full mt-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+                      {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Confirmar e importar {aiPreview.length}
+                    </button>
+                    <p className="text-[10px] text-slate-500 mt-1.5 text-center">A IA só organiza — nada é salvo até você confirmar.</p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
