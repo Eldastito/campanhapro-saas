@@ -16,7 +16,7 @@ import PartyAIOrb from '../components/party/PartyAIOrb';
  * as abas dele. Fase 1: provisão do partido + lista de candidatos + adicionar.
  */
 interface Candidate {
-  id: string; displayName: string; cargo?: string | null; regiao?: string | null; phone?: string | null;
+  id: string; displayName: string; cargo?: string | null; regiao?: string | null; estado?: string | null; phone?: string | null;
   status: string; valorRecebido?: number; campaignId?: string | null; inviteToken?: string | null;
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
   coordCount?: number; leaderCount?: number; valorAlocado?: number;
@@ -136,7 +136,7 @@ const PartyPresidentPage: React.FC = () => {
   const [provName, setProvName] = React.useState('');
   const [provBusy, setProvBusy] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
-  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', phone: '' });
+  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' });
   const [adding, setAdding] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [importText, setImportText] = React.useState('');
@@ -160,10 +160,10 @@ const PartyPresidentPage: React.FC = () => {
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<'all' | 'green' | 'yellow' | 'red' | 'pending'>('all');
   const [editFor, setEditFor] = React.useState<Candidate | null>(null);
-  const [editForm, setEditForm] = React.useState({ displayName: '', cargo: '', regiao: '', phone: '' });
+  const [editForm, setEditForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' });
   const [editing, setEditing] = React.useState(false);
 
-  const openEdit = (c: Candidate) => { setEditFor(c); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', phone: c.phone || '' }); };
+  const openEdit = (c: Candidate) => { setEditFor(c); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', estado: c.estado || '', phone: c.phone || '' }); };
   const saveEdit = async () => {
     if (!editFor || !editForm.displayName.trim()) return;
     setEditing(true);
@@ -251,14 +251,21 @@ const PartyPresidentPage: React.FC = () => {
     setAdding(true);
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
-      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', phone: '' }); setAddOpen(false); await load(); }
+      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' }); setAddOpen(false); await load(); }
     } finally { setAdding(false); }
   };
 
   const importRows = async () => {
+    // Formato novo: Nome, Cargo, Cidade, Estado, Telefone. Mantém compatibilidade
+    // com o formato antigo (sem Estado): detecta o telefone pelo excesso de dígitos.
+    const isPhone = (s?: string) => (s || '').replace(/\D/g, '').length >= 8;
     const rows = importText.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
-      const [displayName, cargo, regiao, phone] = line.split(/[;,\t]/).map((s) => (s || '').trim());
-      return { displayName, cargo, regiao, phone };
+      const [displayName, cargo, regiao, p4, p5] = line.split(/[;,\t]/).map((s) => (s || '').trim());
+      let estado = '', phone = '';
+      for (const t of [p4, p5].filter(Boolean)) {
+        if (isPhone(t)) phone = t; else if (!estado) estado = t;
+      }
+      return { displayName, cargo, regiao, estado, phone };
     }).filter((r) => r.displayName);
     if (!rows.length) return;
     setImporting(true);
@@ -335,6 +342,8 @@ const PartyPresidentPage: React.FC = () => {
   const metasDoneTotal = candidates.reduce((s, c) => s + (c.metasDone || 0), 0);
   const metasTotalTotal = candidates.reduce((s, c) => s + (c.metasTotal || 0), 0);
   const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  // Cidade/UF combinados (ex: "Niterói/RJ"). Preparado pra todo o Brasil (#147b).
+  const localOf = (c: Candidate) => [c.regiao, c.estado].filter(Boolean).join('/');
 
   if (loading) {
     return <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>;
@@ -441,7 +450,7 @@ const PartyPresidentPage: React.FC = () => {
               <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="min-w-0">
                   <p className="font-bold text-white truncate">{c.displayName}</p>
-                  <p className="text-xs text-slate-400 truncate">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'}</p>
+                  <p className="text-xs text-slate-400 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <ScoreChip s={c.score} />
@@ -535,7 +544,7 @@ const PartyPresidentPage: React.FC = () => {
                       <span className="font-black text-slate-400">{medal(i)}</span>
                       <span className="min-w-0">
                         <span className="flex items-center gap-1.5"><span className="font-bold text-white truncate">{c.displayName}</span><ValveChip status={c.repasseStatus} /></span>
-                        <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'}</span>
+                        <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</span>
                       </span>
                       <span className="text-center"><ScoreChip s={c.score} /></span>
                       <span className="hidden sm:block text-right text-sm text-white">{brl(recebido)}</span>
@@ -604,7 +613,7 @@ const PartyPresidentPage: React.FC = () => {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-bold text-white truncate flex items-center gap-2">{c.displayName} <ValveChip status={c.repasseStatus} /></p>
-                    <p className="text-xs text-slate-400">{[c.cargo, c.regiao].filter(Boolean).join(' · ') || '—'} · 🎯 {c.metasDone}/{c.metasTotal} metas</p>
+                    <p className="text-xs text-slate-400">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'} · 🎯 {c.metasDone}/{c.metasTotal} metas</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <div className="text-right">
@@ -721,9 +730,12 @@ const PartyPresidentPage: React.FC = () => {
               <input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               <div className="grid grid-cols-2 gap-2">
                 <input value={form.cargo} onChange={(e) => setForm({ ...form, cargo: e.target.value })} placeholder="Cargo" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-                <input value={form.regiao} onChange={(e) => setForm({ ...form, regiao: e.target.value })} placeholder="Cidade/Região" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <input value={form.regiao} onChange={(e) => setForm({ ...form, regiao: e.target.value })} placeholder="Cidade" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              <div className="grid grid-cols-[5rem_1fr] gap-2">
+                <input value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} placeholder="UF" maxLength={20} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white uppercase" />
+                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              </div>
             </div>
             <button onClick={addCandidate} disabled={adding || !form.displayName.trim()} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar
@@ -744,9 +756,12 @@ const PartyPresidentPage: React.FC = () => {
               <input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               <div className="grid grid-cols-2 gap-2">
                 <input value={editForm.cargo} onChange={(e) => setEditForm({ ...editForm, cargo: e.target.value })} placeholder="Cargo" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-                <input value={editForm.regiao} onChange={(e) => setEditForm({ ...editForm, regiao: e.target.value })} placeholder="Cidade/Região" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <input value={editForm.regiao} onChange={(e) => setEditForm({ ...editForm, regiao: e.target.value })} placeholder="Cidade" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
-              <input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              <div className="grid grid-cols-[5rem_1fr] gap-2">
+                <input value={editForm.estado} onChange={(e) => setEditForm({ ...editForm, estado: e.target.value })} placeholder="UF" maxLength={20} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white uppercase" />
+                <input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              </div>
             </div>
             <button onClick={saveEdit} disabled={editing || !editForm.displayName.trim()} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {editing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
@@ -763,10 +778,11 @@ const PartyPresidentPage: React.FC = () => {
               <h4 className="font-bold text-white">Importar candidatos</h4>
               <button onClick={() => setImportOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-xs text-slate-400 mb-2">Cole uma linha por candidato, separando por vírgula:<br /><span className="text-slate-500">Nome, Cargo, Cidade, Telefone</span></p>
+            <p className="text-xs text-slate-400 mb-2">Cole uma linha por candidato, separando por vírgula:<br /><span className="text-slate-500">Nome, Cargo, Cidade, Estado (UF), Telefone</span></p>
             <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={8}
-              placeholder={'João Silva, Vereador, Niterói, 21999990000\nMaria Souza, Prefeita, São Gonçalo, 21988880000'}
+              placeholder={'João Silva, Vereador, Niterói, RJ, 21999990000\nMaria Souza, Prefeita, São Gonçalo, RJ, 21988880000'}
               className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono" />
+            <p className="text-[11px] text-slate-500 mt-1">O partido pode ter candidatos em qualquer estado do Brasil. Se não informar a UF, importa sem estado (você edita depois).</p>
             <button onClick={importRows} disabled={importing || !importText.trim()} className="w-full mt-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Importar candidatos
             </button>

@@ -18,6 +18,14 @@ import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 
 const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
+// Normaliza o estado/UF: sigla de 2 letras vira maiúscula (rj→RJ); nome completo
+// fica como veio (capado). Vazio → null. Preparação pra uso em todo o Brasil.
+const normalizeUF = (v: any): string | null => {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  return s.length <= 3 ? s.toUpperCase().slice(0, 3) : s.slice(0, 40);
+};
+
 // Broadcast (pub/sub) p/ o telão público atualizar no INSTANTE do evento, sem
 // expor tabela nenhuma a RLS. Envia só um "ping" vazio; o telão re-busca os dados
 // pelo endpoint seguro. Fire-and-forget (nunca bloqueia a resposta).
@@ -174,13 +182,14 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const party = await partyOf(userId);
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
-    const { displayName, cargo, regiao, phone } = req.body || {};
+    const { displayName, cargo, regiao, estado, phone } = req.body || {};
     if (!displayName?.trim()) return res.status(400).json({ error: 'displayName_obrigatorio' });
     const { data, error } = await supabase.from('party_candidates').insert({
       partyId: party.id,
       displayName: String(displayName).slice(0, 160),
       cargo: cargo?.trim() || null,
       regiao: regiao?.trim() || null,
+      estado: normalizeUF(estado),
       phone: phone?.trim() || null,
       status: 'pending',
       inviteToken: newToken(),
@@ -189,7 +198,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     return res.json({ candidate: data });
   });
 
-  // Import em lote (planilha do presidente). Body: { rows: [{displayName,cargo,regiao,phone}] }
+  // Import em lote (planilha do presidente). Body: { rows: [{displayName,cargo,regiao,estado,phone}] }
   router.post('/candidates/import', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -201,6 +210,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       displayName: String(r.displayName || r.nome || '').trim().slice(0, 160),
       cargo: (r.cargo || '').toString().trim() || null,
       regiao: (r.regiao || r.cidade || '').toString().trim() || null,
+      estado: normalizeUF(r.estado || r.uf),
       phone: (r.phone || r.telefone || '').toString().trim() || null,
       status: 'pending',
       inviteToken: newToken(),
@@ -225,11 +235,12 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const userId = (req as any).user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     if (!(await candidateOfPresident(userId, req.params.id))) return res.status(404).json({ error: 'not_found' });
-    const { displayName, cargo, regiao, phone } = req.body || {};
+    const { displayName, cargo, regiao, estado, phone } = req.body || {};
     const patch: any = { updatedAt: new Date().toISOString() };
     if (typeof displayName === 'string' && displayName.trim()) patch.displayName = displayName.trim().slice(0, 160);
     if (cargo !== undefined) patch.cargo = cargo?.toString().trim() || null;
     if (regiao !== undefined) patch.regiao = regiao?.toString().trim() || null;
+    if (estado !== undefined) patch.estado = normalizeUF(estado);
     if (phone !== undefined) patch.phone = phone?.toString().trim() || null;
     const { data, error } = await supabase.from('party_candidates').update(patch).eq('id', req.params.id).select('*').single();
     if (error) return res.status(500).json({ error: error.message });
@@ -877,7 +888,7 @@ Saída JSON estrito (sem markdown):
     if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
 
     const { data: cands } = await supabase.from('party_candidates')
-      .select('id, displayName, cargo, regiao').eq('partyId', party.id);
+      .select('id, displayName, cargo, regiao, estado').eq('partyId', party.id);
     const candMap: Record<string, any> = {};
     (cands || []).forEach((c: any) => { candMap[c.id] = c; });
 
@@ -890,7 +901,7 @@ Saída JSON estrito (sem markdown):
       return {
         candidato: c.displayName || '—',
         cargo: c.cargo || '',
-        regiao: c.regiao || '',
+        regiao: [c.regiao, c.estado].filter(Boolean).join('/'),
         valor: Number(r.valor) || 0,
         data: r.data || null,
         descricao: r.descricao || '',
@@ -929,7 +940,7 @@ Saída JSON estrito (sem markdown):
     try {
       // 1. Snapshot determinístico do partido (escopado por partyId)
       const { data: cands } = await supabase.from('party_candidates')
-        .select('displayName, cargo, regiao, status, valorRecebido, repasseStatus')
+        .select('displayName, cargo, regiao, estado, status, valorRecebido, repasseStatus')
         .eq('partyId', party.id).order('valorRecebido', { ascending: false });
       const candidates = cands || [];
       const totalRepassado = candidates.reduce((s: number, c: any) => s + (Number(c.valorRecebido) || 0), 0);
@@ -954,14 +965,18 @@ Saída JSON estrito (sem markdown):
       const repMap = await candNameByRepasse();
 
       const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      const statusLabel = (s: string) => s === 'active' ? 'cadastro concluído' : s === 'pending' ? 'cadastro pendente' : (s || '—');
+      const local = (c: any) => [c.regiao, c.estado].filter(Boolean).join('/') || 's/local';
       const snapshot = [
         `PARTIDO: ${party.name}`,
-        `Candidatos: ${candidates.length} (${cadastrados} cadastrados, ${pendentes} pendentes)`,
+        `Candidatos: ${candidates.length} (${cadastrados} com cadastro concluído, ${pendentes} com cadastro pendente)`,
         `Total repassado: ${brl(totalRepassado)}`,
         ``,
-        `CANDIDATOS (nome · cargo · região · status · valor recebido):`,
-        ...candidates.slice(0, 30).map((c: any) =>
-          `- ${c.displayName} · ${c.cargo || 's/cargo'} · ${c.regiao || 's/região'} · ${c.status} · ${brl(Number(c.valorRecebido) || 0)}`),
+        `LEGENDA DE STATUS: "active" = cadastro concluído (já criou acesso/senha); "pending" = cadastro pendente (ainda não concluiu — o convite foi enviado mas ele não criou o acesso).`,
+        ``,
+        `CANDIDATOS (nome | cargo | cidade/UF | status | valor recebido):`,
+        ...candidates.slice(0, 120).map((c: any) =>
+          `- ${c.displayName} | ${c.cargo || 's/cargo'} | ${local(c)} | ${statusLabel(c.status)} | ${brl(Number(c.valorRecebido) || 0)}`),
         ``,
         `REPASSES RECENTES (data · valor · candidato · descrição):`,
         ...(repasses || []).map((r: any) =>
@@ -975,7 +990,14 @@ Saída JSON estrito (sem markdown):
       }
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0.2, maxOutputTokens: 500 } });
+      // maxOutputTokens alto pra caber listas longas (ex: "todos os candidatos em
+      // ordem alfabética") sem truncar o JSON — truncamento era a causa do JSON
+      // cru vazar pro presidente. (SDK 0.1.3 não tem responseMimeType; o parse
+      // abaixo já lida com cercas markdown e o fallback nunca exibe JSON cru.)
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+      });
       const hojeIso = new Date().toISOString().slice(0, 10);
       const prompt = `Você é o assistente do Centro de Comando do partido, falando com o PRESIDENTE.
 
@@ -987,7 +1009,7 @@ Responda SEMPRE em JSON válido (nada fora do JSON):
 }
 
 REGRAS:
-- "consulta": o presidente pergunta sobre dados. Responda em message usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
+- "consulta": o presidente pergunta/pede pra ORGANIZAR, LISTAR, FILTRAR ou ORDENAR dados. Responda em "message" usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
 - "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR um valor a um candidato. Extraia candidateName, valor, descricao. Se faltar valor ou candidato, use "consulta" e peça o que falta.
 - "editar_repasse": ALTERAR/EDITAR/MUDAR/CORRIGIR o valor de um repasse de um candidato. Extraia candidateName e o NOVO valor (campo "valor"). descricao opcional.
 - "excluir_repasse": APAGAR/EXCLUIR/REMOVER/CANCELAR um repasse de um candidato. Extraia candidateName. valor/descricao = null.
@@ -996,6 +1018,14 @@ REGRAS:
 - "valor" sempre número (ex: "8 mil"=8000).
 - Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
 - Valores sempre em R$. Tom direto, chat.
+
+COMO RESPONDER CONSULTAS DE LISTA/ORDENAÇÃO (importante):
+- Quando pedirem uma lista (ex: "todos os candidatos com cadastro pendente em ordem alfabética decrescente"), INCLUA TODOS os itens que batem com o filtro — não resuma "há 1 candidato", liste de fato cada um.
+- Respeite a ordem pedida (alfabética, crescente/decrescente, por valor, etc). Se pedirem "decrescente e alfabética", ordene de Z→A.
+- Use uma linha por item, com hífen ou número. Ex: "1. Carlos Dias — Vereador, São Gonçalo/RJ".
+- "cadastro pendente"/"não concluiu o cadastro" = status "pending". "cadastrado"/"concluído" = status "active".
+- Se nenhum candidato bate o filtro, diga isso claramente.
+- NUNCA mostre nomes de coluna crus do banco (ex: "status 'pending'") — traduza pro presidente ("cadastro ainda pendente").
 
 SNAPSHOT ATUAL DO PARTIDO (hoje: ${hojeIso}):
 ${snapshot}
@@ -1006,17 +1036,22 @@ JSON:`;
       const result = await model.generateContent(prompt);
       const raw = result.response.text().trim();
 
-      // Parse defensivo: extrai o primeiro {...}. Se falhar, trata como consulta.
+      // Parse defensivo: tenta JSON puro (responseMimeType garante), senão extrai {...}.
       let parsed: any = null;
-      try {
-        const m = raw.match(/\{[\s\S]*\}/);
-        if (m) parsed = JSON.parse(m[0]);
-      } catch { /* fallback abaixo */ }
+      try { parsed = JSON.parse(raw); } catch { /* tenta extrair abaixo */ }
+      if (!parsed) {
+        try { const m = raw.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); } catch { /* */ }
+      }
       if (!parsed || typeof parsed !== 'object') {
-        return res.json({ intent: 'consulta', message: raw.slice(0, 2000), draft: null });
+        // Nunca joga JSON cru pro presidente: tenta resgatar só o campo "message",
+        // senão devolve um aviso amigável.
+        let msg = '';
+        const mm = raw.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (mm) { try { msg = JSON.parse(`"${mm[1]}"`); } catch { msg = mm[1]; } }
+        return res.json({ intent: 'consulta', draft: null, message: msg || 'Não consegui formatar a resposta. Pode reformular a pergunta?' });
       }
 
-      const intent = ['consulta', 'lancar_repasse', 'gerar_relatorio', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
+      const intent = ['consulta', 'lancar_repasse', 'editar_repasse', 'excluir_repasse', 'gerar_relatorio', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
       let message = String(parsed.message || '').slice(0, 2000);
       let draft: any = null;
 
