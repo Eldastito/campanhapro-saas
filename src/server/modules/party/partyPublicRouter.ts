@@ -9,8 +9,19 @@
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { computeScore } from './score';
+import { geocode } from '../../../lib/geocode';
 import { ensureCampaignConfig } from '../../../utils/planUtils';
 import { Plan } from '../../../types/user';
+
+// Chave do geo_cache idêntica à de geocode.ts (lower + espaços colapsados).
+const geoKey = (q: string) => q.trim().toLowerCase().replace(/\s+/g, ' ');
+// Jitter determinístico (~1–2km) p/ candidatos sem comitê na MESMA cidade não
+// empilharem exatamente no mesmo ponto. Derivado do id (estável entre cargas).
+const jitter = (id: string, salt: number) => {
+  let h = salt;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return ((h % 1000) / 1000 - 0.5) * 0.03; // ±0.015°
+};
 
 export function createPartyPublicRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -22,7 +33,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     if (!party) return res.status(404).json({ error: 'telao_invalido' });
     const partyId = (party as any).id;
     const { data: cands } = await supabase.from('party_candidates')
-      .select('id, displayName, regiao, status, campaignId, valorRecebido, valorAlocado').eq('partyId', partyId);
+      .select('id, displayName, regiao, estado, status, campaignId, valorRecebido, valorAlocado').eq('partyId', partyId);
     const candidates = cands || [];
     const ids = candidates.map((c: any) => c.id);
     const campIds = candidates.map((c: any) => c.campaignId).filter(Boolean);
@@ -52,6 +63,33 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
       }
     }
 
+    // Posição aproximada por cidade/UF (#147f): candidatos SEM comitê com GPS
+    // viram bolinha aproximada na cidade — assim os 🔴 sem comitê aparecem.
+    const cityQueryOf = (c: any): string | null => {
+      const cidade = String(c.regiao || '').trim();
+      if (!cidade) return null;
+      const uf = String(c.estado || '').trim();
+      return uf ? `${cidade}, ${uf}, Brasil` : `${cidade}, Brasil`;
+    };
+    const semComite = candidates.filter((c: any) => {
+      const com = committees[c.id];
+      return !(com && typeof com.lat === 'number') && cityQueryOf(c);
+    });
+    const cityCoords: Record<string, { lat: number; lng: number }> = {};
+    if (semComite.length) {
+      const keys = [...new Set(semComite.map((c: any) => geoKey(cityQueryOf(c)!)))];
+      const cachedKeys = new Set<string>();
+      const { data: cacheRows } = await supabase.from('geo_cache').select('query, lat, lng').in('query', keys);
+      for (const row of cacheRows || []) {
+        cachedKeys.add((row as any).query);
+        if ((row as any).lat != null && (row as any).lng != null) cityCoords[(row as any).query] = { lat: (row as any).lat, lng: (row as any).lng };
+      }
+      // Aquece o cache em background pras cidades ainda não consultadas (sem travar
+      // a resposta nem esperar o throttle do Nominatim) — aparecem no próximo poll.
+      const aQuecer = [...new Set(semComite.map((c: any) => cityQueryOf(c)!))].filter((q) => !cachedKeys.has(geoKey(q)));
+      for (const q of aQuecer) void geocode(q);
+    }
+
     let green = 0, yellow = 0, red = 0;
     const points = candidates.map((c: any) => {
       const com = committees[c.id];
@@ -64,13 +102,26 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
         valorRecebido: Number(c.valorRecebido) || 0, valorAlocado: Number(c.valorAlocado) || 0,
       });
       if (sc.level === 'green') green++; else if (sc.level === 'yellow') yellow++; else red++;
+
+      // Localização do pino: 1º comitê (GPS/endereço); senão, aproximada pela cidade.
+      let lat: number | null = com?.lat ?? null;
+      let lng: number | null = com?.lng ?? null;
+      let approx = !!com && com.geoSource === 'address';
+      let noCommittee = false;
+      let local = com?.address || [c.regiao, c.estado].filter(Boolean).join('/') || null;
+      if (typeof lat !== 'number') {
+        const cc = cityCoords[geoKey(cityQueryOf(c) || '')];
+        if (cc) {
+          lat = cc.lat + jitter(c.id, 7);
+          lng = cc.lng + jitter(c.id, 13);
+          approx = true; noCommittee = true;
+          local = [c.regiao, c.estado].filter(Boolean).join('/') || local;
+        }
+      }
       return {
         displayName: c.displayName,
-        // Texto do popup = localização REAL do pino (endereço do comitê), com
-        // a região declarada só como fallback (evita pino na Gávea dizer "Niterói").
-        local: com?.address || c.regiao || null,
-        approx: !!com && com.geoSource === 'address',
-        lat: com?.lat ?? null, lng: com?.lng ?? null, hasPhoto: !!com?.photo,
+        local, approx, noCommittee,
+        lat, lng, hasPhoto: !!com?.photo,
         level: sc.level, checkins: checkinCount[c.id] || 0,
       };
     });

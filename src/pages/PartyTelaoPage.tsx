@@ -13,7 +13,7 @@ const LEVEL_COLOR: Record<string, string> = { green: '#10b981', yellow: '#f59e0b
 const esc = (s: any) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] || c));
 const SAFETY_POLL_MS = 120_000; // rede de segurança caso um broadcast se perca
 
-interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; level: string; checkins: number; }
+interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; noCommittee?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; level: string; checkins: number; }
 interface TelaoData { partyName: string; channel?: string; points: TelaoPoint[]; checkinPoints: { lat: number; lng: number }[]; stats: { candidates: number; committees: number; checkins: number; green: number; yellow: number; red: number }; }
 
 const PartyTelaoPage: React.FC = () => {
@@ -73,8 +73,16 @@ const PartyTelaoPage: React.FC = () => {
     data.points.forEach((p) => {
       if (typeof p.lat !== 'number' || typeof p.lng !== 'number') return;
       const color = LEVEL_COLOR[p.level] || '#94a3b8';
-      const mk = L.circleMarker([p.lat, p.lng], { radius: 11, fillColor: color, color: '#fff', weight: 2, fillOpacity: 0.9 });
-      mk.bindPopup(`<div style="min-width:170px"><b>${esc(p.displayName)}</b>${p.local ? `<br/><span style="opacity:.7">${esc(p.local)}${p.approx ? ' (aprox.)' : ''}</span>` : ''}<br/><span style="color:${color}">●</span> ${p.checkins} check-in(s)${p.hasPhoto ? ' · 📸' : ''}</div>`);
+      // Comitê real = bolinha cheia com borda branca. Sem comitê (posição
+      // aproximada pela cidade) = anel tracejado e oco, na cor do score.
+      const style = p.noCommittee
+        ? { radius: 8, fillColor: color, color, weight: 2, fillOpacity: 0.2, dashArray: '3,4' }
+        : { radius: 11, fillColor: color, color: '#fff', weight: 2, fillOpacity: 0.9 };
+      const mk = L.circleMarker([p.lat, p.lng], style);
+      const sub = p.noCommittee
+        ? `${p.local ? esc(p.local) + ' · ' : ''}sem comitê · local aproximado`
+        : (p.local ? `${esc(p.local)}${p.approx ? ' (aprox.)' : ''}` : '');
+      mk.bindPopup(`<div style="min-width:170px"><b>${esc(p.displayName)}</b>${sub ? `<br/><span style="opacity:.7">${sub}</span>` : ''}<br/><span style="color:${color}">●</span> ${p.checkins} check-in(s)${p.hasPhoto ? ' · 📸' : ''}</div>`);
       mk.addTo(lgRef.current.comites); pts.push([p.lat, p.lng]);
     });
 
@@ -94,6 +102,7 @@ const PartyTelaoPage: React.FC = () => {
       <div className="absolute top-0 left-0 right-0 z-[500] pointer-events-none p-4 sm:p-6 bg-gradient-to-b from-black/70 to-transparent">
         <h1 className="text-2xl sm:text-3xl font-black tracking-tight">{data!.partyName}</h1>
         <p className="text-xs text-slate-400">Telão ao vivo · estrutura de campo · atualiza em tempo real</p>
+        <p className="text-[10px] text-slate-500 mt-0.5">● comitê com local · ◌ sem comitê (aprox. pela cidade) · cor = saúde do candidato</p>
       </div>
 
       {/* Placar 🟢🟡🔴 + totais */}
