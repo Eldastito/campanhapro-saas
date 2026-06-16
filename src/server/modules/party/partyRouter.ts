@@ -26,6 +26,11 @@ const normalizeUF = (v: any): string | null => {
   return s.length <= 3 ? s.toUpperCase().slice(0, 3) : s.slice(0, 40);
 };
 
+// Chaves de deduplicação (#147e): nome normalizado (sem acento/caixa/espaços
+// extras) e telefone só com dígitos.
+const normName = (v: any): string => String(v ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+const normPhone = (v: any): string => String(v ?? '').replace(/\D/g, '');
+
 // Broadcast (pub/sub) p/ o telão público atualizar no INSTANTE do evento, sem
 // expor tabela nenhuma a RLS. Envia só um "ping" vazio; o telão re-busca os dados
 // pelo endpoint seguro. Fire-and-forget (nunca bloqueia a resposta).
@@ -205,20 +210,41 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const party = await partyOf(userId);
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
-    const toInsert = rows.slice(0, 500).map((r: any) => ({
-      partyId: party.id,
-      displayName: String(r.displayName || r.nome || '').trim().slice(0, 160),
-      cargo: (r.cargo || '').toString().trim() || null,
-      regiao: (r.regiao || r.cidade || '').toString().trim() || null,
-      estado: normalizeUF(r.estado || r.uf),
-      phone: (r.phone || r.telefone || '').toString().trim() || null,
-      status: 'pending',
-      inviteToken: newToken(),
-    })).filter((x: any) => x.displayName);
-    if (!toInsert.length) return res.status(400).json({ error: 'nenhuma_linha_valida' });
+
+    // Dedup (#147e): não recria quem já existe no partido (por nome OU telefone),
+    // nem repete dentro do próprio lote. Re-colar a planilha vira no-op seguro.
+    const { data: existing } = await supabase.from('party_candidates')
+      .select('displayName, phone').eq('partyId', party.id);
+    const existNames = new Set((existing || []).map((e: any) => normName(e.displayName)));
+    const existPhones = new Set((existing || []).map((e: any) => normPhone(e.phone)).filter((p: string) => p.length >= 8));
+    const seenNames = new Set<string>();
+    const seenPhones = new Set<string>();
+
+    let duplicates = 0, invalid = 0;
+    const toInsert: any[] = [];
+    for (const r of rows.slice(0, 500)) {
+      const displayName = String(r.displayName || r.nome || '').trim().slice(0, 160);
+      if (!displayName) { invalid++; continue; }
+      const nk = normName(displayName);
+      const pk = normPhone(r.phone || r.telefone);
+      const isDup = existNames.has(nk) || seenNames.has(nk) || (pk.length >= 8 && (existPhones.has(pk) || seenPhones.has(pk)));
+      if (isDup) { duplicates++; continue; }
+      seenNames.add(nk); if (pk.length >= 8) seenPhones.add(pk);
+      toInsert.push({
+        partyId: party.id,
+        displayName,
+        cargo: (r.cargo || '').toString().trim() || null,
+        regiao: (r.regiao || r.cidade || '').toString().trim() || null,
+        estado: normalizeUF(r.estado || r.uf),
+        phone: (r.phone || r.telefone || '').toString().trim() || null,
+        status: 'pending',
+        inviteToken: newToken(),
+      });
+    }
+    if (!toInsert.length) return res.json({ created: 0, duplicates, invalid });
     const { data, error } = await supabase.from('party_candidates').insert(toInsert).select('id');
     if (error) return res.status(500).json({ error: error.message });
-    return res.json({ created: (data || []).length });
+    return res.json({ created: (data || []).length, duplicates, invalid });
   });
 
   // Import assistido por IA (#147d): recebe uma planilha colada "suja" (com

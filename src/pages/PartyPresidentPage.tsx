@@ -37,6 +37,8 @@ interface ProofData {
 }
 
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
+// 27 UFs do Brasil (preparação nacional #147b). Seletor evita "rj"/"Rio de Janeiro" misturados.
+const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
 interface Party { id: string; name: string; telaoToken?: string | null; plan?: string | null; }
 interface RecurringRepasse {
@@ -148,6 +150,7 @@ const PartyPresidentPage: React.FC = () => {
   const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string }[] | null>(null);
   const [aiIgnored, setAiIgnored] = React.useState<string[]>([]);
   const [aiError, setAiError] = React.useState<string | null>(null);
+  const [importSummary, setImportSummary] = React.useState<{ created: number; duplicates: number; invalid: number } | null>(null);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [repasseFor, setRepasseFor] = React.useState<Candidate | null>(null);
   const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
@@ -166,6 +169,7 @@ const PartyPresidentPage: React.FC = () => {
   const [valveBusy, setValveBusy] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<'all' | 'green' | 'yellow' | 'red' | 'pending'>('all');
+  const [estadoFilter, setEstadoFilter] = React.useState<string>('all');
   const [editFor, setEditFor] = React.useState<Candidate | null>(null);
   const [editForm, setEditForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' });
   const [editing, setEditing] = React.useState(false);
@@ -275,10 +279,11 @@ const PartyPresidentPage: React.FC = () => {
       return { displayName, cargo, regiao, estado, phone };
     }).filter((r) => r.displayName);
     if (!rows.length) return;
-    setImporting(true);
+    setImporting(true); setImportSummary(null);
     try {
       const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
-      if (r.ok) { setImportText(''); setImportOpen(false); await load(); }
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) { setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(); }
     } finally { setImporting(false); }
   };
 
@@ -300,15 +305,23 @@ const PartyPresidentPage: React.FC = () => {
   // Confirma o preview da IA → grava de fato via o mesmo endpoint de import.
   const importParsed = async () => {
     if (!aiPreview?.length) return;
-    setImporting(true);
+    setImporting(true); setImportSummary(null);
     try {
-      const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows: aiPreview }) });
-      if (r.ok) { closeImport(); await load(); }
+      const rows = aiPreview.filter((c) => c.displayName.trim());
+      const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) { setAiPreview(null); setAiIgnored([]); setImportText(''); setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(); }
     } finally { setImporting(false); }
   };
+  // edição inline da prévia da IA (#147e)
+  const updatePreviewRow = (i: number, field: 'displayName' | 'cargo' | 'regiao' | 'estado' | 'phone', value: string) => {
+    setAiPreview((prev) => prev ? prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)) : prev);
+  };
+  const removePreviewRow = (i: number) => setAiPreview((prev) => (prev ? prev.filter((_, j) => j !== i) : prev));
+
   const closeImport = () => {
     setImportOpen(false); setImportText(''); setImportMode('manual');
-    setAiPreview(null); setAiIgnored([]); setAiError(null);
+    setAiPreview(null); setAiIgnored([]); setAiError(null); setImportSummary(null);
   };
 
   const inviteUrl = (token: string) => `${window.location.origin}/cadastro/partido/${token}`;
@@ -457,11 +470,13 @@ const PartyPresidentPage: React.FC = () => {
         ) : (() => {
           const q = search.trim().toLowerCase();
           const filtered = candidates.filter((c) => {
-            if (q && !`${c.displayName} ${c.cargo || ''} ${c.regiao || ''}`.toLowerCase().includes(q)) return false;
-            if (statusFilter === 'pending') return c.status === 'pending';
-            if (statusFilter === 'green' || statusFilter === 'yellow' || statusFilter === 'red') return c.score?.level === statusFilter;
+            if (q && !`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''}`.toLowerCase().includes(q)) return false;
+            if (estadoFilter !== 'all' && (c.estado || '') !== estadoFilter) return false;
+            if (statusFilter === 'pending' && c.status !== 'pending') return false;
+            if ((statusFilter === 'green' || statusFilter === 'yellow' || statusFilter === 'red') && c.score?.level !== statusFilter) return false;
             return true;
           });
+          const estadosPresentes = [...new Set(candidates.map((c) => c.estado).filter(Boolean) as string[])].sort();
           const FILTERS: { k: typeof statusFilter; label: string }[] = [
             { k: 'all', label: 'Todos' }, { k: 'green', label: '🟢' }, { k: 'yellow', label: '🟡' }, { k: 'red', label: '🔴' }, { k: 'pending', label: 'Pendentes' },
           ];
@@ -471,9 +486,16 @@ const PartyPresidentPage: React.FC = () => {
             <div className="flex flex-col sm:flex-row gap-2 mb-2">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar candidato (nome, cargo, cidade)…"
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar candidato (nome, cargo, cidade, UF)…"
                   className="w-full bg-[#1c2128] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-white text-sm" />
               </div>
+              {estadosPresentes.length > 1 && (
+                <select value={estadoFilter} onChange={(e) => setEstadoFilter(e.target.value)}
+                  className="bg-[#1c2128] border border-white/10 rounded-xl px-3 py-2 text-white text-sm shrink-0">
+                  <option value="all">Todos os estados</option>
+                  {estadosPresentes.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                </select>
+              )}
               <div className="flex gap-1 overflow-x-auto no-scrollbar">
                 {FILTERS.map((f) => (
                   <button key={f.k} onClick={() => setStatusFilter(f.k)}
@@ -771,8 +793,11 @@ const PartyPresidentPage: React.FC = () => {
                 <input value={form.cargo} onChange={(e) => setForm({ ...form, cargo: e.target.value })} placeholder="Cargo" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
                 <input value={form.regiao} onChange={(e) => setForm({ ...form, regiao: e.target.value })} placeholder="Cidade" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
-              <div className="grid grid-cols-[5rem_1fr] gap-2">
-                <input value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} placeholder="UF" maxLength={20} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white uppercase" />
+              <div className="grid grid-cols-[5.5rem_1fr] gap-2">
+                <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-2 py-2 text-white">
+                  <option value="">UF</option>
+                  {UFS.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                </select>
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
             </div>
@@ -797,8 +822,11 @@ const PartyPresidentPage: React.FC = () => {
                 <input value={editForm.cargo} onChange={(e) => setEditForm({ ...editForm, cargo: e.target.value })} placeholder="Cargo" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
                 <input value={editForm.regiao} onChange={(e) => setEditForm({ ...editForm, regiao: e.target.value })} placeholder="Cidade" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
-              <div className="grid grid-cols-[5rem_1fr] gap-2">
-                <input value={editForm.estado} onChange={(e) => setEditForm({ ...editForm, estado: e.target.value })} placeholder="UF" maxLength={20} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white uppercase" />
+              <div className="grid grid-cols-[5.5rem_1fr] gap-2">
+                <select value={editForm.estado} onChange={(e) => setEditForm({ ...editForm, estado: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-2 py-2 text-white">
+                  <option value="">UF</option>
+                  {UFS.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                </select>
                 <input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
             </div>
@@ -818,6 +846,22 @@ const PartyPresidentPage: React.FC = () => {
               <button onClick={closeImport} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
 
+            {/* Resumo pós-import (dedup) — substitui o formulário quando concluído */}
+            {importSummary ? (
+              <div className="text-center py-4">
+                <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-2" />
+                <p className="text-white font-bold mb-1">{importSummary.created} candidato(s) importado(s)</p>
+                <div className="text-sm text-slate-400 space-y-0.5">
+                  {importSummary.duplicates > 0 && <p>⏭️ {importSummary.duplicates} já existiam (ignorados)</p>}
+                  {importSummary.invalid > 0 && <p>⚠️ {importSummary.invalid} sem nome (ignorados)</p>}
+                  {importSummary.created === 0 && importSummary.duplicates > 0 && <p className="text-amber-300">Todos já estavam cadastrados.</p>}
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => { setImportSummary(null); setImportText(''); }} className="flex-1 bg-white/5 hover:bg-white/10 rounded-xl px-4 py-2.5 font-bold text-slate-200 text-sm">Importar mais</button>
+                  <button onClick={closeImport} className="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2.5 font-bold text-sm">Concluído</button>
+                </div>
+              </div>
+            ) : (<>
             {/* Seletor de modo */}
             <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 border border-white/10 rounded-xl mb-3">
               {([['manual', 'Colar simples'], ['ia', '🤖 Organizar com IA']] as const).map(([m, label]) => (
@@ -851,41 +895,47 @@ const PartyPresidentPage: React.FC = () => {
                 )}
                 {aiError && <p className="text-xs text-rose-400 mt-2">{aiError}</p>}
 
-                {/* Preview do que a IA extraiu */}
+                {/* Preview EDITÁVEL do que a IA extraiu (#147e) */}
                 {aiPreview && aiPreview.length > 0 && (
                   <div className="mt-3">
                     <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-xs font-bold text-emerald-300">✅ {aiPreview.length} candidato(s) encontrado(s) — confira:</p>
+                      <p className="text-xs font-bold text-emerald-300">✅ {aiPreview.length} candidato(s) — confira e corrija se precisar:</p>
                       <button onClick={() => { setAiPreview(null); setAiIgnored([]); }} className="text-[11px] text-slate-400 hover:text-white underline">Refazer</button>
                     </div>
                     {aiIgnored.length > 0 && (
                       <p className="text-[11px] text-slate-500 mb-1.5">Colunas ignoradas: {aiIgnored.join(', ')}.</p>
                     )}
-                    <div className="max-h-52 overflow-y-auto rounded-xl border border-white/10">
-                      <table className="w-full text-[11px]">
-                        <thead className="sticky top-0 bg-slate-800 text-slate-400">
-                          <tr><th className="text-left px-2 py-1.5">Nome</th><th className="text-left px-2 py-1.5">Cargo</th><th className="text-left px-2 py-1.5">Cidade/UF</th><th className="text-left px-2 py-1.5">Telefone</th></tr>
-                        </thead>
-                        <tbody>
-                          {aiPreview.map((c, i) => (
-                            <tr key={i} className="border-t border-white/5">
-                              <td className="px-2 py-1.5 text-white font-medium">{c.displayName}</td>
-                              <td className="px-2 py-1.5 text-slate-300">{c.cargo || '—'}</td>
-                              <td className="px-2 py-1.5 text-slate-300">{[c.regiao, c.estado].filter(Boolean).join('/') || '—'}</td>
-                              <td className="px-2 py-1.5 text-slate-300">{c.phone || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="max-h-64 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
+                      {aiPreview.map((c, i) => (
+                        <div key={i} className="p-2 flex items-start gap-1.5">
+                          <div className="flex-1 grid grid-cols-2 gap-1">
+                            <input value={c.displayName} onChange={(e) => updatePreviewRow(i, 'displayName', e.target.value)} placeholder="Nome *"
+                              className="col-span-2 bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[12px] text-white" />
+                            <input value={c.cargo} onChange={(e) => updatePreviewRow(i, 'cargo', e.target.value)} placeholder="Cargo"
+                              className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
+                            <input value={c.regiao} onChange={(e) => updatePreviewRow(i, 'regiao', e.target.value)} placeholder="Cidade"
+                              className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
+                            <select value={UFS.includes(c.estado) ? c.estado : ''} onChange={(e) => updatePreviewRow(i, 'estado', e.target.value)}
+                              className="bg-slate-950 border border-white/10 rounded-lg px-1 py-1 text-[11px] text-slate-200">
+                              <option value="">UF</option>
+                              {UFS.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                            </select>
+                            <input value={c.phone} onChange={(e) => updatePreviewRow(i, 'phone', e.target.value)} placeholder="Telefone"
+                              className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
+                          </div>
+                          <button onClick={() => removePreviewRow(i)} title="Remover" className="p-1 text-slate-500 hover:text-rose-400 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      ))}
                     </div>
-                    <button onClick={importParsed} disabled={importing} className="w-full mt-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
-                      {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Confirmar e importar {aiPreview.length}
+                    <button onClick={importParsed} disabled={importing || !aiPreview.some((c) => c.displayName.trim())} className="w-full mt-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+                      {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Confirmar e importar {aiPreview.filter((c) => c.displayName.trim()).length}
                     </button>
-                    <p className="text-[10px] text-slate-500 mt-1.5 text-center">A IA só organiza — nada é salvo até você confirmar.</p>
+                    <p className="text-[10px] text-slate-500 mt-1.5 text-center">A IA só organiza — nada é salvo até você confirmar. Duplicados são ignorados automaticamente.</p>
                   </div>
                 )}
               </>
             )}
+            </>)}
           </div>
         </div>
       )}

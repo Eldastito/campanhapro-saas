@@ -56,11 +56,19 @@ const PartyBackup: React.FC = () => {
   const [dirName, setDirName] = useState<string | null>(null);
   const [lastAt, setLastAt] = useState<string | null>(null);
   const supported = supportsDirectoryPicker();
+  const STALE_DAYS = 7;
 
   useEffect(() => {
     loadSavedDirectory().then((d) => { if (d?.name) setDirName(d.name); });
     try { setLastAt(localStorage.getItem('party_backup_last')); } catch { /* */ }
   }, []);
+
+  // Aviso de backup vencido (#147e): nunca feito ou há mais de STALE_DAYS dias.
+  const daysSince = lastAt ? Math.floor((Date.now() - new Date(lastAt).getTime()) / 86400000) : null;
+  const nudge: { tone: 'red' | 'amber'; text: string } | null =
+    daysSince === null ? { tone: 'amber', text: 'Você ainda não fez nenhum backup em pendrive. Faça o primeiro para ter sua cópia física.' }
+    : daysSince >= STALE_DAYS ? { tone: 'red', text: `Seu último backup foi há ${daysSince} dias. Recomendado fazer um novo.` }
+    : null;
 
   const fetchPayload = async () => {
     const r = await authedFetch('/api/v1/party/backup');
@@ -125,6 +133,13 @@ const PartyBackup: React.FC = () => {
         Salva <b>todos os dados do seu partido</b> (candidatos, repasses, comitês, check-ins, recorrentes e válvula)
         numa unidade física que você escolher. Os dados são só do seu partido — ninguém vê os de outro.
       </p>
+
+      {/* Aviso de backup vencido (#147e) */}
+      {nudge && (
+        <div className={`flex items-start gap-2 rounded-xl p-3 mb-3 text-sm border ${nudge.tone === 'red' ? 'bg-rose-500/10 border-rose-500/30 text-rose-200' : 'bg-amber-500/10 border-amber-500/30 text-amber-200'}`}>
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> <span>{nudge.text}</span>
+        </div>
+      )}
 
       {/* Estado atual */}
       <div className="flex flex-wrap items-center gap-2 mb-3 text-[11px]">
