@@ -8,6 +8,7 @@ import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
 import PartyEmergencyWipe from '../components/party/PartyEmergencyWipe';
+import PartyBackup from '../components/party/PartyBackup';
 import PartyAIOrb from '../components/party/PartyAIOrb';
 
 /**
@@ -708,11 +709,14 @@ const PartyPresidentPage: React.FC = () => {
       })()}
 
       {tab === 'Segurança' && (
-        <PartyEmergencyWipe
-          partyName={party.name}
-          hasData={candidates.length > 0 || totalRepassado > 0}
-          onWiped={() => { setTab('Candidatos'); load(); }}
-        />
+        <>
+          <PartyBackup />
+          <PartyEmergencyWipe
+            partyName={party.name}
+            hasData={candidates.length > 0 || totalRepassado > 0}
+            onWiped={() => { setTab('Candidatos'); load(); }}
+          />
+        </>
       )}
 
       {/* ORB Conversacional (#142) — assistente flutuante do partido */}

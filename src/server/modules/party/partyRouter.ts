@@ -918,6 +918,59 @@ Saída JSON estrito (sem markdown):
     });
   });
 
+  // ── BACKUP EM UNIDADE EXTERNA (#147c) ──────────────────────────────────
+  // Exporta TODOS os dados do partido do presidente logado, em JSON.
+  // ISOLAMENTO: escopado por partyId — cada presidente baixa só o que é dele,
+  // nunca os dados de outro partido. O navegador (File System Access API) é quem
+  // grava o arquivo no pendrive/pasta escolhida pelo usuário; o servidor (nuvem)
+  // não tem acesso a unidade física, então só devolve o payload completo.
+  router.get('/backup', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+
+    const { data: candidates } = await supabase.from('party_candidates').select('*').eq('partyId', party.id);
+    const candIds = (candidates || []).map((c: any) => c.id);
+    const inIds = candIds.length ? candIds : ['00000000-0000-0000-0000-000000000000'];
+
+    const [repassesQ, recurringQ, committeesQ, checkinsQ, valveLogQ] = await Promise.all([
+      supabase.from('party_repasses').select('*').eq('partyId', party.id),
+      supabase.from('party_recurring_repasses').select('*').eq('partyId', party.id),
+      supabase.from('party_committees').select('*').in('candidateId', inIds),
+      supabase.from('party_checkins').select('*').in('candidateId', inIds),
+      supabase.from('party_valve_log').select('*').in('candidateId', inIds),
+    ]);
+
+    const payload = {
+      schema: 'campanhapro.party-backup',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      party: { id: party.id, name: party.name },
+      counts: {
+        candidatos: (candidates || []).length,
+        repasses: (repassesQ.data || []).length,
+        recorrentes: (recurringQ.data || []).length,
+        comites: (committeesQ.data || []).length,
+        checkins: (checkinsQ.data || []).length,
+        valvula: (valveLogQ.data || []).length,
+      },
+      data: {
+        candidatos: candidates || [],
+        repasses: repassesQ.data || [],
+        repassesRecorrentes: recurringQ.data || [],
+        comites: committeesQ.data || [],
+        checkins: checkinsQ.data || [],
+        valvulaLog: valveLogQ.data || [],
+      },
+    };
+    return res.json(payload);
+  });
+
   // ── ORB CONVERSACIONAL (#142) — IA consultiva (só LEITURA nesta fase) ──
   //
   // Segurança: a IA NUNCA toca o banco direto. O backend monta um snapshot
