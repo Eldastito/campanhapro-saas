@@ -36,7 +36,22 @@ interface RepasseDraft {
   data: string | null;
   repasseId?: string;
 }
-interface Msg { role: 'user' | 'assistant'; text: string; draft?: RepasseDraft | null }
+interface RepasseOption {
+  repasseId: string;
+  candidateId: string;
+  candidateName: string;
+  valor: number;
+  descricao: string;
+  data: string | null;
+}
+interface PendingAction { type: 'edit_repasse' | 'delete_repasse'; valor?: number }
+interface Msg {
+  role: 'user' | 'assistant';
+  text: string;
+  draft?: RepasseDraft | null;
+  options?: RepasseOption[] | null;     // lista de repasses pra escolher
+  pendingAction?: PendingAction | null; // ação a aplicar na escolha
+}
 
 // Web Speech API (sem types nativos no TS) — acessa via window com any.
 type SpeechRec = any;
@@ -89,7 +104,9 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
       const reply = j.message || j.error || 'Não consegui responder agora.';
       // Se a IA propôs um lançamento, anexa o draft à mensagem (vira card de confirmação)
       const draft: RepasseDraft | null = ['lancar_repasse', 'editar_repasse', 'excluir_repasse'].includes(j.intent) && j.draft ? j.draft : null;
-      setMsgs((m) => [...m, { role: 'assistant', text: reply, draft }]);
+      const options: RepasseOption[] | null = j.intent === 'escolher_repasse' && Array.isArray(j.options) ? j.options : null;
+      const pendingAction: PendingAction | null = options ? (j.pendingAction || null) : null;
+      setMsgs((m) => [...m, { role: 'assistant', text: reply, draft, options, pendingAction }]);
       // Pediu relatório → abre o overlay imprimível
       if (j.intent === 'gerar_relatorio') setShowReport(true);
       setState('idle');
@@ -140,6 +157,18 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
   const cancelDraft = (msgIdx: number) => {
     setMsgs((m) => m.map((msg, i) => i === msgIdx ? { ...msg, draft: null } : msg)
       .concat({ role: 'assistant', text: 'Ok, cancelei. Nada foi lançado.' }));
+  };
+
+  // Presidente escolheu um repasse da lista → vira card de confirmação
+  const chooseOption = (opt: RepasseOption, action: PendingAction, msgIdx: number) => {
+    const draft: RepasseDraft = action.type === 'edit_repasse'
+      ? { type: 'edit_repasse', repasseId: opt.repasseId, candidateId: opt.candidateId, candidateName: opt.candidateName,
+          valorAntigo: opt.valor, valor: action.valor || 0, descricao: opt.descricao, data: opt.data }
+      : { type: 'delete_repasse', repasseId: opt.repasseId, candidateId: opt.candidateId, candidateName: opt.candidateName,
+          valor: opt.valor, descricao: opt.descricao, data: opt.data };
+    // Remove as opções da mensagem (já escolheu) e adiciona o card de confirmação
+    setMsgs((m) => m.map((msg, i) => i === msgIdx ? { ...msg, options: null, pendingAction: null } : msg)
+      .concat({ role: 'assistant', text: action.type === 'delete_repasse' ? 'Confira antes de excluir:' : 'Confira a alteração:', draft }));
   };
 
   const startVoice = () => {
@@ -256,6 +285,21 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                   </div>
                   );
                 })()}
+                {/* Lista de repasses pra escolher (candidato com vários) */}
+                {m.options && m.options.length > 0 && m.pendingAction && (
+                  <div className="ml-8 w-[85%] space-y-1.5">
+                    {m.options.map((opt, oi) => (
+                      <button key={opt.repasseId} onClick={() => chooseOption(opt, m.pendingAction!, i)}
+                        className="w-full text-left bg-slate-800 hover:bg-slate-700 border border-white/10 rounded-lg px-3 py-2 transition-colors">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold text-white">{oi + 1}. {brl(opt.valor)}</span>
+                          <span className="text-[10px] text-slate-500">{opt.data ? new Date(opt.data).toLocaleDateString('pt-BR') : 's/data'}</span>
+                        </div>
+                        {opt.descricao && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{opt.descricao}</p>}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {state === 'thinking' && (

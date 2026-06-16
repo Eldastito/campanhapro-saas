@@ -985,61 +985,69 @@ JSON:`;
         }
       }
 
-      // EDITAR ou EXCLUIR repasse: resolve candidato → repasse mais recente
+      // EDITAR ou EXCLUIR repasse: resolve candidato → 1 repasse (direto) OU vários (lista pra escolher)
+      let options: any = null;       // lista de repasses quando o candidato tem vários
+      let pendingAction: any = null; // ação a aplicar quando o presidente escolher na lista
       if ((intent === 'editar_repasse' || intent === 'excluir_repasse') && parsed.draft) {
+        const isEdit = intent === 'editar_repasse';
         const wantName = String(parsed.draft.candidateName || '').trim().toLowerCase();
+        const novoValor = Number(parsed.draft.valor) || 0;
         const { data: allCands } = await supabase.from('party_candidates')
           .select('id, displayName').eq('partyId', party.id);
-        const matches = (allCands || []).filter((c: any) =>
+        const candMatches = (allCands || []).filter((c: any) =>
           c.displayName.toLowerCase().includes(wantName) || (wantName && wantName.includes(c.displayName.toLowerCase())));
 
         if (!wantName) {
           message = 'De qual candidato é o repasse? Me diga o nome.';
-        } else if (matches.length === 0) {
+        } else if (candMatches.length === 0) {
           message = `Não encontrei candidato "${parsed.draft.candidateName}". Confira na lista.`;
-        } else if (matches.length > 1) {
-          message = `Há mais de um parecido com "${parsed.draft.candidateName}": ${matches.map((c: any) => c.displayName).join(', ')}. Qual deles?`;
+        } else if (candMatches.length > 1) {
+          message = `Há mais de um parecido com "${parsed.draft.candidateName}": ${candMatches.map((c: any) => c.displayName).join(', ')}. Qual deles?`;
+        } else if (isEdit && novoValor <= 0) {
+          message = `Qual o novo valor do repasse de ${candMatches[0].displayName}?`;
         } else {
-          const cand = matches[0];
-          // Pega o repasse MAIS RECENTE do candidato
+          const cand = candMatches[0];
           const { data: reps } = await supabase.from('party_repasses')
             .select('id, valor, data, descricao').eq('candidateId', cand.id)
-            .order('data', { ascending: false, nullsFirst: false }).limit(1);
-          const rep = (reps || [])[0] as any;
-          if (!rep) {
-            message = `${cand.displayName} não tem repasses registrados pra ${intent === 'editar_repasse' ? 'editar' : 'excluir'}.`;
-          } else if (intent === 'editar_repasse') {
-            const novoValor = Number(parsed.draft.valor) || 0;
-            if (novoValor <= 0) {
-              message = `Qual o novo valor do repasse de ${cand.displayName} (atual: ${brl(Number(rep.valor) || 0)})?`;
-            } else {
-              draft = {
-                type: 'edit_repasse',
-                repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
+            .order('data', { ascending: false, nullsFirst: false });
+          const list = (reps || []) as any[];
+
+          if (list.length === 0) {
+            message = `${cand.displayName} não tem repasses pra ${isEdit ? 'editar' : 'excluir'}.`;
+          } else if (list.length === 1) {
+            // Um só → confirmação direta
+            const rep = list[0];
+            if (isEdit) {
+              draft = { type: 'edit_repasse', repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
                 valorAntigo: Number(rep.valor) || 0, valor: novoValor,
-                descricao: parsed.draft.descricao ? String(parsed.draft.descricao).slice(0, 300) : (rep.descricao || ''),
-                data: rep.data,
-              };
-              message = `Vou alterar o repasse mais recente de ${cand.displayName} de ${brl(Number(rep.valor) || 0)} para ${brl(novoValor)}. Confirma? (Se for outro repasse, edite pela aba Repasses.)`;
+                descricao: parsed.draft.descricao ? String(parsed.draft.descricao).slice(0, 300) : (rep.descricao || ''), data: rep.data };
+              message = `Vou alterar o repasse de ${cand.displayName} de ${brl(Number(rep.valor) || 0)} para ${brl(novoValor)}. Confirma?`;
+            } else {
+              draft = { type: 'delete_repasse', repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
+                valor: Number(rep.valor) || 0, descricao: rep.descricao || '', data: rep.data };
+              message = `⚠️ Vou EXCLUIR o repasse de ${cand.displayName}: ${brl(Number(rep.valor) || 0)}${rep.descricao ? ` (${rep.descricao})` : ''}. Não pode ser desfeito. Confirma?`;
             }
           } else {
-            // excluir
-            draft = {
-              type: 'delete_repasse',
-              repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
-              valor: Number(rep.valor) || 0, descricao: rep.descricao || '', data: rep.data,
-            };
-            message = `⚠️ Vou EXCLUIR o repasse mais recente de ${cand.displayName}: ${brl(Number(rep.valor) || 0)}${rep.descricao ? ` (${rep.descricao})` : ''}. Esta ação não pode ser desfeita. Confirma?`;
+            // Vários → lista numerada pro presidente escolher (clicável no front)
+            options = list.map((r: any) => ({
+              repasseId: r.id, candidateId: cand.id, candidateName: cand.displayName,
+              valor: Number(r.valor) || 0, descricao: r.descricao || '', data: r.data,
+            }));
+            pendingAction = isEdit ? { type: 'edit_repasse', valor: novoValor } : { type: 'delete_repasse' };
+            message = `${cand.displayName} tem ${list.length} repasses. Qual deles você quer ${isEdit ? `alterar para ${brl(novoValor)}` : 'excluir'}?`;
           }
         }
       }
 
+      // Se montou lista de escolha, o intent vira 'escolher_repasse' pro front
+      const finalIntent = options ? 'escolher_repasse' : intent;
+
       await supabase.from('party_ai_command_logs').insert({
         partyId: party.id, userId, inputType: (req.body || {}).inputType || 'text',
-        userCommand: text.slice(0, 500), detectedIntent: intent, actionStatus: draft ? 'draft' : 'ok',
+        userCommand: text.slice(0, 500), detectedIntent: finalIntent, actionStatus: draft ? 'draft' : (options ? 'choosing' : 'ok'),
       }).then(() => {}, () => {});
 
-      return res.json({ intent, message, draft });
+      return res.json({ intent: finalIntent, message, draft, options, pendingAction });
     } catch (err: any) {
       console.error('[party] ai/command:', err);
       return res.status(500).json({ error: err?.message || 'ai_failed', message: 'Não consegui processar agora. Tente reformular.' });
