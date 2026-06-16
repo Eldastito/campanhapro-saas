@@ -19,6 +19,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 import { runSocialSync, detectSignificantChange, SyncProvider } from '../../../lib/socialSyncRunner';
 import { createSnapshot, shouldRunBackupToday } from '../controlPanel/backupService';
+import { processRecurringRepasses } from '../../../lib/recurringRepasses';
 
 const TICK_MS = 60_000;        // 1 minuto
 const BATCH_LIMIT = 20;        // máximo de triggers por tick (proteção)
@@ -295,6 +296,28 @@ async function tickDailyBackup(supabase: SupabaseClient) {
   }
 }
 
+/**
+ * Repasse recorrente automático (#147).
+ *
+ * Roda 1x/dia entre 02h-03h BR (antes do backup das 03h). Lança os repasses
+ * recorrentes cujo proximaData já chegou, respeitando a válvula do candidato
+ * (cortado/retido → pausa sem lançar). O motor é idempotente por dia: ao
+ * lançar, avança proximaData pro futuro, então rodar várias vezes na janela
+ * não duplica. Recorrentes pausados pela válvula são reavaliados a cada dia.
+ */
+const RECURRING_HOUR_BR = 2;
+
+async function tickRecurringRepasses(supabase: SupabaseClient) {
+  const hour = getBRHour();
+  if (hour < RECURRING_HOUR_BR || hour > RECURRING_HOUR_BR + 1) return;
+  try {
+    const n = await processRecurringRepasses(supabase);
+    if (n > 0) console.log(`[recurring] tick noturno lançou ${n} repasse(s) recorrente(s)`);
+  } catch (err: any) {
+    console.warn('[recurring] falha no tick:', err?.message || err);
+  }
+}
+
 let _started = false;
 let _intervalHandle: NodeJS.Timeout | null = null;
 
@@ -313,6 +336,7 @@ export function startRoutinesWorker(supabase: SupabaseClient) {
       await tickManualRuns(supabase);
       await tickSocialSync(supabase);
       await tickDailyBackup(supabase);
+      await tickRecurringRepasses(supabase);
     } catch (e: any) {
       console.error('[routines-worker] erro no tick:', e?.message || e);
     }

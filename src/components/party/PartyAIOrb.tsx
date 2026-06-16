@@ -43,6 +43,7 @@ interface RepasseOption {
   valor: number;
   descricao: string;
   data: string | null;
+  suggested?: boolean; // o mais recente — destacado como sugestão (#147)
 }
 interface PendingAction { type: 'edit_repasse' | 'delete_repasse'; valor?: number }
 interface Msg {
@@ -285,14 +286,21 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                   </div>
                   );
                 })()}
-                {/* Lista de repasses pra escolher (candidato com vários) */}
+                {/* Lista de repasses pra escolher (candidato com vários).
+                    O mais recente (suggested) vem destacado como sugestão (#147). */}
                 {m.options && m.options.length > 0 && m.pendingAction && (
                   <div className="ml-8 w-[85%] space-y-1.5">
                     {m.options.map((opt, oi) => (
                       <button key={opt.repasseId} onClick={() => chooseOption(opt, m.pendingAction!, i)}
-                        className="w-full text-left bg-slate-800 hover:bg-slate-700 border border-white/10 rounded-lg px-3 py-2 transition-colors">
+                        className={`w-full text-left rounded-lg px-3 py-2 transition-colors border ${
+                          opt.suggested
+                            ? 'bg-indigo-500/15 border-indigo-400/50 hover:bg-indigo-500/25 ring-1 ring-indigo-400/30'
+                            : 'bg-slate-800 hover:bg-slate-700 border-white/10'}`}>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold text-white">{oi + 1}. {brl(opt.valor)}</span>
+                          <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
+                            {oi + 1}. {brl(opt.valor)}
+                            {opt.suggested && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 uppercase tracking-wider">⭐ mais recente</span>}
+                          </span>
                           <span className="text-[10px] text-slate-500">{opt.data ? new Date(opt.data).toLocaleDateString('pt-BR') : 's/data'}</span>
                         </div>
                         {opt.descricao && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{opt.descricao}</p>}

@@ -801,6 +801,70 @@ Saída JSON estrito (sem markdown):
     return res.json({ ok: true });
   });
 
+  // ── REPASSE RECORRENTE (#147) ──────────────────────────────────────────
+  // POST cria um modelo recorrente (em vez de lançar 1 repasse só).
+  router.post('/candidates/:id/recurring-repasses', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await candidateOfPresident(userId, req.params.id);
+    if (!party) return res.status(404).json({ error: 'not_found' });
+
+    const { valor, descricao, frequencia, proximaData, dataFim } = req.body || {};
+    const v = Number(valor);
+    if (!(v > 0)) return res.status(400).json({ error: 'valor_invalido' });
+    const freq = ['mensal', 'quinzenal', 'semanal'].includes(frequencia) ? frequencia : 'mensal';
+    const prox = /^\d{4}-\d{2}-\d{2}$/.test(proximaData || '') ? proximaData : new Date().toISOString().slice(0, 10);
+
+    const { data, error } = await supabase.from('party_recurring_repasses').insert({
+      partyId: (party as any).id, candidateId: req.params.id, valor: v,
+      descricao: descricao?.trim() || null, frequencia: freq,
+      proximaData: prox, dataFim: /^\d{4}-\d{2}-\d{2}$/.test(dataFim || '') ? dataFim : null,
+      ativo: true, createdBy: userId,
+    }).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ recurring: data });
+  });
+
+  // GET lista os recorrentes do partido (com nome do candidato).
+  router.get('/recurring-repasses', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await partyOf(userId);
+    if (!party) return res.json({ recurring: [] });
+    const { data: recs } = await supabase.from('party_recurring_repasses')
+      .select('*').eq('partyId', party.id).order('createdAt', { ascending: false });
+    const { data: cands } = await supabase.from('party_candidates')
+      .select('id, displayName').eq('partyId', party.id);
+    const nameById: Record<string, string> = {};
+    (cands || []).forEach((c: any) => { nameById[c.id] = c.displayName; });
+    const recurring = (recs || []).map((r: any) => ({ ...r, candidateName: nameById[r.candidateId] || '—' }));
+    return res.json({ recurring });
+  });
+
+  // PATCH pausar/reativar; DELETE cancelar.
+  router.patch('/recurring-repasses/:id', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'not_found' });
+    const patch: any = { updatedAt: new Date().toISOString() };
+    if (typeof (req.body || {}).ativo === 'boolean') patch.ativo = (req.body as any).ativo;
+    if ((req.body || {}).valor !== undefined) { const v = Number((req.body as any).valor); if (v > 0) patch.valor = v; }
+    const { error } = await supabase.from('party_recurring_repasses')
+      .update(patch).eq('id', req.params.id).eq('partyId', party.id);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true });
+  });
+
+  router.delete('/recurring-repasses/:id', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'not_found' });
+    await supabase.from('party_recurring_repasses').delete().eq('id', req.params.id).eq('partyId', party.id);
+    return res.json({ ok: true });
+  });
+
   // ── RELATÓRIO DE REPASSES (#144) — agregado do partido pra impressão ──
   router.get('/repasses-report', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
@@ -1028,13 +1092,19 @@ JSON:`;
               message = `⚠️ Vou EXCLUIR o repasse de ${cand.displayName}: ${brl(Number(rep.valor) || 0)}${rep.descricao ? ` (${rep.descricao})` : ''}. Não pode ser desfeito. Confirma?`;
             }
           } else {
-            // Vários → lista numerada pro presidente escolher (clicável no front)
-            options = list.map((r: any) => ({
+            // Vários → destaca o MAIS RECENTE como sugestão (#147) e mostra a lista.
+            // A lista já vem ordenada por data desc, então list[0] é o mais recente.
+            options = list.map((r: any, idx: number) => ({
               repasseId: r.id, candidateId: cand.id, candidateName: cand.displayName,
               valor: Number(r.valor) || 0, descricao: r.descricao || '', data: r.data,
+              suggested: idx === 0, // o mais recente
             }));
             pendingAction = isEdit ? { type: 'edit_repasse', valor: novoValor } : { type: 'delete_repasse' };
-            message = `${cand.displayName} tem ${list.length} repasses. Qual deles você quer ${isEdit ? `alterar para ${brl(novoValor)}` : 'excluir'}?`;
+            const recente = list[0];
+            const recenteData = recente.data ? new Date(recente.data).toLocaleDateString('pt-BR') : 'sem data';
+            message = `${cand.displayName} tem ${list.length} repasses. O mais recente é ${brl(Number(recente.valor) || 0)} de ${recenteData}`
+              + `${recente.descricao ? ` (${recente.descricao})` : ''} — é esse que você quer ${isEdit ? `alterar para ${brl(novoValor)}` : 'excluir'}? `
+              + 'Se for outro, toque na lista abaixo.';
           }
         }
       }

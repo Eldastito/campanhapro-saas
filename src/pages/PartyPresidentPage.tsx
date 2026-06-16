@@ -38,6 +38,26 @@ interface ProofData {
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
 const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
 interface Party { id: string; name: string; telaoToken?: string | null; plan?: string | null; }
+interface RecurringRepasse {
+  id: string; candidateId: string; candidateName?: string; valor: number;
+  descricao?: string | null; frequencia: 'mensal' | 'quinzenal' | 'semanal';
+  proximaData: string; dataFim?: string | null; ativo: boolean;
+  pausadoPelaValvula?: boolean; totalLancado?: number; lastRunAt?: string | null;
+}
+
+// Cálculo da próxima ocorrência — espelha o motor do backend (recurringRepasses.ts)
+// pra exibir/agendar coerente sem ida ao servidor.
+const addDaysISO = (iso: string, days: number) => {
+  const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10);
+};
+const addMonthsISO = (iso: string, months: number) => {
+  const d = new Date(iso + 'T00:00:00Z'); const day = d.getUTCDate();
+  d.setUTCMonth(d.getUTCMonth() + months); if (d.getUTCDate() < day) d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+};
+const nextOccurrence = (iso: string, freq: string) =>
+  freq === 'semanal' ? addDaysISO(iso, 7) : freq === 'quinzenal' ? addDaysISO(iso, 14) : addMonthsISO(iso, 1);
+const FREQ_LABEL: Record<string, string> = { mensal: 'Mensal', quinzenal: 'Quinzenal (a cada 15 dias)', semanal: 'Semanal' };
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
@@ -126,6 +146,12 @@ const PartyPresidentPage: React.FC = () => {
   const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
   const [repItems, setRepItems] = React.useState<{ categoria: string; valor: string }[]>([]);
   const [savingRep, setSavingRep] = React.useState(false);
+  // Repasse recorrente (#147): flag "repetir até a eleição" + frequência.
+  const [repRecurring, setRepRecurring] = React.useState(false);
+  const [repFreq, setRepFreq] = React.useState<'mensal' | 'quinzenal' | 'semanal'>('mensal');
+  const [repUntil, setRepUntil] = React.useState('');
+  const [recurring, setRecurring] = React.useState<RecurringRepasse[]>([]);
+  const [recBusy, setRecBusy] = React.useState<string | null>(null);
   const [proofFor, setProofFor] = React.useState<Candidate | null>(null);
   const [proofData, setProofData] = React.useState<ProofData | null>(null);
   const [proofLoading, setProofLoading] = React.useState(false);
@@ -188,7 +214,16 @@ const PartyPresidentPage: React.FC = () => {
     setRepasseFor(c);
     setRepForm({ valor: '', data: '', descricao: '' });
     setRepItems(DEFAULT_CATS.map((categoria) => ({ categoria, valor: '' })));
+    setRepRecurring(false); setRepFreq('mensal'); setRepUntil('');
   };
+
+  const loadRecurring = React.useCallback(async () => {
+    try {
+      const r = await authedFetch('/api/v1/party/recurring-repasses');
+      const j = await r.json();
+      if (r.ok) setRecurring(j.recurring || []);
+    } catch { /* */ }
+  }, []);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -196,9 +231,10 @@ const PartyPresidentPage: React.FC = () => {
       const r = await authedFetch('/api/v1/party/me');
       const j = await r.json();
       if (r.ok) { setParty(j.party); setCandidates(j.candidates || []); }
+      await loadRecurring();
     } catch { /* */ }
     finally { setLoading(false); }
-  }, []);
+  }, [loadRecurring]);
   React.useEffect(() => { load(); }, [load]);
 
   const provision = async () => {
@@ -257,8 +293,41 @@ const PartyPresidentPage: React.FC = () => {
       const r = await authedFetch(`/api/v1/party/candidates/${repasseFor.id}/repasses`, {
         method: 'POST', body: JSON.stringify({ valor: v, data: repForm.data, descricao: repForm.descricao, itens }),
       });
-      if (r.ok) { setRepasseFor(null); await load(); }
+      if (r.ok) {
+        // Flag "repetir até a eleição": cria o modelo recorrente. O repasse de
+        // HOJE já foi lançado acima — o recorrente agenda a PRÓXIMA ocorrência
+        // (data base avançada uma vez) pra não duplicar neste período.
+        if (repRecurring) {
+          const base = /^\d{4}-\d{2}-\d{2}$/.test(repForm.data) ? repForm.data : new Date().toISOString().slice(0, 10);
+          await authedFetch(`/api/v1/party/candidates/${repasseFor.id}/recurring-repasses`, {
+            method: 'POST',
+            body: JSON.stringify({
+              valor: v, descricao: repForm.descricao, frequencia: repFreq,
+              proximaData: nextOccurrence(base, repFreq),
+              dataFim: repUntil || undefined,
+            }),
+          });
+        }
+        setRepasseFor(null); await load();
+      }
     } finally { setSavingRep(false); }
+  };
+
+  // Pausar/reativar/cancelar recorrente (#147).
+  const toggleRecurring = async (rec: RecurringRepasse) => {
+    setRecBusy(rec.id);
+    try {
+      const r = await authedFetch(`/api/v1/party/recurring-repasses/${rec.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: !rec.ativo }) });
+      if (r.ok) await loadRecurring();
+    } finally { setRecBusy(null); }
+  };
+  const cancelRecurring = async (rec: RecurringRepasse) => {
+    if (!window.confirm(`Cancelar o repasse automático de ${brl(rec.valor)} para ${rec.candidateName || 'este candidato'}? Os repasses já lançados continuam no histórico.`)) return;
+    setRecBusy(rec.id);
+    try {
+      const r = await authedFetch(`/api/v1/party/recurring-repasses/${rec.id}`, { method: 'DELETE' });
+      if (r.ok) await loadRecurring();
+    } finally { setRecBusy(null); }
   };
 
   const totalRepassado = candidates.reduce((s, c) => s + (Number(c.valorRecebido) || 0), 0);
@@ -491,6 +560,42 @@ const PartyPresidentPage: React.FC = () => {
               Total repassado: <b className="text-white">{brl(totalRepassado)}</b>
               {' · '}A justificar: <b className="text-rose-400">{brl(candidates.reduce((s, c) => s + Math.max(0, (Number(c.valorRecebido) || 0) - (Number(c.valorAlocado) || 0)), 0))}</b>
             </p>
+
+            {/* Repasses automáticos (#147) — modelos recorrentes ativos/pausados */}
+            {recurring.length > 0 && (
+              <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-3 mb-2">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 mb-2 flex items-center gap-1.5">🔁 Repasses automáticos ({recurring.filter((r) => r.ativo).length} ativos)</p>
+                <div className="space-y-1.5">
+                  {recurring.map((rec) => (
+                    <div key={rec.id} className="flex items-center justify-between gap-2 bg-[#1c2128] rounded-xl border border-white/5 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-white truncate flex items-center gap-1.5">
+                          {rec.candidateName || '—'}
+                          {!rec.ativo && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-600/40 text-slate-300">pausado</span>}
+                          {rec.ativo && rec.pausadoPelaValvula && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">⏸️ válvula</span>}
+                        </p>
+                        <p className="text-[11px] text-slate-400 truncate">
+                          {brl(rec.valor)} · {FREQ_LABEL[rec.frequencia] || rec.frequencia}
+                          {rec.ativo ? ` · próximo ${new Date(rec.proximaData + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
+                          {rec.dataFim ? ` · até ${new Date(rec.dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
+                          {rec.totalLancado ? ` · ${rec.totalLancado} lançado(s)` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => toggleRecurring(rec)} disabled={recBusy === rec.id}
+                          className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-50">
+                          {rec.ativo ? '⏸️ Pausar' : '▶️ Retomar'}
+                        </button>
+                        <button onClick={() => cancelRecurring(rec)} disabled={recBusy === rec.id} title="Cancelar"
+                          className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">Lançam sozinhos na data agendada. Se a válvula do candidato estiver segurada/cortada, pausam automaticamente e voltam quando você liberar.</p>
+              </div>
+            )}
+
             {[...candidates].sort((a, b) => (Number(b.valorRecebido) || 0) - (Number(a.valorRecebido) || 0)).map((c) => {
               const recebido = Number(c.valorRecebido) || 0;
               const restante = recebido - (Number(c.valorAlocado) || 0);
@@ -602,7 +707,7 @@ const PartyPresidentPage: React.FC = () => {
       )}
 
       {/* ORB Conversacional (#142) — assistente flutuante do partido */}
-      <PartyAIOrb />
+      <PartyAIOrb onRepasseDone={load} />
 
       {/* Modal: novo candidato */}
       {addOpen && (
@@ -717,8 +822,43 @@ const PartyPresidentPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Repasse recorrente (#147): repete sozinho até a eleição */}
+            <div className={`rounded-xl border p-3 mb-3 transition-colors ${repRecurring ? 'bg-indigo-500/10 border-indigo-500/40' : 'bg-slate-950 border-white/10'}`}>
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={repRecurring} onChange={(e) => setRepRecurring(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-indigo-500" />
+                <span>
+                  <span className="text-sm font-bold text-white flex items-center gap-1.5">🔁 Repetir este repasse automaticamente</span>
+                  <span className="block text-[11px] text-slate-400 mt-0.5">O mesmo valor é lançado sozinho na frequência escolhida — você não precisa refazer o formulário todo mês.</span>
+                </span>
+              </label>
+              {repRecurring && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Frequência</label>
+                    <select value={repFreq} onChange={(e) => setRepFreq(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white">
+                      <option value="mensal">Mensal</option>
+                      <option value="quinzenal">Quinzenal (15 dias)</option>
+                      <option value="semanal">Semanal</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Repetir até (opcional)</label>
+                    <input type="date" value={repUntil} onChange={(e) => setRepUntil(e.target.value)}
+                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" />
+                  </div>
+                  <p className="sm:col-span-2 text-[11px] text-indigo-300">
+                    Próximo lançamento automático: <b>{new Date(nextOccurrence(/^\d{4}-\d{2}-\d{2}$/.test(repForm.data) ? repForm.data : new Date().toISOString().slice(0, 10), repFreq) + 'T00:00:00').toLocaleDateString('pt-BR')}</b>
+                    {repUntil ? ` · até ${new Date(repUntil + 'T00:00:00').toLocaleDateString('pt-BR')}` : ' · até você cancelar'}.
+                    {' '}Se a válvula deste candidato estiver segurada/cortada, o repasse pausa sozinho.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <button onClick={saveRepasse} disabled={savingRep || !(total > 0)} className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
-              {savingRep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />} Registrar repasse
+              {savingRep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />} {repRecurring ? 'Registrar + agendar repasse' : 'Registrar repasse'}
             </button>
           </div>
         </div>
