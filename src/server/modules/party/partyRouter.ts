@@ -181,6 +181,23 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     return res.json({ party: data, created: true });
   });
 
+  // Edita nome e número eleitoral do partido (só o presidente dono).
+  router.patch('/profile', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+    const { name, numero } = req.body || {};
+    const patch: any = { updatedAt: new Date().toISOString() };
+    if (typeof name === 'string' && name.trim()) patch.name = name.trim().slice(0, 120);
+    if (numero !== undefined) patch.numero = String(numero ?? '').replace(/\D/g, '').slice(0, 5) || null;
+    const { data, error } = await supabase.from('parties')
+      .update(patch).eq('id', party.id).eq('presidentId', userId).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    const { billingNote, ...safe } = data as any;
+    return res.json({ party: safe });
+  });
+
   // Adiciona um candidato (pending) ao partido + gera token de convite.
   router.post('/candidates', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;

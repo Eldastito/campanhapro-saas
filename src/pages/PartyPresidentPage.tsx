@@ -40,7 +40,7 @@ const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder
 // 27 UFs do Brasil (preparação nacional #147b). Seletor evita "rj"/"Rio de Janeiro" misturados.
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
-interface Party { id: string; name: string; telaoToken?: string | null; plan?: string | null; }
+interface Party { id: string; name: string; numero?: string | null; telaoToken?: string | null; plan?: string | null; }
 interface RecurringRepasse {
   id: string; candidateId: string; candidateName?: string; valor: number;
   descricao?: string | null; frequencia: 'mensal' | 'quinzenal' | 'semanal';
@@ -138,6 +138,10 @@ const PartyPresidentPage: React.FC = () => {
   });
   const [provName, setProvName] = React.useState('');
   const [provBusy, setProvBusy] = React.useState(false);
+  // Editar nome + número do partido (cabeçalho).
+  const [partyEditOpen, setPartyEditOpen] = React.useState(false);
+  const [partyForm, setPartyForm] = React.useState({ name: '', numero: '' });
+  const [partySaving, setPartySaving] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
   const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' });
   const [adding, setAdding] = React.useState(false);
@@ -236,15 +240,17 @@ const PartyPresidentPage: React.FC = () => {
     } catch { /* */ }
   }, []);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
+  // silent=true: atualiza os dados SEM trocar a página inteira pelo spinner
+  // (evita o "flash/loop" e não desmonta o ORB/modais durante refresh pós-ação).
+  const load = React.useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const r = await authedFetch('/api/v1/party/me');
       const j = await r.json();
       if (r.ok) { setParty(j.party); setCandidates(j.candidates || []); }
       await loadRecurring();
     } catch { /* */ }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   }, [loadRecurring]);
   React.useEffect(() => { load(); }, [load]);
 
@@ -255,6 +261,16 @@ const PartyPresidentPage: React.FC = () => {
       const r = await authedFetch('/api/v1/party/provision', { method: 'POST', body: JSON.stringify({ name: provName.trim() }) });
       if (r.ok) await load();
     } finally { setProvBusy(false); }
+  };
+
+  const openPartyEdit = () => { setPartyForm({ name: party?.name || '', numero: party?.numero || '' }); setPartyEditOpen(true); };
+  const savePartyProfile = async () => {
+    if (!partyForm.name.trim()) return;
+    setPartySaving(true);
+    try {
+      const r = await authedFetch('/api/v1/party/profile', { method: 'PATCH', body: JSON.stringify({ name: partyForm.name.trim(), numero: partyForm.numero }) });
+      if (r.ok) { setPartyEditOpen(false); await load(true); }
+    } finally { setPartySaving(false); }
   };
 
   const addCandidate = async () => {
@@ -283,7 +299,7 @@ const PartyPresidentPage: React.FC = () => {
     try {
       const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
       const j = await r.json().catch(() => ({}));
-      if (r.ok) { setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(); }
+      if (r.ok) { setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(true); }
     } finally { setImporting(false); }
   };
 
@@ -310,7 +326,7 @@ const PartyPresidentPage: React.FC = () => {
       const rows = aiPreview.filter((c) => c.displayName.trim());
       const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
       const j = await r.json().catch(() => ({}));
-      if (r.ok) { setAiPreview(null); setAiIgnored([]); setImportText(''); setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(); }
+      if (r.ok) { setAiPreview(null); setAiIgnored([]); setImportText(''); setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(true); }
     } finally { setImporting(false); }
   };
   // edição inline da prévia da IA (#147e)
@@ -428,7 +444,10 @@ const PartyPresidentPage: React.FC = () => {
               <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Plano Partido</span>
             )}
           </h1>
-          <p className="text-gray-400 text-sm truncate">{party.name} · {user?.name}</p>
+          <p className="text-gray-400 text-sm truncate flex items-center gap-1.5">
+            <span className="truncate">{party.name}{party.numero ? ` · nº ${party.numero}` : ''} · {user?.name}</span>
+            <button onClick={openPartyEdit} title="Editar nome e número do partido" className="text-slate-500 hover:text-white shrink-0"><Pencil className="w-3.5 h-3.5" /></button>
+          </p>
         </div>
         <div className="flex gap-2 w-full md:w-auto">
           <button onClick={() => setImportOpen(true)} className="flex-1 md:flex-none justify-center bg-white/5 hover:bg-white/10 px-3 sm:px-4 py-2 rounded-xl text-slate-200 font-bold flex items-center gap-2 text-sm"><Upload className="w-4 h-4" /> Importar</button>
@@ -777,7 +796,29 @@ const PartyPresidentPage: React.FC = () => {
       )}
 
       {/* ORB Conversacional (#142) — assistente flutuante do partido */}
-      <PartyAIOrb onRepasseDone={load} />
+      <PartyAIOrb onRepasseDone={() => load(true)} />
+
+      {/* Modal: editar nome + número do partido */}
+      {partyEditOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !partySaving && setPartyEditOpen(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-bold text-white">Editar partido</h4>
+              <button onClick={() => setPartyEditOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <label className="block text-[11px] text-slate-400 mb-1">Nome do partido</label>
+            <input value={partyForm.name} onChange={(e) => setPartyForm({ ...partyForm, name: e.target.value })} placeholder="Nome do partido"
+              className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white mb-3" />
+            <label className="block text-[11px] text-slate-400 mb-1">Número eleitoral (opcional)</label>
+            <input value={partyForm.numero} onChange={(e) => setPartyForm({ ...partyForm, numero: e.target.value.replace(/\D/g, '').slice(0, 5) })}
+              placeholder="Ex: 13" inputMode="numeric"
+              className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white mb-4" />
+            <button onClick={savePartyProfile} disabled={partySaving || !partyForm.name.trim()} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+              {partySaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Modal: novo candidato */}
       {addOpen && (

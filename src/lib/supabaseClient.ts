@@ -32,3 +32,21 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 // Backwards-compatible alias for code that imported `rawSupabase`.
 export { supabase as rawSupabase };
+
+/**
+ * Cliente EFÊMERO só pra validar senha (reautenticação) sem mexer na sessão
+ * ativa nem disparar o onAuthStateChange global. Sem isso, um signInWithPassword
+ * no cliente principal re-loga o app inteiro e gera loop de re-inicialização.
+ * persistSession:false → não grava token; o resultado (ok/erro) é descartado.
+ */
+export function createReauthClient() {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: 'cp-reauth-ephemeral',
+      lock: <R>(_n: string, _t: number, fn: () => Promise<R>): Promise<R> => fn(),
+    },
+  });
+}

@@ -13,7 +13,7 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldAlert, AlertTriangle, Loader2, Lock, X, ShieldCheck } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
-import { supabase } from '../../lib/supabaseClient';
+import { createReauthClient } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 
 const CONFIRM_PHRASE = 'APAGAR TUDO';
@@ -52,10 +52,14 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
     setError(null);
     setBusy(true);
     try {
-      // 1. Reautenticação da senha NO CLIENTE (senha não vai pro nosso backend)
+      // 1. Reautenticação da senha NO CLIENTE (senha não vai pro nosso backend).
+      //    Usa cliente EFÊMERO: valida a senha sem tocar na sessão ativa nem
+      //    disparar o onAuthStateChange global — senão re-logava o app e loopava.
       const email = user?.email;
       if (!email) { setError('Sessão sem e-mail. Faça login de novo.'); setBusy(false); return; }
-      const { error: authErr } = await supabase.auth.signInWithPassword({ email, password });
+      const reauth = createReauthClient();
+      const { error: authErr } = await reauth.auth.signInWithPassword({ email, password });
+      try { await reauth.auth.signOut(); } catch { /* efêmero, ignora */ }
       if (authErr) {
         setError('Senha incorreta. Tente novamente.');
         setBusy(false);
