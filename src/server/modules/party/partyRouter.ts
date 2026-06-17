@@ -31,6 +31,23 @@ const normalizeUF = (v: any): string | null => {
 const normName = (v: any): string => String(v ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 const normPhone = (v: any): string => String(v ?? '').replace(/\D/g, '');
 
+// Cargos eletivos (lista fixa). normalizeCargo mapeia variações (inclusive
+// femininas) pro valor canônico da lista; vazio se não reconhecer.
+const CARGOS = ['Presidente', 'Senador', 'Deputado Federal', 'Deputado Estadual', 'Prefeito', 'Vereador'];
+const normalizeCargo = (v: any): string => {
+  const s = normName(v);
+  if (!s) return '';
+  const direct = CARGOS.find((c) => normName(c) === s);
+  if (direct) return direct;
+  if (s.includes('vereador') || s.includes('vereadora')) return 'Vereador';
+  if (s.includes('prefeit')) return 'Prefeito';
+  if (s.includes('senador')) return 'Senador';
+  if (s.includes('deputad') && s.includes('federal')) return 'Deputado Federal';
+  if (s.includes('deputad') && s.includes('estadual')) return 'Deputado Estadual';
+  if (s.includes('presidente')) return 'Presidente';
+  return ''; // não reconhecido → tratado como faltando
+};
+
 // Broadcast (pub/sub) p/ o telão público atualizar no INSTANTE do evento, sem
 // expor tabela nenhuma a RLS. Envia só um "ping" vazio; o telão re-busca os dados
 // pelo endpoint seguro. Fire-and-forget (nunca bloqueia a resposta).
@@ -1193,6 +1210,7 @@ REGRAS:
 - "editar_repasse": ALTERAR/EDITAR/MUDAR/CORRIGIR o valor de um repasse de um candidato. Extraia candidateName e o NOVO valor (campo "valor"). descricao opcional.
 - "excluir_repasse": APAGAR/EXCLUIR/REMOVER/CANCELAR um repasse de um candidato. Extraia candidateName. valor/descricao = null.
 - "criar_candidato": CRIAR/CADASTRAR/ADICIONAR um novo CANDIDATO/pessoa (ex: "cadastra a candidata Ana Maria Braga, vereadora, Niterói RJ"). Extraia candidateName (obrigatório) e, se citados, cargo, regiao (cidade), estado (UF), phone. Se não vier nome, use "consulta" e peça o nome.
+  O campo "cargo" DEVE ser exatamente um destes: "Presidente", "Senador", "Deputado Federal", "Deputado Estadual", "Prefeito", "Vereador". Mapeie variações pro valor da lista (ex: "vereadora"→"Vereador", "prefeita"→"Prefeito", "deputada estadual"→"Deputado Estadual"). Se o cargo citado não for nenhum desses, deixe cargo vazio.
 - "excluir_candidato": EXCLUIR/APAGAR/REMOVER um CANDIDATO inteiro (a pessoa, não um repasse). Extraia candidateName.
 - "gerar_relatorio": GERAR/IMPRIMIR/BAIXAR RELATÓRIO de repasses. message = "Gerei o relatório, abrindo aqui." draft = null.
 - "acao_nao_suportada": qualquer outra escrita (mexer em metas, comitê, válvula, etc). message explica que ainda não executa e oriente usar os botões. NUNCA finja que fez.
@@ -1272,7 +1290,7 @@ JSON:`;
         if (!nome) {
           message = 'Qual o nome do candidato que você quer cadastrar?';
         } else {
-          const cargo = String(parsed.draft?.cargo || '').trim().slice(0, 80);
+          const cargo = normalizeCargo(parsed.draft?.cargo);
           const regiao = String(parsed.draft?.regiao || parsed.draft?.cidade || '').trim().slice(0, 80);
           const estado = normalizeUF(parsed.draft?.estado || parsed.draft?.uf) || '';
           const phone = String(parsed.draft?.phone || parsed.draft?.telefone || '').replace(/\D/g, '').slice(0, 20);
@@ -1280,7 +1298,15 @@ JSON:`;
           const dupe = (allCands || []).some((c: any) => normName(c.displayName) === normName(nome));
           draft = { type: 'create_candidate', candidateName: nome, cargo, regiao, estado, phone };
           const loc = [regiao, estado].filter(Boolean).join('/');
-          message = `${dupe ? `⚠️ Já existe um candidato chamado "${nome}". ` : ''}Vou cadastrar ${nome}${cargo ? `, ${cargo}` : ''}${loc ? ` (${loc})` : ''}. Confirma?`;
+          // Informa o que falta (igual aos campos do formulário) mas deixa confirmar.
+          const faltando: string[] = [];
+          if (!cargo) faltando.push('cargo');
+          if (!regiao) faltando.push('cidade');
+          if (!estado) faltando.push('estado (UF)');
+          if (!phone) faltando.push('telefone');
+          message = `${dupe ? `⚠️ Já existe um candidato chamado "${nome}". ` : ''}Vou cadastrar ${nome}${cargo ? `, ${cargo}` : ''}${loc ? ` (${loc})` : ''}.`
+            + (faltando.length ? ` Faltou: ${faltando.join(', ')} — me passe esses dados (ex: "${nome}, vereador, Niterói RJ, 21999990000") ou toque em Confirmar pra cadastrar assim mesmo.` : '')
+            + ` Confirma?`;
         }
       }
 

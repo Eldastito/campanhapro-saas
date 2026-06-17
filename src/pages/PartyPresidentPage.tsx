@@ -39,6 +39,8 @@ interface ProofData {
 const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
 // 27 UFs do Brasil (preparação nacional #147b). Seletor evita "rj"/"Rio de Janeiro" misturados.
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+// Cargos eletivos (lista fixa pra escolher no formulário e pra IA mapear).
+const CARGOS = ['Presidente', 'Senador', 'Deputado Federal', 'Deputado Estadual', 'Prefeito', 'Vereador'];
 const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
 interface Party { id: string; name: string; numero?: string | null; telaoToken?: string | null; plan?: string | null; }
 interface RecurringRepasse {
@@ -852,7 +854,10 @@ const PartyPresidentPage: React.FC = () => {
             <div className="space-y-2">
               <input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               <div className="grid grid-cols-2 gap-2">
-                <input value={form.cargo} onChange={(e) => setForm({ ...form, cargo: e.target.value })} placeholder="Cargo" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <select value={form.cargo} onChange={(e) => setForm({ ...form, cargo: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white">
+                  <option value="">Cargo</option>
+                  {CARGOS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
                 <input value={form.regiao} onChange={(e) => setForm({ ...form, regiao: e.target.value })} placeholder="Cidade" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
               <div className="grid grid-cols-[5.5rem_1fr] gap-2">
@@ -881,7 +886,11 @@ const PartyPresidentPage: React.FC = () => {
             <div className="space-y-2">
               <input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               <div className="grid grid-cols-2 gap-2">
-                <input value={editForm.cargo} onChange={(e) => setEditForm({ ...editForm, cargo: e.target.value })} placeholder="Cargo" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <select value={editForm.cargo} onChange={(e) => setEditForm({ ...editForm, cargo: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white">
+                  <option value="">Cargo</option>
+                  {CARGOS.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {editForm.cargo && !CARGOS.includes(editForm.cargo) && <option value={editForm.cargo}>{editForm.cargo}</option>}
+                </select>
                 <input value={editForm.regiao} onChange={(e) => setEditForm({ ...editForm, regiao: e.target.value })} placeholder="Cidade" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
               <div className="grid grid-cols-[5.5rem_1fr] gap-2">
