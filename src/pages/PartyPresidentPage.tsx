@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
 import PartyEmergencyWipe from '../components/party/PartyEmergencyWipe';
 import PartyBackup from '../components/party/PartyBackup';
+import PartyRestore from '../components/party/PartyRestore';
 import PartyAIOrb from '../components/party/PartyAIOrb';
 
 /**
@@ -810,6 +811,7 @@ const PartyPresidentPage: React.FC = () => {
       {tab === 'Segurança' && (
         <>
           <PartyBackup />
+          <PartyRestore onRestored={() => load(true)} />
           <PartyEmergencyWipe
             partyName={party.name}
             hasData={candidates.length > 0 || totalRepassado > 0}

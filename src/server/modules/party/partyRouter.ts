@@ -1114,6 +1114,71 @@ Saída JSON estrito (sem markdown):
     return res.json(payload);
   });
 
+  // ── RESTAURAR BACKUP (#147f) ───────────────────────────────────────────
+  // Recebe o JSON gerado pelo /backup e repõe os dados no partido do presidente.
+  // Aditivo e idempotente: usa upsert ON CONFLICT(id) DO NOTHING — restaurar de
+  // novo não duplica. Candidatos voltam como 'pending' (sem vínculo de conta) com
+  // novo token de convite, pra re-cadastro limpo. Tudo escopado ao partido atual.
+  router.post('/restore', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+
+    const body = req.body || {};
+    if (body.schema !== 'campanhapro.party-backup') {
+      return res.status(400).json({ error: 'arquivo_invalido', message: 'Este arquivo não é um backup de partido do CampanhaPro.' });
+    }
+    const d = body.data || {};
+    const cap = (a: any) => (Array.isArray(a) ? a.slice(0, 5000) : []);
+    const restored = { candidatos: 0, repasses: 0, recorrentes: 0, comites: 0, checkins: 0, valvula: 0 };
+
+    try {
+      // Candidatos — remapeia pro partido atual, restaura como pendente (sem conta).
+      const candidatos = cap(d.candidatos).map((c: any) => ({
+        ...c, partyId: party.id, status: 'pending', userId: null, campaignId: null,
+        inviteToken: newToken(), updatedAt: new Date().toISOString(),
+      }));
+      if (candidatos.length) {
+        const { data } = await supabase.from('party_candidates').upsert(candidatos, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+        restored.candidatos = (data || []).length;
+      }
+      const repasses = cap(d.repasses).map((r: any) => ({ ...r, partyId: party.id }));
+      if (repasses.length) {
+        const { data } = await supabase.from('party_repasses').upsert(repasses, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+        restored.repasses = (data || []).length;
+      }
+      const recorrentes = cap(d.repassesRecorrentes).map((r: any) => ({ ...r, partyId: party.id }));
+      if (recorrentes.length) {
+        const { data } = await supabase.from('party_recurring_repasses').upsert(recorrentes, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+        restored.recorrentes = (data || []).length;
+      }
+      const comites = cap(d.comites);
+      if (comites.length) {
+        const { data } = await supabase.from('party_committees').upsert(comites, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+        restored.comites = (data || []).length;
+      }
+      const checkins = cap(d.checkins);
+      if (checkins.length) {
+        const { data } = await supabase.from('party_checkins').upsert(checkins, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+        restored.checkins = (data || []).length;
+      }
+      const valvula = cap(d.valvulaLog);
+      if (valvula.length) {
+        const { data } = await supabase.from('party_valve_log').upsert(valvula, { onConflict: 'id', ignoreDuplicates: true }).select('id');
+        restored.valvula = (data || []).length;
+      }
+      return res.json({ ok: true, restored });
+    } catch (err: any) {
+      console.error('[party] restore:', err);
+      return res.status(500).json({ error: 'restore_failed', message: err?.message || 'Falha ao restaurar.' });
+    }
+  });
+
   // ── ORB CONVERSACIONAL (#142) — IA consultiva (só LEITURA nesta fase) ──
   //
   // Segurança: a IA NUNCA toca o banco direto. O backend monta um snapshot
