@@ -25,6 +25,8 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const [user, setUser] = React.useState<AuthenticatedUser | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [isInitializing, setIsInitializing] = React.useState<boolean>(true);
+  // Último uid já hidratado — evita re-buscar/re-renderizar em TOKEN_REFRESHED/foco.
+  const loadedUidRef = React.useRef<string | null>(null);
 
   const fetchOrCreateUser = React.useCallback(async (session: any) => {
     let { data: userData, error: userError } = await supabase
@@ -95,20 +97,30 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
     // mesmo se onAuthStateChange falhar silenciosamente.
     const safetyTimeout = setTimeout(() => setIsInitializing(false), 2000);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
+    // IMPORTANTE: o callback do onAuthStateChange NÃO pode ser async nem dar
+    // `await` em chamadas Supabase aqui dentro — o GoTrue segura um lock durante
+    // o callback e a chamada ao banco fica esperando o mesmo lock → DEADLOCK
+    // (trava o cliente; toda requisição via getSession congela; só F5 destrava).
+    // Solução: callback síncrono + diferir a busca do usuário com setTimeout(0).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       clearTimeout(safetyTimeout);
-      try {
-        if (session?.user) {
+      const uid = session?.user?.id || null;
+
+      if (!uid || !session) { loadedUidRef.current = null; setUser(null); setIsInitializing(false); return; }
+      // Mesmo usuário já carregado (TOKEN_REFRESHED, foco na aba, INITIAL_SESSION
+      // repetido) → não re-busca nem re-renderiza (evitava limpar formulários).
+      if (uid === loadedUidRef.current) { setIsInitializing(false); return; }
+
+      setTimeout(async () => {
+        try {
           const userData = await fetchOrCreateUser(session);
           if (userData) {
             const dbCampaignId = userData.campaignId;
             const dbIsSupremeAdmin = !!(userData.isSupremeAdmin);
             const dbAssignedLeaderId = userData.assignedLeaderId;
-
-            // isSupremeAdmin ONLY routes to SupremeAdminPage — keep it exclusive to eldastito
             const isSupremeAdmin = session.user.email === SUPREME_ADMIN_EMAIL || dbIsSupremeAdmin;
-            // VIP emails get Admin/Total plan but stay in CampaignWebApp (NOT SupremeAdminPage)
             const isVip = VIP_EMAILS.includes(session.user.email || '');
+            loadedUidRef.current = uid;
             setUser({
               ...userData,
               uid: session.user.id,
@@ -119,14 +131,12 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
               assignedLeaderId: dbAssignedLeaderId,
             } as AuthenticatedUser);
           }
-        } else {
-          setUser(null);
+        } catch (err) {
+          console.error("Erro na inicialização do Auth:", err);
+        } finally {
+          setIsInitializing(false);
         }
-      } catch (err) {
-        console.error("Erro na inicialização do Auth:", err);
-      } finally {
-        setIsInitializing(false);
-      }
+      }, 0);
     });
 
     const handleMessage = async (event: MessageEvent) => {
