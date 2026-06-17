@@ -1182,9 +1182,9 @@ Saída JSON estrito (sem markdown):
 
 Responda SEMPRE em JSON válido (nada fora do JSON):
 {
-  "intent": "consulta" | "lancar_repasse" | "editar_repasse" | "excluir_repasse" | "gerar_relatorio" | "acao_nao_suportada",
+  "intent": "consulta" | "lancar_repasse" | "editar_repasse" | "excluir_repasse" | "criar_candidato" | "excluir_candidato" | "gerar_relatorio" | "acao_nao_suportada",
   "message": "texto curto pro presidente",
-  "draft": null OU { "candidateName": "nome citado", "valor": numero_em_reais, "descricao": "finalidade" }
+  "draft": null OU { "candidateName": "nome citado", "valor": numero_em_reais, "descricao": "finalidade", "cargo": "cargo se citado", "regiao": "cidade se citada", "estado": "UF se citada", "phone": "telefone se citado" }
 }
 
 REGRAS:
@@ -1192,8 +1192,11 @@ REGRAS:
 - "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR um valor a um candidato. Extraia candidateName, valor, descricao. Se faltar valor ou candidato, use "consulta" e peça o que falta.
 - "editar_repasse": ALTERAR/EDITAR/MUDAR/CORRIGIR o valor de um repasse de um candidato. Extraia candidateName e o NOVO valor (campo "valor"). descricao opcional.
 - "excluir_repasse": APAGAR/EXCLUIR/REMOVER/CANCELAR um repasse de um candidato. Extraia candidateName. valor/descricao = null.
+- "criar_candidato": CRIAR/CADASTRAR/ADICIONAR um novo CANDIDATO/pessoa (ex: "cadastra a candidata Ana Maria Braga, vereadora, Niterói RJ"). Extraia candidateName (obrigatório) e, se citados, cargo, regiao (cidade), estado (UF), phone. Se não vier nome, use "consulta" e peça o nome.
+- "excluir_candidato": EXCLUIR/APAGAR/REMOVER um CANDIDATO inteiro (a pessoa, não um repasse). Extraia candidateName.
 - "gerar_relatorio": GERAR/IMPRIMIR/BAIXAR RELATÓRIO de repasses. message = "Gerei o relatório, abrindo aqui." draft = null.
-- "acao_nao_suportada": qualquer outra escrita (editar candidato, apagar candidato, mexer em metas, etc). message explica que ainda não executa e oriente usar os botões. NUNCA finja que fez.
+- "acao_nao_suportada": qualquer outra escrita (mexer em metas, comitê, válvula, etc). message explica que ainda não executa e oriente usar os botões. NUNCA finja que fez.
+- DISTINÇÃO IMPORTANTE: "repasse" = dinheiro/valor pra um candidato; "candidato" = a pessoa. "criar usuário/candidato/pessoa" = criar_candidato (NÃO é repasse).
 - "valor" sempre número (ex: "8 mil"=8000).
 - Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
 - Valores sempre em R$. Tom direto, chat.
@@ -1230,7 +1233,7 @@ JSON:`;
         return res.json({ intent: 'consulta', draft: null, message: msg || 'Não consegui formatar a resposta. Pode reformular a pergunta?' });
       }
 
-      const intent = ['consulta', 'lancar_repasse', 'editar_repasse', 'excluir_repasse', 'gerar_relatorio', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
+      const intent = ['consulta', 'lancar_repasse', 'editar_repasse', 'excluir_repasse', 'criar_candidato', 'excluir_candidato', 'gerar_relatorio', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
       let message = String(parsed.message || '').slice(0, 2000);
       let draft: any = null;
 
@@ -1260,6 +1263,40 @@ JSON:`;
             valor, descricao, data: hojeIso,
           };
           message = `Vou lançar um repasse de ${brl(valor)} para ${cand.displayName}${descricao ? ` (${descricao})` : ''}. Confirma?`;
+        }
+      }
+
+      // CRIAR candidato (a pessoa). Confirma antes de gravar (regra de ouro).
+      if (intent === 'criar_candidato') {
+        const nome = String(parsed.draft?.candidateName || '').trim().slice(0, 160);
+        if (!nome) {
+          message = 'Qual o nome do candidato que você quer cadastrar?';
+        } else {
+          const cargo = String(parsed.draft?.cargo || '').trim().slice(0, 80);
+          const regiao = String(parsed.draft?.regiao || parsed.draft?.cidade || '').trim().slice(0, 80);
+          const estado = normalizeUF(parsed.draft?.estado || parsed.draft?.uf) || '';
+          const phone = String(parsed.draft?.phone || parsed.draft?.telefone || '').replace(/\D/g, '').slice(0, 20);
+          const { data: allCands } = await supabase.from('party_candidates').select('displayName').eq('partyId', party.id);
+          const dupe = (allCands || []).some((c: any) => normName(c.displayName) === normName(nome));
+          draft = { type: 'create_candidate', candidateName: nome, cargo, regiao, estado, phone };
+          const loc = [regiao, estado].filter(Boolean).join('/');
+          message = `${dupe ? `⚠️ Já existe um candidato chamado "${nome}". ` : ''}Vou cadastrar ${nome}${cargo ? `, ${cargo}` : ''}${loc ? ` (${loc})` : ''}. Confirma?`;
+        }
+      }
+
+      // EXCLUIR candidato inteiro (a pessoa + todos os dados). Resolve por nome.
+      if (intent === 'excluir_candidato') {
+        const wantName = String(parsed.draft?.candidateName || '').trim().toLowerCase();
+        const { data: allCands } = await supabase.from('party_candidates').select('id, displayName').eq('partyId', party.id);
+        const matches = (allCands || []).filter((c: any) =>
+          c.displayName.toLowerCase().includes(wantName) || (wantName && wantName.includes(c.displayName.toLowerCase())));
+        if (!wantName) message = 'Qual candidato você quer excluir? Me diga o nome.';
+        else if (matches.length === 0) message = `Não encontrei candidato "${parsed.draft?.candidateName}".`;
+        else if (matches.length > 1) message = `Há mais de um parecido com "${parsed.draft?.candidateName}": ${matches.map((c: any) => c.displayName).join(', ')}. Qual deles?`;
+        else {
+          const cand = matches[0];
+          draft = { type: 'delete_candidate', candidateId: cand.id, candidateName: cand.displayName };
+          message = `⚠️ Vou EXCLUIR o candidato ${cand.displayName} e TODOS os dados dele (repasses, comitê, check-ins). Não pode ser desfeito. Confirma?`;
         }
       }
 

@@ -124,6 +124,7 @@ const ScoreChip: React.FC<{ s?: ScoreInfo; size?: 'sm' | 'md' }> = ({ s, size = 
 const PartyPresidentPage: React.FC = () => {
   const { user, logout } = useAuth();
   const [loading, setLoading] = React.useState(true);
+  const [authExpired, setAuthExpired] = React.useState(false);
   const [party, setParty] = React.useState<Party | null>(null);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [tab, setTab] = React.useState('Candidatos');
@@ -246,10 +247,13 @@ const PartyPresidentPage: React.FC = () => {
     if (!silent) setLoading(true);
     try {
       const r = await authedFetch('/api/v1/party/me');
+      // 401 = sessão expirada. NÃO é "sem partido" — não mostrar tela de criação
+      // (senão o presidente acha que perdeu o partido). Pede login de novo.
+      if (r.status === 401) { setAuthExpired(true); return; }
       const j = await r.json();
-      if (r.ok) { setParty(j.party); setCandidates(j.candidates || []); }
+      if (r.ok) { setAuthExpired(false); setParty(j.party); setCandidates(j.candidates || []); }
       await loadRecurring();
-    } catch { /* */ }
+    } catch { /* rede instável: mantém estado atual */ }
     finally { if (!silent) setLoading(false); }
   }, [loadRecurring]);
   React.useEffect(() => { load(); }, [load]);
@@ -412,6 +416,23 @@ const PartyPresidentPage: React.FC = () => {
 
   if (loading) {
     return <div className="min-h-screen bg-[#0a0a0b] flex items-center justify-center"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>;
+  }
+
+  // Sessão expirada (401): NÃO mostrar criação de partido — pedir login de novo.
+  if (authExpired) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0b] text-white flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-slate-900/60 border border-white/10 rounded-3xl p-8 text-center">
+          <LogOut className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+          <h1 className="text-2xl font-black">Sessão expirada</h1>
+          <p className="text-sm text-slate-400 mt-1 mb-5">Seu login expirou por inatividade. Entre de novo para voltar ao Centro de Comando — seus dados estão salvos.</p>
+          <button onClick={() => logout?.()}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-3 font-bold flex items-center justify-center gap-2">
+            <LogOut className="w-4 h-4" /> Fazer login novamente
+          </button>
+        </div>
+      </div>
+    );
   }
 
   // Sem partido provisionado → tela de criação.
