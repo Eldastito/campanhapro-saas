@@ -872,9 +872,13 @@ const PartyPresidentPage: React.FC = () => {
               <h4 className="font-bold text-white">Convidar pendentes ({pendentesConvite.length})</h4>
               <button onClick={() => setInviteOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-xs text-slate-400 mb-3">Toque no WhatsApp de cada um pra enviar o convite (abre a conversa já com a mensagem), ou copie todos os links de uma vez pra colar numa lista de transmissão.</p>
+            <p className="text-xs text-slate-400 mb-3">
+              <b>Jeito recomendado:</b> toque no botão de WhatsApp de cada candidato — abre a conversa dele já com a mensagem e o link prontos, é só enviar.
+              <br /><b>Atalho:</b> "Copiar lista" copia <i>Nome + link</i> de todos pra você <b>colar numa mensagem ou grupo</b>.
+              <span className="block mt-1 text-slate-500">Obs: a "lista de transmissão" do WhatsApp é montada escolhendo os contatos salvos no seu celular — não dá pra colar texto nela. Por isso o ideal é o botão de WhatsApp um a um.</span>
+            </p>
             <button onClick={copyAllInvites} className="w-full mb-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 text-sm">
-              {copiedAll ? <><Check className="w-4 h-4 text-emerald-300" /> Links copiados!</> : <><Link2 className="w-4 h-4" /> Copiar todos os {pendentesConvite.length} convites</>}
+              {copiedAll ? <><Check className="w-4 h-4 text-emerald-300" /> Lista copiada!</> : <><Link2 className="w-4 h-4" /> Copiar lista (nome + link) dos {pendentesConvite.length}</>}
             </button>
             <div className="flex-1 overflow-y-auto space-y-1.5">
               {pendentesConvite.map((c) => (

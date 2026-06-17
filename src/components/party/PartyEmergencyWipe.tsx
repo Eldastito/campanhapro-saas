@@ -59,7 +59,9 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
       if (!email) { setError('Sessão sem e-mail. Faça login de novo.'); setBusy(false); return; }
       const reauth = createReauthClient();
       const { error: authErr } = await reauth.auth.signInWithPassword({ email, password });
-      try { await reauth.auth.signOut(); } catch { /* efêmero, ignora */ }
+      // NÃO chamar signOut() aqui: o signOut padrão é GLOBAL e revoga TODAS as
+      // sessões do usuário no servidor — inclusive a principal → "token inválido"
+      // e sessão derrubada. O cliente efêmero não persiste, então não há o que limpar.
       if (authErr) {
         setError('Senha incorreta. Tente novamente.');
         setBusy(false);
