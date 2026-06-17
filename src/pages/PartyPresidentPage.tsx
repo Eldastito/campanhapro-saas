@@ -160,6 +160,8 @@ const PartyPresidentPage: React.FC = () => {
   const [aiError, setAiError] = React.useState<string | null>(null);
   const [importSummary, setImportSummary] = React.useState<{ created: number; duplicates: number; invalid: number } | null>(null);
   const [copied, setCopied] = React.useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = React.useState(false);
+  const [copiedAll, setCopiedAll] = React.useState(false);
   const [repasseFor, setRepasseFor] = React.useState<Candidate | null>(null);
   const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
   const [repItems, setRepItems] = React.useState<{ categoria: string; valor: string }[]>([]);
@@ -281,7 +283,7 @@ const PartyPresidentPage: React.FC = () => {
   };
 
   const addCandidate = async () => {
-    if (!form.displayName.trim() || !form.regiao.trim() || !form.estado) return;
+    if (!form.displayName.trim() || !form.regiao.trim() || !form.estado || form.phone.replace(/\D/g, '').length < 10) return;
     setAdding(true);
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
@@ -360,6 +362,15 @@ const PartyPresidentPage: React.FC = () => {
     const phone = (c.phone || '').replace(/\D/g, '');
     const wa = phone ? `https://wa.me/${phone.length <= 11 ? '55' + phone : phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
     window.open(wa, '_blank');
+  };
+
+  // Candidatos ainda não cadastrados (pendentes) que têm link de convite.
+  const pendentesConvite = candidates.filter((c) => c.status === 'pending' && c.inviteToken);
+  // Copia "Nome: link" de todos os pendentes pra colar numa lista de transmissão.
+  const copyAllInvites = () => {
+    if (!pendentesConvite.length) return;
+    const txt = pendentesConvite.map((c) => `${c.displayName}: ${inviteUrl(c.inviteToken!)}`).join('\n');
+    navigator.clipboard?.writeText(txt).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1800); }, () => {});
   };
 
   const saveRepasse = async () => {
@@ -546,6 +557,14 @@ const PartyPresidentPage: React.FC = () => {
                 ))}
               </div>
             </div>
+            {pendentesConvite.length > 0 && (
+              <div className="flex items-center justify-between gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-3 py-2 mb-1">
+                <p className="text-xs text-emerald-200"><b>{pendentesConvite.length}</b> candidato(s) ainda não concluíram o cadastro.</p>
+                <button onClick={() => setInviteOpen(true)} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shrink-0">
+                  <MessageCircle className="w-3.5 h-3.5" /> Convidar pendentes
+                </button>
+              </div>
+            )}
             <p className="text-xs text-slate-500 mb-1">{filtered.length} de {candidates.length} candidato(s)</p>
             {filtered.map((c) => (
               <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -845,6 +864,40 @@ const PartyPresidentPage: React.FC = () => {
         </div>
       )}
 
+      {/* Modal: convidar pendentes (WhatsApp 1 a 1 + copiar todos os links) */}
+      {inviteOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setInviteOpen(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5 max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="font-bold text-white">Convidar pendentes ({pendentesConvite.length})</h4>
+              <button onClick={() => setInviteOpen(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">Toque no WhatsApp de cada um pra enviar o convite (abre a conversa já com a mensagem), ou copie todos os links de uma vez pra colar numa lista de transmissão.</p>
+            <button onClick={copyAllInvites} className="w-full mb-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 text-sm">
+              {copiedAll ? <><Check className="w-4 h-4 text-emerald-300" /> Links copiados!</> : <><Link2 className="w-4 h-4" /> Copiar todos os {pendentesConvite.length} convites</>}
+            </button>
+            <div className="flex-1 overflow-y-auto space-y-1.5">
+              {pendentesConvite.map((c) => (
+                <div key={c.id} className="flex items-center justify-between gap-2 bg-[#1c2128] rounded-xl border border-white/5 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white truncate">{c.displayName}</p>
+                    <p className="text-[11px] text-slate-400 truncate">{[localOf(c), c.phone].filter(Boolean).join(' · ') || 'sem telefone'}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => sendWhatsApp(c)} title="Enviar convite no WhatsApp"
+                      className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 font-bold"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>
+                    <button onClick={() => copyLink(c.inviteToken)} title="Copiar link"
+                      className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">
+                      {copied === c.inviteToken ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Link2 className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal: novo candidato */}
       {addOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !adding && setAddOpen(false)}>
@@ -867,11 +920,11 @@ const PartyPresidentPage: React.FC = () => {
                   <option value="">UF *</option>
                   {UFS.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
                 </select>
-                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp) *" className={`bg-slate-950 border rounded-xl px-3 py-2 text-white ${form.phone.replace(/\D/g, '').length >= 10 ? 'border-white/10' : 'border-amber-500/40'}`} />
               </div>
-              <p className="text-[11px] text-slate-500">* Nome, cidade e UF são obrigatórios — posicionam o candidato no mapa do partido. Cargo e telefone são opcionais.</p>
+              <p className="text-[11px] text-slate-500">* Nome, cidade, UF e telefone são obrigatórios (mapa + convite por WhatsApp). Cargo é opcional.</p>
             </div>
-            <button onClick={addCandidate} disabled={adding || !form.displayName.trim() || !form.regiao.trim() || !form.estado} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+            <button onClick={addCandidate} disabled={adding || !form.displayName.trim() || !form.regiao.trim() || !form.estado || form.phone.replace(/\D/g, '').length < 10} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar
             </button>
           </div>

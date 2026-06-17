@@ -1381,23 +1381,21 @@ JSON:`;
           const regiao = String(parsed.draft?.regiao || parsed.draft?.cidade || '').trim().slice(0, 80);
           const estado = normalizeUF(parsed.draft?.estado || parsed.draft?.uf) || '';
           const phone = String(parsed.draft?.phone || parsed.draft?.telefone || '').replace(/\D/g, '').slice(0, 20);
-          // Cidade + UF são OBRIGATÓRIOS (posicionam o candidato no mapa/telão).
+          // Obrigatórios: cidade + UF (mapa/telão) + telefone (convite WhatsApp).
           // Sem eles, não monto o cadastro — ensino o formato certo com exemplo.
           const faltamObrig: string[] = [];
           if (!regiao) faltamObrig.push('cidade');
           if (!estado) faltamObrig.push('estado (UF)');
+          if (!phone || phone.length < 10) faltamObrig.push('telefone (WhatsApp)');
           if (faltamObrig.length) {
-            message = `Pra cadastrar ${nome} eu preciso de ${faltamObrig.join(' e ')} — é o que posiciona o candidato no mapa do partido. Me manda assim: "${nome}, vereador, Niterói RJ, 21999990000".`;
+            message = `Pra cadastrar ${nome} eu preciso de ${faltamObrig.join(', ')} — cidade/UF posicionam no mapa e o telefone é pra mandar o convite por WhatsApp. Me manda assim: "${nome}, vereador, Niterói RJ, 21999990000".`;
           } else {
             const { data: allCands } = await supabase.from('party_candidates').select('displayName').eq('partyId', party.id);
             const dupe = (allCands || []).some((c: any) => normName(c.displayName) === normName(nome));
             draft = { type: 'create_candidate', candidateName: nome, cargo, regiao, estado, phone };
             const loc = [regiao, estado].filter(Boolean).join('/');
-            const faltamOpc: string[] = [];
-            if (!cargo) faltamOpc.push('cargo');
-            if (!phone) faltamOpc.push('telefone');
-            message = `${dupe ? `⚠️ Já existe um candidato chamado "${nome}". ` : ''}Vou cadastrar ${nome}${cargo ? `, ${cargo}` : ''} (${loc}).`
-              + (faltamOpc.length ? ` Sem ${faltamOpc.join(' e ')} (opcional — dá pra adicionar depois).` : '')
+            message = `${dupe ? `⚠️ Já existe um candidato chamado "${nome}". ` : ''}Vou cadastrar ${nome}${cargo ? `, ${cargo}` : ''} (${loc}) · 📱 ${phone}.`
+              + (cargo ? '' : ' Sem cargo (opcional — dá pra adicionar depois).')
               + ` Confirma?`;
           }
         }
