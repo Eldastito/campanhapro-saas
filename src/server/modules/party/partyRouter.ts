@@ -1199,7 +1199,7 @@ Saída JSON estrito (sem markdown):
 
 Responda SEMPRE em JSON válido (nada fora do JSON):
 {
-  "intent": "consulta" | "lancar_repasse" | "editar_repasse" | "excluir_repasse" | "criar_candidato" | "excluir_candidato" | "gerar_relatorio" | "acao_nao_suportada",
+  "intent": "consulta" | "lancar_repasse" | "editar_repasse" | "excluir_repasse" | "criar_candidato" | "excluir_candidato" | "gerar_relatorio" | "ajuda" | "acao_nao_suportada",
   "message": "texto curto pro presidente",
   "draft": null OU { "candidateName": "nome citado", "valor": numero_em_reais, "descricao": "finalidade", "cargo": "cargo se citado", "regiao": "cidade se citada", "estado": "UF se citada", "phone": "telefone se citado" }
 }
@@ -1213,7 +1213,12 @@ REGRAS:
   O campo "cargo" DEVE ser exatamente um destes: "Presidente", "Senador", "Deputado Federal", "Deputado Estadual", "Prefeito", "Vereador". Mapeie variações pro valor da lista (ex: "vereadora"→"Vereador", "prefeita"→"Prefeito", "deputada estadual"→"Deputado Estadual"). Se o cargo citado não for nenhum desses, deixe cargo vazio.
 - "excluir_candidato": EXCLUIR/APAGAR/REMOVER um CANDIDATO inteiro (a pessoa, não um repasse). Extraia candidateName.
 - "gerar_relatorio": GERAR/IMPRIMIR/BAIXAR RELATÓRIO de repasses. message = "Gerei o relatório, abrindo aqui." draft = null.
+- "ajuda": o usuário pergunta COMO fazer algo, o que você faz, pede ajuda/instruções, ou está claramente perdido (ex: "como cadastro um candidato?", "o que você consegue fazer?", "me ajuda", "não sei como lançar repasse"). draft = null. (O texto de ajuda é montado pelo sistema.)
 - "acao_nao_suportada": qualquer outra escrita (mexer em metas, comitê, válvula, etc). message explica que ainda não executa e oriente usar os botões. NUNCA finja que fez.
+
+COACHING (seja uma GUIA, não só executora):
+- Sempre que faltar um dado, o comando estiver ambíguo, ou você não encontrar o candidato, NÃO responda seco — ENSINE com um EXEMPLO de comando pronto pro usuário copiar. Ex: 'Não achei "Maria". Pra lançar, tente: "lança 5 mil pra Maria Silva, material gráfico".'
+- Quando o usuário parecer não saber usar, ofereça o jeito certo de falar o comando.
 - DISTINÇÃO IMPORTANTE: "repasse" = dinheiro/valor pra um candidato; "candidato" = a pessoa. "criar usuário/candidato/pessoa" = criar_candidato (NÃO é repasse).
 - "valor" sempre número (ex: "8 mil"=8000).
 - Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
@@ -1251,9 +1256,26 @@ JSON:`;
         return res.json({ intent: 'consulta', draft: null, message: msg || 'Não consegui formatar a resposta. Pode reformular a pergunta?' });
       }
 
-      const intent = ['consulta', 'lancar_repasse', 'editar_repasse', 'excluir_repasse', 'criar_candidato', 'excluir_candidato', 'gerar_relatorio', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
+      const intent = ['consulta', 'lancar_repasse', 'editar_repasse', 'excluir_repasse', 'criar_candidato', 'excluir_candidato', 'gerar_relatorio', 'ajuda', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
       let message = String(parsed.message || '').slice(0, 2000);
       let draft: any = null;
+
+      // Ajuda: texto fixo (sempre preciso) ensinando os comandos com exemplos.
+      if (intent === 'ajuda') {
+        message = [
+          'Posso te ajudar com estas tarefas — é só falar naturalmente (por texto ou voz):',
+          '',
+          '📊 *Consultar*: "quanto já repassei?", "lista os candidatos pendentes em ordem alfabética", "quem recebeu mais?"',
+          '➕ *Cadastrar candidato*: "cadastra o João Silva, vereador, Niterói RJ, 21999990000" (preciso de nome, cidade e UF; cargo e telefone ajudam)',
+          '💰 *Lançar repasse*: "lança 5 mil pro João, material gráfico"',
+          '✏️ *Editar repasse*: "muda o repasse do João pra 8 mil"',
+          '🗑️ *Excluir repasse*: "exclui o último repasse do João"',
+          '👤 *Excluir candidato*: "exclui o candidato João Silva"',
+          '📄 *Relatório*: "gera o relatório de repasses"',
+          '',
+          'Antes de salvar qualquer coisa eu sempre mostro um resumo e peço sua confirmação.',
+        ].join('\n');
+      }
 
       // 3. Se for lançar repasse: resolve candidato + valida (backend manda no draft)
       if (intent === 'lancar_repasse' && parsed.draft) {
@@ -1294,19 +1316,25 @@ JSON:`;
           const regiao = String(parsed.draft?.regiao || parsed.draft?.cidade || '').trim().slice(0, 80);
           const estado = normalizeUF(parsed.draft?.estado || parsed.draft?.uf) || '';
           const phone = String(parsed.draft?.phone || parsed.draft?.telefone || '').replace(/\D/g, '').slice(0, 20);
-          const { data: allCands } = await supabase.from('party_candidates').select('displayName').eq('partyId', party.id);
-          const dupe = (allCands || []).some((c: any) => normName(c.displayName) === normName(nome));
-          draft = { type: 'create_candidate', candidateName: nome, cargo, regiao, estado, phone };
-          const loc = [regiao, estado].filter(Boolean).join('/');
-          // Informa o que falta (igual aos campos do formulário) mas deixa confirmar.
-          const faltando: string[] = [];
-          if (!cargo) faltando.push('cargo');
-          if (!regiao) faltando.push('cidade');
-          if (!estado) faltando.push('estado (UF)');
-          if (!phone) faltando.push('telefone');
-          message = `${dupe ? `⚠️ Já existe um candidato chamado "${nome}". ` : ''}Vou cadastrar ${nome}${cargo ? `, ${cargo}` : ''}${loc ? ` (${loc})` : ''}.`
-            + (faltando.length ? ` Faltou: ${faltando.join(', ')} — me passe esses dados (ex: "${nome}, vereador, Niterói RJ, 21999990000") ou toque em Confirmar pra cadastrar assim mesmo.` : '')
-            + ` Confirma?`;
+          // Cidade + UF são OBRIGATÓRIOS (posicionam o candidato no mapa/telão).
+          // Sem eles, não monto o cadastro — ensino o formato certo com exemplo.
+          const faltamObrig: string[] = [];
+          if (!regiao) faltamObrig.push('cidade');
+          if (!estado) faltamObrig.push('estado (UF)');
+          if (faltamObrig.length) {
+            message = `Pra cadastrar ${nome} eu preciso de ${faltamObrig.join(' e ')} — é o que posiciona o candidato no mapa do partido. Me manda assim: "${nome}, vereador, Niterói RJ, 21999990000".`;
+          } else {
+            const { data: allCands } = await supabase.from('party_candidates').select('displayName').eq('partyId', party.id);
+            const dupe = (allCands || []).some((c: any) => normName(c.displayName) === normName(nome));
+            draft = { type: 'create_candidate', candidateName: nome, cargo, regiao, estado, phone };
+            const loc = [regiao, estado].filter(Boolean).join('/');
+            const faltamOpc: string[] = [];
+            if (!cargo) faltamOpc.push('cargo');
+            if (!phone) faltamOpc.push('telefone');
+            message = `${dupe ? `⚠️ Já existe um candidato chamado "${nome}". ` : ''}Vou cadastrar ${nome}${cargo ? `, ${cargo}` : ''} (${loc}).`
+              + (faltamOpc.length ? ` Sem ${faltamOpc.join(' e ')} (opcional — dá pra adicionar depois).` : '')
+              + ` Confirma?`;
+          }
         }
       }
 

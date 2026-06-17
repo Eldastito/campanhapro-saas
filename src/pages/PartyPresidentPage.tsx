@@ -280,7 +280,7 @@ const PartyPresidentPage: React.FC = () => {
   };
 
   const addCandidate = async () => {
-    if (!form.displayName.trim()) return;
+    if (!form.displayName.trim() || !form.regiao.trim() || !form.estado) return;
     setAdding(true);
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
@@ -858,17 +858,18 @@ const PartyPresidentPage: React.FC = () => {
                   <option value="">Cargo</option>
                   {CARGOS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
-                <input value={form.regiao} onChange={(e) => setForm({ ...form, regiao: e.target.value })} placeholder="Cidade" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <input value={form.regiao} onChange={(e) => setForm({ ...form, regiao: e.target.value })} placeholder="Cidade *" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
               <div className="grid grid-cols-[5.5rem_1fr] gap-2">
-                <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-2 py-2 text-white">
-                  <option value="">UF</option>
+                <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} className={`bg-slate-950 border rounded-xl px-2 py-2 text-white ${form.estado ? 'border-white/10' : 'border-amber-500/40'}`}>
+                  <option value="">UF *</option>
                   {UFS.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
                 </select>
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp)" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               </div>
+              <p className="text-[11px] text-slate-500">* Nome, cidade e UF são obrigatórios — posicionam o candidato no mapa do partido. Cargo e telefone são opcionais.</p>
             </div>
-            <button onClick={addCandidate} disabled={adding || !form.displayName.trim()} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+            <button onClick={addCandidate} disabled={adding || !form.displayName.trim() || !form.regiao.trim() || !form.estado} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar
             </button>
           </div>

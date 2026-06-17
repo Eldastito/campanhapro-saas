@@ -74,10 +74,11 @@ function getRecognition(): SpeechRec | null {
 }
 
 const SUGESTOES = [
-  'Qual o total repassado até agora?',
-  'Quais os repasses mais recentes?',
+  '❓ O que você consegue fazer?',
+  'Cadastra o João Silva, vereador, Niterói RJ',
+  'Lança 5 mil pro João, material gráfico',
+  'Lista os candidatos pendentes',
   'Gere o relatório de repasses',
-  'Quem recebeu mais até agora?',
 ];
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
