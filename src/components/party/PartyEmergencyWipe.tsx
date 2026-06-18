@@ -11,10 +11,14 @@
  *   6. Backend revalida role 'Presidente de Partido' + ownership + confirmationText
  */
 import React, { useEffect, useState } from 'react';
-import { ShieldAlert, AlertTriangle, Loader2, Lock, X, ShieldCheck } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Loader2, Lock, X, ShieldCheck, Fingerprint } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
-import { createReauthClient } from '../../lib/supabaseClient';
+import { createReauthClient, supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
+import { passkeyFlags } from '../../lib/passkeys/flags';
+import { detectPasskeySupport } from '../../lib/passkeys/support';
+import { authenticateWithPasskey } from '../../lib/passkeys/service';
+import { mapPasskeyError } from '../../lib/passkeys/errors';
 
 const CONFIRM_PHRASE = 'APAGAR TUDO';
 const COUNTDOWN_SECONDS = 5;
@@ -28,10 +32,37 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // Step-up por passkey (Fase 4): alternativa à senha, atrás da flag.
+  const [passkeyVerified, setPasskeyVerified] = useState(false);
+  const [passkeySupported, setPasskeySupported] = useState(false);
+  const stepUp = passkeyFlags.stepUp;
 
   const phraseOk = phrase.trim() === CONFIRM_PHRASE;
   const passwordOk = password.length >= 4;
-  const ready = phraseOk && passwordOk;
+  // Reautenticação satisfeita por SENHA *ou* BIOMETRIA.
+  const ready = phraseOk && (passwordOk || passkeyVerified);
+
+  useEffect(() => {
+    if (!stepUp) return;
+    let alive = true;
+    detectPasskeySupport().then((s) => { if (alive) setPasskeySupported(s.webAuthnSupported); });
+    return () => { alive = false; };
+  }, [stepUp]);
+
+  const verifyPasskey = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await authenticateWithPasskey();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('USER_VERIFICATION_FAILED');
+      setPasskeyVerified(true);
+    } catch (e) {
+      setError(mapPasskeyError(e).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Countdown só roda quando frase + senha estão preenchidas corretamente.
   useEffect(() => {
@@ -43,7 +74,7 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
 
   const reset = () => {
     setPhrase(''); setPassword(''); setCountdown(COUNTDOWN_SECONDS);
-    setError(null); setDone(null);
+    setError(null); setDone(null); setPasskeyVerified(false);
   };
 
   const close = () => { if (!busy) { setOpen(false); reset(); } };
@@ -52,18 +83,23 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
     setError(null);
     setBusy(true);
     try {
-      // 1. Reautenticação da senha NO CLIENTE (senha não vai pro nosso backend).
-      //    Usa cliente EFÊMERO: valida a senha sem tocar na sessão ativa nem
-      //    disparar o onAuthStateChange global — senão re-logava o app e loopava.
-      const email = user?.email;
-      if (!email) { setError('Sessão sem e-mail. Faça login de novo.'); setBusy(false); return; }
-      const reauth = createReauthClient();
-      const { error: authErr } = await reauth.auth.signInWithPassword({ email, password });
-      // NÃO chamar signOut() aqui: o signOut padrão é GLOBAL e revoga TODAS as
-      // sessões do usuário no servidor — inclusive a principal → "token inválido"
-      // e sessão derrubada. O cliente efêmero não persiste, então não há o que limpar.
-      if (authErr) {
-        setError('Senha incorreta. Tente novamente.');
+      // 1. Reautenticação NO CLIENTE: por SENHA (cliente efêmero) ou por BIOMETRIA
+      //    (passkey já verificado acima). A senha nunca vai pro nosso backend.
+      if (password) {
+        const email = user?.email;
+        if (!email) { setError('Sessão sem e-mail. Faça login de novo.'); setBusy(false); return; }
+        const reauth = createReauthClient();
+        const { error: authErr } = await reauth.auth.signInWithPassword({ email, password });
+        // NÃO chamar signOut() aqui: o signOut padrão é GLOBAL e revoga TODAS as
+        // sessões do usuário no servidor — inclusive a principal → "token inválido".
+        // O cliente efêmero não persiste, então não há o que limpar.
+        if (authErr) {
+          setError('Senha incorreta. Tente novamente.');
+          setBusy(false);
+          return;
+        }
+      } else if (!passkeyVerified) {
+        setError('Confirme sua identidade: senha ou biometria.');
         setBusy(false);
         return;
       }
@@ -174,8 +210,25 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
                   placeholder="Senha da sua conta"
                   autoComplete="new-password" data-lpignore="true"
                   name="cp_reauth_password"
-                  className={`w-full bg-slate-950 border rounded-xl px-3 py-2.5 text-white mb-4 ${passwordOk ? 'border-emerald-500/50' : 'border-white/10'}`}
+                  className={`w-full bg-slate-950 border rounded-xl px-3 py-2.5 text-white mb-3 ${passwordOk ? 'border-emerald-500/50' : 'border-white/10'}`}
                 />
+
+                {stepUp && passkeySupported && (
+                  <div className="mb-4">
+                    {passkeyVerified ? (
+                      <p className="text-xs text-emerald-300 flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5" /> Identidade confirmada por biometria.
+                      </p>
+                    ) : (
+                      <button
+                        type="button" onClick={verifyPasskey} disabled={busy}
+                        className="text-xs text-sky-300 hover:text-sky-200 flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <Fingerprint className="w-3.5 h-3.5" /> ou confirmar com biometria (sem digitar a senha)
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {error && (
                   <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2.5 text-xs text-red-300 mb-3">{error}</div>
@@ -191,7 +244,8 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
                     className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-bold flex items-center justify-center gap-2"
                   >
                     {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Apagando...</>
-                      : !ready ? 'Preencha frase + senha'
+                      : !phraseOk ? `Digite ${CONFIRM_PHRASE}`
+                      : !ready ? 'Confirme a identidade (senha ou biometria)'
                       : countdown > 0 ? `Aguarde ${countdown}s...`
                       : 'Confirmar exclusão definitiva'}
                   </button>
