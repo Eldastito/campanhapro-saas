@@ -12,6 +12,7 @@ import AgendaPanel from '../components/agenda/AgendaPanel';
 import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
 import ExternalMemoryRefreshCard from '../components/dashboard/ExternalMemoryRefreshCard';
 import CampaignPauseCard from '../components/settings/CampaignPauseCard';
+import PasskeyCard from '../components/security/PasskeyCard';
 
 const SettingsPage = () => {
     const { campaignDetails, updateCampaignDetails } = useSettings();
@@ -25,6 +26,9 @@ const SettingsPage = () => {
 
             {/* Modo Campanha Pausada (#137) — botão de pânico no topo */}
             <CampaignPauseCard />
+
+            {/* Chaves de acesso / biometria (Passkeys) — só aparece com a flag ligada */}
+            <PasskeyCard />
 
             <Card>
                 <h3 className="text-lg font-bold text-slate-300 mb-4">Dados do Candidato e Orçamento</h3>
