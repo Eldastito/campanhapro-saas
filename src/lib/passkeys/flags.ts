@@ -1,9 +1,10 @@
 /**
- * Feature flags de Passkeys (WebAuthn) — Fase 1.
+ * Feature flags de Passkeys (WebAuthn) — controlam a UI (Estratégia B).
  *
- * Recurso EXPERIMENTAL do Supabase Auth (auth.mfa.webauthn). Tudo desligado por
- * padrão: só liga quando as envs VITE_PASSKEY_* forem 'true'. Assim a fundação
- * pode entrar em produção sem afetar ninguém até decidirmos habilitar.
+ * Login/cadastro/gestão usam o backend próprio (/api/v1/passkeys + SimpleWebAuthn),
+ * que só responde com PASSKEY_B_ENABLED=true no servidor. Estas flags VITE_PASSKEY_*
+ * controlam só a aparência na interface — a do servidor precisa estar ligada também
+ * pra valer. Tudo desligado por padrão: nada muda em produção até habilitarmos.
  *
  * IMPORTANTE (Fase 0): a passkey fica presa ao domínio (rp_id). Definido como
  * campanhapro2.tesseractauto.com.br. Trocar o domínio depois invalida todas as

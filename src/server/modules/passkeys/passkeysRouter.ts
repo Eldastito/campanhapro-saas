@@ -143,6 +143,43 @@ export function createPasskeysRouter(supabase: SupabaseClient): Router {
     }
   });
 
+  // ---- GESTÃO (usuário logado): listar e revogar ---------------------------
+
+  router.get('/list', async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    if (!user?.id) return res.status(401).json({ error: 'unauthorized' });
+    try {
+      const { data } = await supabase
+        .from('user_passkey_credentials')
+        .select('id, device_name, created_at, last_used_at, revoked_at')
+        .eq('user_id', user.id)
+        .is('revoked_at', null)
+        .order('created_at', { ascending: false });
+      return res.json({ credentials: data ?? [] });
+    } catch (e: any) {
+      return res.status(500).json({ error: 'list_failed', detail: String(e?.message ?? e) });
+    }
+  });
+
+  router.post('/revoke', async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    if (!user?.id) return res.status(401).json({ error: 'unauthorized' });
+    const { id } = req.body ?? {};
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      // Só revoga credencial do próprio usuário (eq user_id) — nunca de terceiros.
+      const { error } = await supabase
+        .from('user_passkey_credentials')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return res.json({ revoked: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: 'revoke_failed', detail: String(e?.message ?? e) });
+    }
+  });
+
   // ---- LOGIN (público, passwordless) ---------------------------------------
 
   router.post('/login/options', async (_req: Request, res: Response) => {
