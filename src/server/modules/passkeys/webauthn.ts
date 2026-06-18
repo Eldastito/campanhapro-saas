@@ -44,8 +44,13 @@ export function getRpConfig(): RpConfig {
 export function toBase64url(buf: Uint8Array): string {
   return Buffer.from(buf).toString('base64url');
 }
-export function fromBase64url(str: string): Uint8Array {
-  return new Uint8Array(Buffer.from(str, 'base64url'));
+export function fromBase64url(str: string) {
+  // Backing num ArrayBuffer próprio (não Buffer/ArrayBufferLike) p/ casar com o
+  // tipo Uint8Array<ArrayBuffer> que o SimpleWebAuthn espera em publicKey.
+  const b = Buffer.from(str, 'base64url');
+  const out = new Uint8Array(new ArrayBuffer(b.byteLength));
+  out.set(b);
+  return out;
 }
 
 /** Credencial já existente do usuário (para excludeCredentials / allowCredentials). */

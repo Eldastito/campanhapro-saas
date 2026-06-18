@@ -60,6 +60,7 @@ import { createToolboxRouter } from './src/server/modules/toolbox/toolboxRouter'
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
+import { createPasskeysRouter } from './src/server/modules/passkeys/passkeysRouter';
 import { createContentRouter } from './src/server/modules/content/contentRouter';
 import { requireAiBudget, requireFeature } from './src/server/middleware/featureGate';
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -296,6 +297,12 @@ async function startServer() {
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));
+    // Passkeys (Estratégia B): /login/* é público (passwordless), /register/* exige
+    // auth. Gated internamente por PASSKEY_B_ENABLED → rota dormente quando off.
+    app.use('/api/v1/passkeys', webhookLimiter, (req, res, next) => {
+      if (req.path.startsWith('/login/')) return next();   // login passwordless: público
+      return requireAuth(req, res, next);                  // cadastro: requer sessão
+    }, createPasskeysRouter(supabaseAdmin));
     app.use('/api/v1/callcenter', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'call_center'), createCallCenterRouter(supabaseAdmin));
     app.use('/api/public/callcenter', webhookLimiter, createCallCenterPublicRouter(supabaseAdmin));
     app.use('/api/v1/content', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'content_studio'), requireAiBudget(supabaseAdmin), createContentRouter(supabaseAdmin));
