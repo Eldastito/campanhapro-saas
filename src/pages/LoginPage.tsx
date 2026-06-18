@@ -4,6 +4,7 @@ import { SmokeyBackground } from '../components/ui/SmokeyBackground';
 import { LOGO_MONO_BASE64 } from '../constants';
 import { useNavigate, Link } from 'react-router-dom';
 import { User, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import PasskeyLoginButton from '../components/security/PasskeyLoginButton';
 
 const LoginPage = () => {
   const { login, isLoading } = useAuth();
@@ -118,6 +119,8 @@ const LoginPage = () => {
                 <ArrowRight className="ml-2 h-5 w-5 transform transition-transform group-hover:translate-x-1" />
               )}
             </button>
+
+            <PasskeyLoginButton onAuthenticated={() => navigate('/app')} />
           </form>
 
           <div className="space-y-3 text-center text-sm">
