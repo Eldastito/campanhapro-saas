@@ -11,7 +11,7 @@
 html,body{height:100%;overflow:hidden;background:#04060d;color:#eaf2ff;font-family:"Inter",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 #galaxy{position:fixed;inset:0;z-index:0;pointer-events:none}
 .bg-glow{position:fixed;inset:0;z-index:0;pointer-events:none;
-  background:radial-gradient(60% 55% at 50% 45%,rgba(56,120,255,.12),transparent 70%),radial-gradient(50% 50% at 50% 50%,rgba(233,196,106,.06),transparent 70%)}
+  background:radial-gradient(60% 55% at 50% 42%,rgba(40,95,210,.16),transparent 70%),radial-gradient(55% 55% at 50% 60%,rgba(58,157,87,.12),transparent 70%)}
 .scene{position:fixed;inset:0;z-index:1;display:grid;place-items:center;perspective:2200px;
   cursor:grab;transition:filter .5s,opacity .5s;touch-action:none;user-select:none;-webkit-user-select:none}
 .scene.grabbing{cursor:grabbing}.scene.dim{filter:brightness(.4) blur(2px)}
@@ -31,7 +31,7 @@ html,body{height:100%;overflow:hidden;background:#04060d;color:#eaf2ff;font-fami
 .viewer.open .live-wrap{transform:scale(1);opacity:1}
 .live-wrap iframe{width:100%;height:100%;border:0;display:block;background:#081424;pointer-events:none}
 
-#progress{position:fixed;top:0;left:0;height:3px;z-index:20;width:0;background:linear-gradient(90deg,#e9c46a,#38a0ff);box-shadow:0 0 12px #38a0ff;transition:width .5s}
+#progress{position:fixed;top:0;left:0;height:3px;z-index:20;width:0;background:linear-gradient(90deg,#3a9d57,#2f6fd6);box-shadow:0 0 12px #2f6fd6;transition:width .5s}
 .hint{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:20;font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:#9fb4d4;display:flex;gap:.6rem;align-items:center;transition:opacity .4s;text-align:center}
 .hint kbd{border:1px solid rgba(150,180,230,.3);border-radius:5px;padding:1px 7px;color:#cfe0ff;background:rgba(255,255,255,.04)}
 .hint.hide{opacity:0}
@@ -40,7 +40,7 @@ html,body{height:100%;overflow:hidden;background:#04060d;color:#eaf2ff;font-fami
 .title h1{font-family:"Sora";font-weight:800;font-size:clamp(1.1rem,2.4vw,1.7rem);background:linear-gradient(180deg,#fff,#a9c6ee);-webkit-background-clip:text;background-clip:text;color:transparent}
 .title p{font-family:"JetBrains Mono";font-size:.64rem;letter-spacing:.3em;text-transform:uppercase;color:#5e74a0;margin-top:.5rem}
 .brand{position:fixed;left:22px;bottom:18px;z-index:20;display:flex;align-items:center;gap:.5rem;font-family:"Sora";font-weight:700;font-size:.82rem;opacity:.9}
-.brand .dot{width:9px;height:9px;border-radius:50%;background:#e9c46a;box-shadow:0 0 10px #e9c46a}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:#3a9d57;box-shadow:0 0 10px #3a9d57}
 .counter{position:fixed;right:22px;bottom:16px;z-index:20;font-family:"JetBrains Mono";font-size:.74rem;color:#5e74a0;letter-spacing:.12em}
 .counter b{color:#eaf2ff}
 .dots{position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:20;display:flex;gap:7px;opacity:0;pointer-events:none;transition:opacity .4s}
@@ -103,7 +103,8 @@ live.src = DECK_URL + "#embed&s1";
 function liveGoto(i){ if(frameReady) live.contentWindow.postMessage({goto:i},'*'); else pending=i; }
 
 let angle=0, target=0, mode='ring', index=0;
-let ringState='rest', velocity=0, down=false, moved=false, startX=0, lastX=0;
+let ringState='auto', velocity=0, down=false, moved=false, startX=0, lastX=0, startY=0, lastY=0;
+let clock=0, tiltDrag=0;
 const cards=[];
 
 THUMBS.forEach((src,i)=>{
@@ -133,7 +134,7 @@ function openViewer(i){
 }
 function enterRing(){
   viewer.classList.remove('open'); scene.classList.remove('dim','grabbing'); pauseBtn.style.display='none';
-  mode='ring'; snapTo(index); ringState='settle'; velocity=0; down=false;   // descansa no slide atual (retoma daqui)
+  mode='ring'; ringState='auto'; velocity=0; down=false;   // volta a girar; cursor (index) preservado p/ retomar
   titleBar.classList.remove('hide'); hint.classList.remove('hide'); dotsWrap.classList.remove('show'); updateHud();
 }
 function advance(){
@@ -154,13 +155,18 @@ function jumpTo(i){
 function toggleFs(){ if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
 
 function loop(){
+  clock += 0.005;
   if(mode==='ring'){
-    if(ringState==='inertia'){ angle+=velocity; velocity*=FRICTION; target=angle; if(Math.abs(velocity)<0.06){ target=Math.round(angle/STEP)*STEP; ringState='settle'; } }
-    else if(ringState==='settle'){ angle+=(target-angle)*0.12; if(Math.abs(target-angle)<0.05){ angle=target; ringState='rest'; } }
-    // 'rest': anel parado no slide atual (sem giro automático)
-    const ni=nearestFront(); if(ni!==index){ index=ni; setFront(index); }
-  } else { angle+=(target-angle)*0.08; }
-  applyTransform(); requestAnimationFrame(loop);
+    if(ringState==='auto'){ angle += IDLE_SPEED; }                       // giro automático (eixo Y)
+    else if(ringState==='inertia'){ angle += velocity; velocity *= FRICTION; if(Math.abs(velocity) < IDLE_SPEED){ ringState='auto'; } }
+    if(ringState!=='drag'){ tiltDrag += (0 - tiltDrag) * 0.06; }          // inclinação volta suave ao repouso
+    setFront(nearestFront());                                            // realce do slide da frente (decorativo)
+  } else {
+    angle += (target - angle) * 0.08;                                    // zoom: alinha o anel ao slide
+  }
+  const tilt = -8 + Math.sin(clock) * 6 + tiltDrag;                      // oscila no eixo X + arraste vertical
+  ring.style.transform = `translateZ(-260px) rotateX(${tilt}deg) rotateY(${angle}deg)`;
+  requestAnimationFrame(loop);
 }
 loop(); setFront(0); updateHud();
 
@@ -169,8 +175,15 @@ viewer.addEventListener('click', advance);
 document.getElementById('next').onclick=(e)=>{e.stopPropagation();advance();};
 document.getElementById('prev').onclick=(e)=>{e.stopPropagation();back();};
 document.getElementById('fs').onclick=(e)=>{e.stopPropagation();toggleFs();};
-scene.addEventListener('pointerdown',(e)=>{ if(mode!=='ring')return; down=true;moved=false;startX=lastX=e.clientX;velocity=0;autoSpin=false;ringState='drag';target=angle;scene.classList.add('grabbing');e.preventDefault(); });
-window.addEventListener('pointermove',(e)=>{ if(!down||mode!=='ring')return; if(!moved&&Math.abs(e.clientX-startX)>DRAG_THRESH)moved=true; if(moved){ const inc=(e.clientX-lastX)*DRAG_SPEED; angle+=inc; velocity=velocity*0.6+inc*0.4; target=angle; lastX=e.clientX; } });
+scene.addEventListener('pointerdown',(e)=>{ if(mode!=='ring')return; down=true;moved=false;startX=lastX=e.clientX;startY=lastY=e.clientY;velocity=0;ringState='drag';scene.classList.add('grabbing');e.preventDefault(); });
+window.addEventListener('pointermove',(e)=>{ if(!down||mode!=='ring')return;
+  if(!moved && (Math.abs(e.clientX-startX)>DRAG_THRESH || Math.abs(e.clientY-startY)>DRAG_THRESH)) moved=true;
+  if(moved){
+    const incX=(e.clientX-lastX)*DRAG_SPEED; angle+=incX; velocity=velocity*0.6+incX*0.4;
+    const incY=(e.clientY-lastY); tiltDrag=Math.max(-35,Math.min(35, tiltDrag + incY*0.15));
+    lastX=e.clientX; lastY=e.clientY;
+  }
+});
 function endDrag(){ if(!down)return; down=false; scene.classList.remove('grabbing'); if(mode!=='ring')return; if(moved)ringState='inertia'; else advance(); }
 window.addEventListener('pointerup', endDrag);
 window.addEventListener('pointercancel', endDrag);
@@ -188,7 +201,7 @@ addEventListener('keydown',(e)=>{
   function rs(){ w=c.width=innerWidth; h=c.height=innerHeight; const n=Math.min(220,Math.floor(w*h/9000));
     stars=Array.from({length:n},()=>{ const ang=Math.random()*Math.PI*2, rad=Math.pow(Math.random(),0.7)*Math.min(w,h)*0.62;
       return {ang,rad,sp:(Math.random()*0.0006+0.0002)*(Math.random()<.5?-1:1),r:Math.random()*1.5+0.3,tw:Math.random()*Math.PI*2,
-        hue:Math.random()<0.55?42:(Math.random()<0.6?212:0),sat:Math.random()<0.5?70:0}; }); }
+        hue:Math.random()<0.6?214:145,sat:Math.random()<0.82?80:0}; }); }
   rs(); addEventListener('resize',rs);
   function draw(){ x.clearRect(0,0,w,h); const cx=w/2,cy=h/2;
     for(const s of stars){ s.ang+=s.sp; s.tw+=0.03; const px=cx+Math.cos(s.ang)*s.rad, py=cy+Math.sin(s.ang)*s.rad*0.62, a=0.35+Math.sin(s.tw)*0.3;
