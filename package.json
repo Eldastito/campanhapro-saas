@@ -18,6 +18,8 @@
     "@hello-pangea/dnd": "^18.0.1",
     "@noble/ed25519": "^3.1.0",
     "@noble/hashes": "^2.2.0",
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.1",
     "@supabase/supabase-js": "^2.104.0",
     "@tailwindcss/vite": "^4.2.2",
     "@types/dompurify": "^3.0.5",
