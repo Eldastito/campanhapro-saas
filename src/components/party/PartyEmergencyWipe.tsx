@@ -13,11 +13,11 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldAlert, AlertTriangle, Loader2, Lock, X, ShieldCheck, Fingerprint } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
-import { createReauthClient, supabase } from '../../lib/supabaseClient';
+import { createReauthClient } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import { passkeyFlags } from '../../lib/passkeys/flags';
 import { detectPasskeySupport } from '../../lib/passkeys/support';
-import { authenticateWithPasskey } from '../../lib/passkeys/service';
+import { stepUpWithPasskey } from '../../lib/passkeys/service';
 import { mapPasskeyError } from '../../lib/passkeys/errors';
 
 const CONFIRM_PHRASE = 'APAGAR TUDO';
@@ -53,9 +53,7 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
     setError(null);
     setBusy(true);
     try {
-      await authenticateWithPasskey();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('USER_VERIFICATION_FAILED');
+      await stepUpWithPasskey();
       setPasskeyVerified(true);
     } catch (e) {
       setError(mapPasskeyError(e).message);
