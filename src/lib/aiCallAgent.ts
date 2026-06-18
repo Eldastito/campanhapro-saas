@@ -429,7 +429,11 @@ export async function callAgent(
     const config: AgentConfig = opts.maxTokens ? { ...baseConfig, maxTokens: opts.maxTokens } : baseConfig;
 
     // 0. ENFORCEMENT DE PLANO: bloqueia IA no GRÁTIS (libera só durante trial 24h).
-    if (supabaseAdmin && opts.campaignId) {
+    // Exceção: escopo do PARTIDO (campaignId "party:<id>") NÃO é uma campanha com
+    // plano — o partido paga o Plano Partido à parte. Sem isso, a IA do presidente
+    // (digest, antifraude, orquestração) caía como "IA bloqueada pelo plano".
+    const isPartyScope = typeof opts.campaignId === 'string' && opts.campaignId.startsWith('party:');
+    if (supabaseAdmin && opts.campaignId && !isPartyScope) {
         try {
             const { checkAiQuota } = await import('../server/modules/billing/quotaEnforcer');
             const quota = await checkAiQuota(supabaseAdmin, opts.campaignId, {
