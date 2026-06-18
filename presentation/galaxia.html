@@ -89,6 +89,12 @@ const ring=document.getElementById('ring'), scene=document.getElementById('scene
   dotsWrap=document.getElementById('dots'), counter=document.getElementById('counter'),
   hint=document.getElementById('hint'), titleBar=document.getElementById('titleBar'),
   progress=document.getElementById('progress');
+  const pauseBtn=document.createElement('button');
+  pauseBtn.className='ctrl'; pauseBtn.id='pause'; pauseBtn.title='Pausar (voltar ao carrossel)';
+  pauseBtn.style.top='16px'; pauseBtn.style.left='22px'; pauseBtn.style.display='none';
+  pauseBtn.innerHTML='<svg viewBox="0 0 24 24"><rect x="7" y="5" width="3.5" height="14" rx="1"/><rect x="13.5" y="5" width="3.5" height="14" rx="1"/></svg>';
+  pauseBtn.onclick=(e)=>{ e.stopPropagation(); enterRing(); };
+  document.body.appendChild(pauseBtn);
 
 // deck vivo dentro do iframe (pilotado por postMessage)
 let frameReady=false, pending=null;
@@ -97,7 +103,7 @@ live.src = DECK_URL + "#embed&s1";
 function liveGoto(i){ if(frameReady) live.contentWindow.postMessage({goto:i},'*'); else pending=i; }
 
 let angle=0, target=0, mode='ring', index=0;
-let ringState='auto', autoSpin=true, velocity=0, down=false, moved=false, startX=0, lastX=0;
+let ringState='rest', velocity=0, down=false, moved=false, startX=0, lastX=0;
 const cards=[];
 
 THUMBS.forEach((src,i)=>{
@@ -121,19 +127,19 @@ function applyTransform(){ ring.style.transform=`translateZ(-260px) rotateX(${TI
 
 function openViewer(i){
   index=i; setFront(i); snapTo(i); liveGoto(i);
-  viewer.classList.add('open'); scene.classList.add('dim');
+  viewer.classList.add('open'); scene.classList.add('dim'); pauseBtn.style.display='grid';
   hint.classList.add('hide'); titleBar.classList.add('hide'); dotsWrap.classList.add('show');
   mode='zoom'; updateHud();
 }
 function enterRing(){
-  viewer.classList.remove('open'); scene.classList.remove('dim','grabbing');
-  mode='ring'; ringState='auto'; autoSpin=true; velocity=0; down=false;
+  viewer.classList.remove('open'); scene.classList.remove('dim','grabbing'); pauseBtn.style.display='none';
+  mode='ring'; snapTo(index); ringState='settle'; velocity=0; down=false;   // descansa no slide atual (retoma daqui)
   titleBar.classList.remove('hide'); hint.classList.remove('hide'); dotsWrap.classList.remove('show'); updateHud();
 }
 function advance(){
   if(mode==='ring'){ openViewer(index); return; }
   if(index<N-1){ const ni=index+1; viewer.classList.remove('open'); scene.classList.add('dim'); setFront(ni); snapTo(ni); mode='busy'; setTimeout(()=>openViewer(ni),430); }
-  else { index=0; enterRing(); }
+  else { enterRing(); }
 }
 function back(){
   if(mode==='busy') return;
@@ -149,9 +155,9 @@ function toggleFs(){ if(!document.fullscreenElement) document.documentElement.re
 
 function loop(){
   if(mode==='ring'){
-    if(ringState==='auto'){ if(autoSpin) target+=IDLE_SPEED; angle+=(target-angle)*0.08; }
-    else if(ringState==='inertia'){ angle+=velocity; velocity*=FRICTION; target=angle; if(Math.abs(velocity)<0.06){ target=Math.round(angle/STEP)*STEP; ringState='settle'; } }
+    if(ringState==='inertia'){ angle+=velocity; velocity*=FRICTION; target=angle; if(Math.abs(velocity)<0.06){ target=Math.round(angle/STEP)*STEP; ringState='settle'; } }
     else if(ringState==='settle'){ angle+=(target-angle)*0.12; if(Math.abs(target-angle)<0.05){ angle=target; ringState='rest'; } }
+    // 'rest': anel parado no slide atual (sem giro automático)
     const ni=nearestFront(); if(ni!==index){ index=ni; setFront(index); }
   } else { angle+=(target-angle)*0.08; }
   applyTransform(); requestAnimationFrame(loop);
@@ -171,7 +177,7 @@ window.addEventListener('pointercancel', endDrag);
 addEventListener('keydown',(e)=>{
   if(['ArrowRight',' ','PageDown','Enter'].includes(e.key)){e.preventDefault();advance();}
   else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();back();}
-  else if(e.key==='Escape'){ if(mode==='zoom')back(); }
+  else if(e.key==='Escape'){ if(mode==='zoom')enterRing(); }
   else if(e.key.toLowerCase()==='f'){ toggleFs(); }
   else if(e.key==='Home'){ index=0; enterRing(); }
 });
