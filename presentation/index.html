@@ -284,9 +284,11 @@ h1,h2,h3,h4,.font-display{font-family:"Sora","Inter",sans-serif;letter-spacing:-
 
 /* ===== Slide 8 — comparison table ===== */
 .ctable{margin-top:1rem;border-radius:16px;overflow:hidden;border:1px solid var(--line)}
-.ctable .crow{display:grid;grid-template-columns:1fr 1.5fr 1.5fr;border-top:1px solid var(--line)}
+.ctable .crow{display:grid;grid-template-columns:1fr 1.5fr 1.5fr;border-top:1px solid var(--line);align-items:center}
 .ctable .crow:first-child{border-top:0}
-.ctable .crow > div{padding:1rem 1.3rem;display:flex;align-items:center}
+/* NÃO usar flex aqui: flexbox engole o espaço entre <b> e o texto seguinte
+   (virava "Segundospara"). Bloco normal preserva os espaços. */
+.ctable .crow > div{padding:1rem 1.3rem}
 .ctable .chead{background:rgba(255,255,255,.02)}
 .ctable .chead > div{font-family:"Sora";font-weight:600;justify-content:center;text-align:center}
 .ctable .col-h{color:var(--ink-dim)}
@@ -298,12 +300,12 @@ h1,h2,h3,h4,.font-display{font-family:"Sora","Inter",sans-serif;letter-spacing:-
 
 /* ===== Slide 9 — pipeline ===== */
 .pipe{display:flex;align-items:stretch;gap:0;margin-top:1.3rem}
-.pstage{flex:1;position:relative;clip-path:polygon(0 0,88% 0,100% 50%,88% 100%,0 100%,12% 50%);
+.pstage{flex:1;position:relative;clip-path:polygon(0 0,90% 0,100% 50%,90% 100%,0 100%,8% 50%);
   background:linear-gradient(160deg,rgba(20,48,74,.7),rgba(10,28,50,.8));
-  border:1px solid var(--line-strong);padding:1.1rem 1.2rem 1.1rem 1.8rem;margin-left:-14px;
+  border:1px solid var(--line-strong);padding:1.1rem 1.1rem 1.1rem 2.7rem;margin-left:-12px;
   display:flex;flex-direction:column;justify-content:center}
-.pstage:first-child{margin-left:0;clip-path:polygon(0 0,88% 0,100% 50%,88% 100%,0 100%)}
-.pstage:last-child{clip-path:polygon(0 0,100% 0,100% 100%,0 100%,12% 50%)}
+.pstage:first-child{margin-left:0;padding-left:1.4rem;clip-path:polygon(0 0,90% 0,100% 50%,90% 100%,0 100%)}
+.pstage:last-child{clip-path:polygon(0 0,100% 0,100% 100%,0 100%,8% 50%)}
 .pstage h4{font-size:.92rem;color:var(--cyan)}
 .pstage p{color:var(--ink-dim);font-size:.72rem;font-weight:300;line-height:1.35;margin-top:.2rem}
 .pstage .si{position:absolute;top:8px;right:18%;font-family:"JetBrains Mono";font-size:.6rem;color:var(--teal);opacity:.7}
@@ -316,7 +318,14 @@ h1,h2,h3,h4,.font-display{font-family:"Sora","Inter",sans-serif;letter-spacing:-
 .risk span{color:var(--ink-dim);font-weight:300;font-size:.78rem}
 
 /* ===== Slide 10 — radial agents ===== */
-.radial{position:relative;width:min(74vh,760px);height:min(74vh,760px);margin:0 auto}
+/* dead-center absoluto no slide (antes ficava deslocado pra direita/baixo) */
+.radial{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(70vh,700px);height:min(70vh,700px)}
+/* IMPORTANTE: .frag.in{transform:none} (2 classes) sobrescrevia o translate de
+   centralização de .core-node/.agent (1 classe) ao revelar o slide, jogando-os
+   pro CANTO do ponto em vez do centro. O id #radial tem especificidade maior e
+   garante a centralização mesmo depois do reveal (opacity continua animando).
+   Os spokes usam transform inline (rotate), que já vence sozinho. */
+#radial .core-node,#radial .agent{transform:translate(-50%,-50%)}
 .core-node{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:170px;height:170px;
   border-radius:50%;display:grid;place-items:center;text-align:center;z-index:5;
   background:radial-gradient(circle at 50% 40%,rgba(56,225,255,.3),rgba(8,26,44,.9));
@@ -342,10 +351,17 @@ h1,h2,h3,h4,.font-display{font-family:"Sora","Inter",sans-serif;letter-spacing:-
   background:
     radial-gradient(circle at 30% 30%,rgba(56,225,255,.12),transparent 40%),
     linear-gradient(160deg,rgba(10,28,50,.8),rgba(6,16,30,.9));}
-.map3d .gridfloor{position:absolute;inset:0;
-  background-image:linear-gradient(rgba(56,225,255,.14) 1px,transparent 1px),linear-gradient(90deg,rgba(56,225,255,.14) 1px,transparent 1px);
-  background-size:40px 40px;transform:perspective(500px) rotateX(58deg) scale(1.4);transform-origin:center 70%;opacity:.6}
-.pin{position:absolute;transform:translate(-50%,-100%);color:var(--cyan)}
+/* piso da grade extrapola a caixa em todos os lados pra preencher após a
+   perspectiva; máscara radial suaviza as bordas pra não parecer cortado. */
+.map3d .gridfloor{position:absolute;left:-40%;right:-40%;top:-15%;bottom:-45%;
+  background-image:linear-gradient(rgba(56,225,255,.22) 1px,transparent 1px),linear-gradient(90deg,rgba(56,225,255,.22) 1px,transparent 1px);
+  background-size:46px 46px;transform:perspective(640px) rotateX(56deg);transform-origin:center bottom;opacity:.6;
+  -webkit-mask-image:radial-gradient(ellipse 65% 75% at 50% 42%,#000 45%,transparent 88%);
+          mask-image:radial-gradient(ellipse 65% 75% at 50% 42%,#000 45%,transparent 88%)}
+.zone-glow{position:absolute;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;z-index:1}
+.zone-glow.hot{width:130px;height:80px;background:radial-gradient(ellipse,rgba(56,225,255,.4),transparent 70%);animation:zonepulse 3s ease-in-out infinite}
+@keyframes zonepulse{0%,100%{opacity:.5;transform:translate(-50%,-50%) scale(.9)}50%{opacity:.9;transform:translate(-50%,-50%) scale(1.1)}}
+.pin{position:absolute;transform:translate(-50%,-100%);color:var(--cyan);z-index:2}
 .pin.hot{filter:drop-shadow(0 0 10px var(--cyan));animation:pulse 2s infinite}
 .pin.cold{color:var(--ink-faint);opacity:.7}
 @keyframes pulse{0%,100%{transform:translate(-50%,-100%) scale(1)}50%{transform:translate(-50%,-100%) scale(1.18)}}
@@ -659,6 +675,9 @@ h1,h2,h3,h4,.font-display{font-family:"Sora","Inter",sans-serif;letter-spacing:-
       <div class="card zone-card hot glowable frag"><div class="zt"><svg class="svg-ic" viewBox="0 0 24 24"><path d="M12 21s7-6 7-11a7 7 0 0 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg> Zonas de Oportunidade</div><p>GAP Alto — alto potencial eleitoral, mas baixa presença da sua equipe. O Comandante IA recalcula rotas para focar os recursos aqui.</p></div>
       <div class="map3d frag">
         <div class="gridfloor"></div>
+        <div class="zone-glow hot" style="left:32%;top:55%"></div>
+        <div class="zone-glow hot" style="left:55%;top:72%"></div>
+        <div class="zone-glow hot" style="left:42%;top:40%"></div>
         <svg class="pin hot" style="left:32%;top:55%" width="30" height="30" viewBox="0 0 24 24"><path d="M12 22s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z" fill="rgba(56,225,255,.25)" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="10" r="2.5" fill="currentColor"/></svg>
         <svg class="pin hot" style="left:55%;top:72%" width="30" height="30" viewBox="0 0 24 24"><path d="M12 22s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z" fill="rgba(56,225,255,.25)" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="10" r="2.5" fill="currentColor"/></svg>
         <svg class="pin hot" style="left:42%;top:40%" width="26" height="26" viewBox="0 0 24 24"><path d="M12 22s7-6 7-12a7 7 0 0 0-14 0c0 6 7 12 7 12z" fill="rgba(56,225,255,.25)" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="10" r="2.5" fill="currentColor"/></svg>

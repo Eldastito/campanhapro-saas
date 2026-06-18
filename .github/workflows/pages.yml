@@ -1,0 +1,42 @@
+name: Deploy Presentation to GitHub Pages
+
+# Publica presentation/index.html no GitHub Pages.
+# Roda quando algo na pasta presentation/ muda na main (ou manualmente).
+# A URL final fica em https://eldastito.github.io/campanhapro-saas/
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'presentation/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Uma publicação por vez; cancela a anterior se vier outra.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configura Pages (habilita se necessário)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Empacota a pasta da apresentação
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: presentation
+      - name: Publica
+        id: deployment
+        uses: actions/deploy-pages@v4
