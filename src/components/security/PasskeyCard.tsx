@@ -1,8 +1,13 @@
 /**
- * Card "Chaves de acesso" (Configurações > Segurança) — Fase 2.
+ * Card "Chaves de acesso" (Configurações > Segurança).
+ * Fase 2: cadastro por nome de dispositivo.
+ * Fase 3: gerenciamento — listar + remover (com confirmação), atrás da flag
+ * `management`. Renomear NÃO é exposto: a SDK do Supabase não suporta atualizar
+ * o friendly_name de um fator (ele é definido só no cadastro).
+ *
  * Autocontido: renderiza NULL se a flag de cadastro estiver off ou o navegador
- * não suportar. Cadastro pede um nome amigável p/ o dispositivo. Listagem/remoção
- * só aparecem se a flag de gerenciamento estiver ligada (Fase 3).
+ * não suportar WebAuthn. Remover é seguro: o login por e-mail/senha permanece
+ * como método de acesso (sem risco de lockout).
  */
 import * as React from 'react';
 import { KeyRound, ShieldCheck, Loader2, Trash2 } from 'lucide-react';
@@ -12,16 +17,26 @@ import { detectPasskeySupport } from '../../lib/passkeys/support';
 import { registerPasskey, listPasskeys, removePasskey, type PasskeyDevice } from '../../lib/passkeys/service';
 import { mapPasskeyError } from '../../lib/passkeys/errors';
 
+function fmtDate(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR');
+}
+function statusLabel(s: string): string {
+  return s === 'verified' ? 'ativa' : s === 'unverified' ? 'pendente' : s;
+}
+
 const PasskeyCard: React.FC = () => {
   const [supported, setSupported] = React.useState(false);
   const [deviceName, setDeviceName] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [msg, setMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [keys, setKeys] = React.useState<PasskeyDevice[]>([]);
+  const [confirmId, setConfirmId] = React.useState<string | null>(null);
 
   const loadKeys = React.useCallback(async () => {
     if (!passkeyFlags.management) return;
-    try { setKeys(await listPasskeys()); } catch { /* silencioso na Fase 2 */ }
+    try { setKeys(await listPasskeys()); } catch { /* silencioso */ }
   }, []);
 
   React.useEffect(() => {
@@ -50,7 +65,16 @@ const PasskeyCard: React.FC = () => {
 
   const remove = async (id: string) => {
     setBusy(true);
-    try { await removePasskey(id); loadKeys(); } catch (e) { setMsg({ kind: 'err', text: mapPasskeyError(e).message }); } finally { setBusy(false); }
+    setConfirmId(null);
+    try {
+      await removePasskey(id);
+      setMsg({ kind: 'ok', text: 'Chave de acesso removida.' });
+      loadKeys();
+    } catch (e) {
+      setMsg({ kind: 'err', text: mapPasskeyError(e).message });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -65,15 +89,34 @@ const PasskeyCard: React.FC = () => {
         permanecem no dispositivo — o CampanhaPro nunca recebe nem armazena dados biométricos.
       </p>
 
-      {passkeyFlags.management && keys.length > 0 && (
-        <ul className="mb-4 space-y-2">
-          {keys.map((k) => (
-            <li key={k.id} className="flex items-center justify-between rounded-lg bg-slate-800/50 px-3 py-2">
-              <span className="text-sm text-slate-200">{k.friendlyName} <span className="text-[11px] text-slate-500">· {k.status}</span></span>
-              <button onClick={() => remove(k.id)} disabled={busy} className="text-slate-400 hover:text-red-400" aria-label="Remover chave"><Trash2 className="w-4 h-4" /></button>
-            </li>
-          ))}
-        </ul>
+      {passkeyFlags.management && (
+        <div className="mb-4">
+          {keys.length === 0 ? (
+            <p className="text-xs text-slate-500">Nenhuma chave cadastrada ainda neste perfil.</p>
+          ) : (
+            <ul className="space-y-2">
+              {keys.map((k) => (
+                <li key={k.id} className="flex items-center justify-between rounded-lg bg-slate-800/50 px-3 py-2">
+                  <div>
+                    <span className="text-sm text-slate-200">{k.friendlyName}</span>
+                    <span className="ml-2 text-[11px] text-slate-500">
+                      {statusLabel(k.status)}{k.createdAt ? ` · criada em ${fmtDate(k.createdAt)}` : ''}
+                    </span>
+                  </div>
+                  {confirmId === k.id ? (
+                    <span className="flex items-center gap-2 text-[11px]">
+                      <span className="text-slate-400">Remover?</span>
+                      <button onClick={() => remove(k.id)} disabled={busy} className="text-red-400 font-semibold hover:underline">Sim</button>
+                      <button onClick={() => setConfirmId(null)} className="text-slate-400 hover:underline">Não</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setConfirmId(k.id)} disabled={busy} className="text-slate-400 hover:text-red-400" aria-label="Remover chave"><Trash2 className="w-4 h-4" /></button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       <div className="flex flex-col sm:flex-row gap-2">
@@ -91,7 +134,7 @@ const PasskeyCard: React.FC = () => {
           className="flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-          Ativar acesso com biometria
+          {keys.length > 0 ? 'Cadastrar outro dispositivo' : 'Ativar acesso com biometria'}
         </button>
       </div>
 
