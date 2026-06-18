@@ -10,7 +10,7 @@
  * Permite decisão financeira clara: quem promover, quem reorientar.
  */
 import React, { useEffect, useState } from 'react';
-import { DollarSign, TrendingUp, Award, AlertTriangle, RefreshCw, ArrowUp, ArrowDown } from 'lucide-react';
+import { DollarSign, TrendingUp, Award, AlertTriangle, RefreshCw, ArrowUp } from 'lucide-react';
 import Card from '../ui/Card';
 import { supabase } from '../../lib/supabaseClient';
 

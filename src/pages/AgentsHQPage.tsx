@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bot, TrendingUp, Share2, Map, Send, Loader2, LayoutDashboard, Ticket, ArrowRight, CheckCircle2, Link as LinkIcon, ShieldCheck, Sparkles as SparklesIcon, History, Shield, Zap, X, BellRing, Trash2, Brain } from 'lucide-react';
+import { Bot, TrendingUp, Share2, Send, Loader2, LayoutDashboard, Ticket, ArrowRight, CheckCircle2, Link as LinkIcon, ShieldCheck, Sparkles as SparklesIcon, History, Shield, Zap, X, BellRing, Trash2, Brain } from 'lucide-react';
 import AiMemoryPanel from '../components/ai/AiMemoryPanel';
 import { supabase } from '../lib/supabaseClient';
-import { askStrategist, askGrowthHacker, askSocialMedia, askFieldCommander, askCreativeProducer, askBackupAgent, askFraudAuditor, runFullPipeline, getPipelineHistory, PipelineResult, generateCreativeImage, createProductionOrder, publishToSocialMedia, getManagerRuns, ManagerRun } from '../services/agentsClientService';
+import { askStrategist, askGrowthHacker, askSocialMedia, askCreativeProducer, askBackupAgent, askFraudAuditor, runFullPipeline, getPipelineHistory, generateCreativeImage, createProductionOrder, publishToSocialMedia, getManagerRuns, ManagerRun } from '../services/agentsClientService';
 import { createBackup, restoreBackup, BackupData } from '../services/backupService';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfilePermissions } from '../contexts/PermissionsContext';
@@ -983,7 +983,9 @@ const PipelineHistory: React.FC<{ campaignId: string }> = ({ campaignId }) => {
     );
 };
 
-const BackupAgentRoom: React.FC<{ campaignId: string, user: any }> = ({ campaignId, user }) => {
+// Exportado (mesmo sem uso interno atual) para não ser podado pelo noUnusedLocals
+// do tsc — sala de backup ainda referenciada pelo roadmap de agentes.
+export const BackupAgentRoom: React.FC<{ campaignId: string, user: any }> = ({ campaignId, user }) => {
     const [backups, setBackups] = useState<BackupData[]>([]);
     const [isCreating, setIsCreating] = useState(false);
     useEffect(() => {

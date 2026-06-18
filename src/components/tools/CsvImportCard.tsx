@@ -6,7 +6,7 @@
  * linhas, validação de header. Dedupe por phone no backend.
  */
 import React, { useState } from 'react';
-import { Upload, FileSpreadsheet, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import Card from '../ui/Card';
 import { supabase } from '../../lib/supabaseClient';
 

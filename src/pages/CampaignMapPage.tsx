@@ -66,7 +66,7 @@ const CampaignMapPage: React.FC = () => {
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
   const mapDivRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<any>(null);
-  const lgRef = React.useRef<{ equipe?: any; visitas?: any; votos?: any; reunioes?: any; live?: any }>({});
+  const lgRef = React.useRef<{ equipe?: any; visitas?: any; votos?: any; reunioes?: any; live?: any; sentimento?: any }>({});
   const doneRef = React.useRef<Set<string>>(new Set());
 
   // ── Agrupamentos ───────────────────────────────────────────────────

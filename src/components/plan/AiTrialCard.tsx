@@ -75,7 +75,7 @@ const AiTrialCard: React.FC<{ className?: string }> = ({ className = '' }) => {
 
   // ESTADO 3: ATIVO
   if (trial.active && trial.until) {
-    const _ = tick; // toca a dep do countdown
+    void tick; // toca a dep do countdown (força re-render a cada segundo)
     const used = trial.used || 0;
     const remaining = Math.max(0, TRIAL_COTA - used);
     const pct = Math.min(100, (used / TRIAL_COTA) * 100);

@@ -44,9 +44,6 @@ export function createTeamGoalsRouter(supabase: SupabaseClient) {
       if (error) return res.status(500).json({ error: error.message });
 
       // Progresso: 1 query por dimensão, agrega em memória.
-      const memberIds = (goals as GoalRow[] | null || []).map(g => g.memberId).filter(Boolean) as string[];
-      const bairros = (goals as GoalRow[] | null || []).map(g => g.bairro).filter(Boolean) as string[];
-
       // Carrega só o necessário pra computar progresso de TODAS as metas em paralelo.
       const [visitsRes, contactsRes, engagementsRes, membersRes] = await Promise.all([
         supabase.from('visits')

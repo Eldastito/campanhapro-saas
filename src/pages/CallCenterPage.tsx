@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   Headset, Loader2, LogOut, Clock, Send, CheckCircle2, RotateCcw,
-  Users, Plus, Link2, Check, MessageCircle, Sparkles, Inbox, X,
+  Users, Plus, Link2, Check, MessageCircle, Sparkles, Inbox,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
