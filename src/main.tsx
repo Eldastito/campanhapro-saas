@@ -24,3 +24,11 @@ root.render(
     </AuthProvider>
   </React.StrictMode>
 );
+
+// PWA: registra o service worker (habilita "Instalar app" na tela inicial).
+// SW mínimo, sem cache — não interfere no deploy/atualização.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => { /* sem PWA não quebra o app */ });
+  });
+}

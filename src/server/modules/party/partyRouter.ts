@@ -544,31 +544,57 @@ JSON:`;
       return res.json({ party: party.name, alerts: [], note: 'Sem candidatos pra analisar.' });
     }
 
-    // Score rule-based atual de cada um (sem novas chamadas SQL — usa o
-    // mesmo computeScore que o painel já mostra).
+    // Sinais reais de ESTRUTURA (comitê) e ATIVIDADE (check-ins) — agora
+    // alimentam o score e o contexto da IA, pra pegar "recebeu mas não produz".
+    const candIds = candidates.map((c: any) => c.id);
+    const committees: Record<string, any> = {};
+    const checkinCount: Record<string, number> = {};
+    const lastCheckinAt: Record<string, string> = {};
+    if (candIds.length) {
+      const { data: coms } = await supabase.from('party_committees').select('candidateId, photo, lat, "geoSource"').in('candidateId', candIds);
+      for (const cm of coms || []) committees[(cm as any).candidateId] = cm;
+      const { data: cks } = await supabase.from('party_checkins').select('candidateId, "createdAt"').in('candidateId', candIds);
+      for (const ck of cks || []) {
+        const k = (ck as any).candidateId;
+        checkinCount[k] = (checkinCount[k] || 0) + 1;
+        const at = (ck as any).createdAt;
+        if (at && (!lastCheckinAt[k] || at > lastCheckinAt[k])) lastCheckinAt[k] = at;
+      }
+    }
+
     const now = Date.now();
     const enriched = candidates.map((c: any) => {
+      const com = committees[c.id];
       const score = computeScore({
         status: c.status || 'pending',
-        committee: null, // signals de comitê não trafegados aqui — TODO
-        checkinCount: 0, lastCheckinAt: null,
+        committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
+        checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         coordCount: 0, leaderCount: 0,
         valorRecebido: Number(c.valorRecebido || 0),
         valorAlocado: Number(c.valorAlocado || 0),
       }, now);
-      return { ...c, score: score.score, scoreLevel: score.level, scoreReasons: score.reasons };
+      const lastCk = lastCheckinAt[c.id];
+      const diasSemCheckin = lastCk ? Math.floor((now - new Date(lastCk).getTime()) / 86400000) : null;
+      return {
+        ...c, score: score.score, scoreLevel: score.level, scoreReasons: score.reasons,
+        temComite: !!(com && com.lat), comiteFoto: !!(com && com.photo),
+        checkins: checkinCount[c.id] || 0, diasSemCheckin,
+      };
     });
 
     const linhas = enriched.map((c, i) =>
-      `${i+1}. ${c.displayName} | cargo=${c.cargo || '?'} | regiao=${c.regiao || '?'} | recebido=R$${Number(c.valorRecebido||0).toFixed(0)} | alocado=R$${Number(c.valorAlocado||0).toFixed(0)} | score=${c.score} (${c.scoreLevel}) | status=${c.status} | valve=${c.repasseStatus||'liberado'}`
+      `${i+1}. ${c.displayName} | cargo=${c.cargo || '?'} | regiao=${c.regiao || '?'} | recebido=R$${Number(c.valorRecebido||0).toFixed(0)} | alocado=R$${Number(c.valorAlocado||0).toFixed(0)} | comite=${c.temComite ? (c.comiteFoto ? 'sim+foto' : 'sim') : 'NÃO'} | checkins=${c.checkins}${c.diasSemCheckin != null ? ` (último há ${c.diasSemCheckin}d)` : ' (nunca)'} | score=${c.score} (${c.scoreLevel}) | status=${c.status} | valve=${c.repasseStatus||'liberado'}`
     ).join('\n');
 
     const system = `Você é o Auditor Antifraude do Partido. Analise a lista de candidatos e detecte padrões SUSPEITOS:
-- "absorção": recebeu R$ mas score baixo / sem comitê / sem alocação clara
-- "disparidade": R$/atividade muito acima dos pares no mesmo cargo
-- "inatividade": último sinal há muito tempo apesar de repasses
+- "absorção": recebeu R$ mas tem comite=NÃO e/ou alocado bem abaixo do recebido (dinheiro entrando sem estrutura/justificativa).
+- "disparidade": R$ muito acima dos pares do MESMO cargo sem atividade (check-ins) proporcional.
+- "inatividade": muitos dias sem check-in (ou nunca) apesar de ter recebido repasses.
 
-NÃO acuse sem evidência. Use a regra: se score é vermelho E valorRecebido > 0 E valorAlocado < 30% recebido, é forte sinal.
+NÃO acuse sem evidência — cite os NÚMEROS (recebido, alocado, comitê, check-ins, dias). Sinais fortes:
+- comite=NÃO E recebido > 0 → absorção provável.
+- score vermelho E recebido > 0 E alocado < 30% do recebido → absorção.
+- recebido > 0 E (checkins=0 ou último há >30d) → inatividade.
 
 Retorne JSON estrito (sem markdown):
 {"alerts":[{"candidateId":"uuid","priority":"alta|media|baixa","pattern":"absorção|disparidade|inatividade|ok","justification":"≤200 chars com NÚMEROS","suggested_action":"segurar|reduzir|manter|investigar + frase ≤120 chars"}]}
