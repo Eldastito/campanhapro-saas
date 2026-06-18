@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Activity, MessageSquare, Cpu, FileText, AlertTriangle } from 'lucide-react';
+import { MessageSquare, AlertTriangle } from 'lucide-react';
 import Card from '../ui/Card';
 
 interface UsageSummary {
@@ -29,9 +29,6 @@ interface Props {
   plan: Plan | null;
   withinBudget: boolean;
 }
-
-const formatBRL = (cents: number) =>
-  (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const ProgressBar: React.FC<{
   current: number;

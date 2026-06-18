@@ -21,7 +21,7 @@ const COMMITTEE_SLOTS = [
 ];
 
 const PartyCandidatePage: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const [loading, setLoading] = React.useState(true);
   const [data, setData] = React.useState<any>(null);
   const [busy, setBusy] = React.useState<string | null>(null);

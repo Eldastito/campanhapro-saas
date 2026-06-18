@@ -551,7 +551,7 @@ Responda APENAS um objeto JSON válido (sem markdown, sem preâmbulo).`;
         const bairro = String((v as any).bairro || '').trim();
         if (!bairro) continue;
         // visitas não trazem município; agrupa por bairro só
-        for (const [key, b] of buckets) {
+        for (const [, b] of buckets) {
           if (b.bairro === bairro) {
             if ((v as any).realizada) { b.visitasFeitas++; b.votosEstim += Number((v as any).votos || 0); }
             break;

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {
-  Landmark, Users, Wallet, Target, Plus, MapPinned, ShieldCheck,
+  Landmark, Users, Wallet, Target, Plus, MapPinned,
   Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle, Search, Pencil, Trash2,
   Eye, EyeOff, Sparkles,
 } from 'lucide-react';

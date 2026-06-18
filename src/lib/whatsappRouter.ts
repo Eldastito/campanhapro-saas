@@ -21,7 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { sendText } from '../server/modules/integrations/evolutionApiClient';
 import { fireOrchestration } from './orchestrationTriggers';
-import { classifyMessage, ClassificationResult, RoutingIntent } from './whatsappClassifier';
+import { classifyMessage, ClassificationResult } from './whatsappClassifier';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { retrieveContext } from '../server/modules/rag/knowledgeIngest';
 import { isCampaignPaused } from './campaignPauseGate';

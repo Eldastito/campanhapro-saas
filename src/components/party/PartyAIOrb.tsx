@@ -9,7 +9,7 @@
  * Segurança: backend valida role + escopa tudo ao partido. IA nunca escreve.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, X, Send, Mic, Loader2, Bot, User, CheckCircle2, XCircle, Volume2, FileText } from 'lucide-react';
+import { Sparkles, X, Send, Mic, Loader2, Bot, User, CheckCircle2, XCircle, Volume2 } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import PartyRepasseReport from './PartyRepasseReport';
 

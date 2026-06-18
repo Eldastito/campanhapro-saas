@@ -1,4 +1,7 @@
-export type TeamMemberRole = 'Coordenador' | 'Líder' | 'Apoiador' | 'Colaborador' | 'Pesquisador' | 'blocked';
+// Mantém paridade com TEAM_MEMBER_ROLES em types/roles.ts (source of truth).
+// 'Fiscal' (de urna) já existia na lista canônica mas faltava aqui — a UI de
+// equipe oferece a função, então a ausência quebrava a comparação (TS2367).
+export type TeamMemberRole = 'Coordenador' | 'Líder' | 'Apoiador' | 'Colaborador' | 'Pesquisador' | 'Fiscal' | 'blocked';
 
 export interface TeamMember {
     id: string | number;

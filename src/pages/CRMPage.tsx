@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users, UserPlus, Search, Calendar,
-  MessageSquare, TrendingUp, Phone, MapPin,
+  MessageSquare, Phone, MapPin,
   Sparkles, Target, Activity,
-  Award, Filter, MoreVertical, Send, Upload, Zap
+  Filter, MoreVertical, Send, Upload, Zap
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer,

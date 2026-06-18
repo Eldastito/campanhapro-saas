@@ -5,7 +5,7 @@
  * NUNCA registrou visita vs quem só "esfriou".
  */
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Clock, UserX, RefreshCw, Phone } from 'lucide-react';
+import { AlertTriangle, Clock, UserX, RefreshCw } from 'lucide-react';
 import Card from '../ui/Card';
 import { supabase } from '../../lib/supabaseClient';
 
