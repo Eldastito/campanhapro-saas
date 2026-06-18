@@ -1,9 +1,8 @@
 /**
  * Card "Chaves de acesso" (Configurações > Segurança).
- * Fase 2: cadastro por nome de dispositivo.
- * Fase 3: gerenciamento — listar + remover (com confirmação), atrás da flag
- * `management`. Renomear NÃO é exposto: a SDK do Supabase não suporta atualizar
- * o friendly_name de um fator (ele é definido só no cadastro).
+ * Cadastro + gerenciamento (listar + remover com confirmação, atrás da flag
+ * `management`) usando a Estratégia B — backend próprio (/api/v1/passkeys) +
+ * SimpleWebAuthn. Renomear NÃO é exposto (definido só no cadastro).
  *
  * Autocontido: renderiza NULL se a flag de cadastro estiver off ou o navegador
  * não suportar WebAuthn. Remover é seguro: o login por e-mail/senha permanece
@@ -14,7 +13,8 @@ import { KeyRound, ShieldCheck, Loader2, Trash2 } from 'lucide-react';
 import Card from '../ui/Card';
 import { passkeyFlags } from '../../lib/passkeys/flags';
 import { detectPasskeySupport } from '../../lib/passkeys/support';
-import { registerPasskey, listPasskeys, removePasskey, type PasskeyDevice } from '../../lib/passkeys/service';
+import type { PasskeyDevice } from '../../lib/passkeys/service';
+import { registerPasskeyB, listPasskeysB, removePasskeyB } from '../../lib/passkeys/serviceB';
 import { mapPasskeyError } from '../../lib/passkeys/errors';
 
 function fmtDate(iso?: string): string {
@@ -36,7 +36,7 @@ const PasskeyCard: React.FC = () => {
 
   const loadKeys = React.useCallback(async () => {
     if (!passkeyFlags.management) return;
-    try { setKeys(await listPasskeys()); } catch { /* silencioso */ }
+    try { setKeys(await listPasskeysB()); } catch { /* silencioso */ }
   }, []);
 
   React.useEffect(() => {
@@ -52,7 +52,7 @@ const PasskeyCard: React.FC = () => {
     setMsg(null);
     setBusy(true);
     try {
-      await registerPasskey(deviceName.trim() || 'Meu dispositivo');
+      await registerPasskeyB(deviceName.trim() || 'Meu dispositivo');
       setMsg({ kind: 'ok', text: 'Chave de acesso ativada neste dispositivo.' });
       setDeviceName('');
       loadKeys();
@@ -67,7 +67,7 @@ const PasskeyCard: React.FC = () => {
     setBusy(true);
     setConfirmId(null);
     try {
-      await removePasskey(id);
+      await removePasskeyB(id);
       setMsg({ kind: 'ok', text: 'Chave de acesso removida.' });
       loadKeys();
     } catch (e) {
