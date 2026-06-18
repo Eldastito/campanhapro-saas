@@ -43,7 +43,7 @@ const LoginPage = () => {
 
         <div className="w-full max-w-sm space-y-6 rounded-2xl border border-white/15 bg-white/5 p-8 shadow-2xl backdrop-blur-xl">
           <div className="text-center">
-            <h2 className="text-3xl font-bold text-white">Acessar Plataforma</h2>
+            <h2 className="font-display text-3xl font-bold tracking-tight text-white">Acessar Plataforma</h2>
             <p className="mt-2 text-sm text-slate-300">Entre para continuar</p>
           </div>
 
@@ -53,55 +53,53 @@ const LoginPage = () => {
             </p>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-8">
-            {/* E-mail com label flutuante */}
-            <div className="relative z-0">
-              <input
-                type="email"
-                id="floating_email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="peer block w-full appearance-none border-0 border-b-2 border-slate-400/60 bg-transparent px-0 py-2.5 text-sm text-white focus:border-sky-400 focus:outline-none focus:ring-0"
-                placeholder=" "
-                autoComplete="email"
-                required
-              />
-              <label
-                htmlFor="floating_email"
-                className="absolute top-3 -z-10 origin-[0] -translate-y-6 scale-75 transform text-sm text-slate-300 duration-300 peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-focus:left-0 peer-focus:-translate-y-6 peer-focus:scale-75 peer-focus:text-sky-400"
-              >
-                <User className="mr-2 -mt-1 inline-block" size={16} />
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* E-mail */}
+            <div>
+              <label htmlFor="login_email" className="mb-1.5 block text-xs font-medium text-slate-300">
                 E-mail
               </label>
+              <div className="relative">
+                <User className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type="email"
+                  id="login_email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="field-dark w-full rounded-xl border border-white/15 bg-white/5 py-3 pl-10 pr-4 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/30"
+                  placeholder="seu@email.com"
+                  autoComplete="email"
+                  required
+                />
+              </div>
             </div>
 
-            {/* Senha com label flutuante + mostrar/ocultar */}
-            <div className="relative z-0">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                id="floating_password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="peer block w-full appearance-none border-0 border-b-2 border-slate-400/60 bg-transparent px-0 py-2.5 pr-8 text-sm text-white focus:border-sky-400 focus:outline-none focus:ring-0"
-                placeholder=" "
-                autoComplete="current-password"
-                required
-              />
-              <label
-                htmlFor="floating_password"
-                className="absolute top-3 -z-10 origin-[0] -translate-y-6 scale-75 transform text-sm text-slate-300 duration-300 peer-placeholder-shown:translate-y-0 peer-placeholder-shown:scale-100 peer-focus:left-0 peer-focus:-translate-y-6 peer-focus:scale-75 peer-focus:text-sky-400"
-              >
-                <Lock className="mr-2 -mt-1 inline-block" size={16} />
+            {/* Senha com mostrar/ocultar */}
+            <div>
+              <label htmlFor="login_password" className="mb-1.5 block text-xs font-medium text-slate-300">
                 Senha
               </label>
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-0 top-2 text-slate-400 transition hover:text-white"
-                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
+              <div className="relative">
+                <Lock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  id="login_password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="field-dark w-full rounded-xl border border-white/15 bg-white/5 py-3 pl-10 pr-11 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/30"
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-white"
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center justify-end">

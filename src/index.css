@@ -1,4 +1,18 @@
+/* Fontes reais (antes "Inter" era declarada mas nunca carregada → caía no
+   fallback do sistema). Sora é usada nos títulos, igual ao deck. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap');
 @import "tailwindcss";
+
+/* Campos do login (.field-dark): impede o autofill do Chrome de pintar a
+   caixa de branco e trocar a cor do texto, mantendo o visual de vidro escuro. */
+.field-dark:-webkit-autofill,
+.field-dark:-webkit-autofill:hover,
+.field-dark:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff;
+  caret-color: #fff;
+  -webkit-box-shadow: 0 0 0 1000px rgba(15, 23, 42, 0.55) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
 
 /* Hide arrows in numeric inputs for a better UX */
 input::-webkit-outer-spin-button,
@@ -14,6 +28,7 @@ input[type=number] {
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 :root {
