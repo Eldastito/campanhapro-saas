@@ -320,6 +320,12 @@ h1,h2,h3,h4,.font-display{font-family:"Sora","Inter",sans-serif;letter-spacing:-
 /* ===== Slide 10 — radial agents ===== */
 /* dead-center absoluto no slide (antes ficava deslocado pra direita/baixo) */
 .radial{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(70vh,700px);height:min(70vh,700px)}
+/* IMPORTANTE: .frag.in{transform:none} (2 classes) sobrescrevia o translate de
+   centralização de .core-node/.agent (1 classe) ao revelar o slide, jogando-os
+   pro CANTO do ponto em vez do centro. O id #radial tem especificidade maior e
+   garante a centralização mesmo depois do reveal (opacity continua animando).
+   Os spokes usam transform inline (rotate), que já vence sozinho. */
+#radial .core-node,#radial .agent{transform:translate(-50%,-50%)}
 .core-node{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:170px;height:170px;
   border-radius:50%;display:grid;place-items:center;text-align:center;z-index:5;
   background:radial-gradient(circle at 50% 40%,rgba(56,225,255,.3),rgba(8,26,44,.9));
