@@ -358,9 +358,14 @@ const PartyPresidentPage: React.FC = () => {
   // candidato se houver; senão abre o WhatsApp pra escolher o contato.
   const sendWhatsApp = (c: Candidate) => {
     if (!c.inviteToken) return;
-    const msg = `Olá, ${c.displayName}! Faça seu cadastro no ${party?.name || 'partido'} por este link (seu nome já está reservado, é só criar a senha): ${inviteUrl(c.inviteToken)}`;
     const phone = (c.phone || '').replace(/\D/g, '');
-    const wa = phone ? `https://wa.me/${phone.length <= 11 ? '55' + phone : phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    // Sem telefone válido → não abre o WhatsApp "vazio" (confuso). Orienta a editar.
+    if (phone.length < 10) {
+      window.alert(`"${c.displayName}" está sem telefone. Edite o candidato (lápis) e adicione o WhatsApp pra abrir a conversa direto — ou use "Copiar link" e envie por outro meio.`);
+      return;
+    }
+    const msg = `Olá, ${c.displayName}! Faça seu cadastro no ${party?.name || 'partido'} por este link (seu nome já está reservado, é só criar a senha): ${inviteUrl(c.inviteToken)}`;
+    const wa = `https://wa.me/${phone.length <= 11 ? '55' + phone : phone}?text=${encodeURIComponent(msg)}`;
     window.open(wa, '_blank');
   };
 
