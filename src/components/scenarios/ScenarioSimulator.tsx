@@ -322,7 +322,9 @@ export const ScenarioSimulator: React.FC = () => {
     if (res.status === 503) return 'IA não configurada no servidor (defina OPENAI_API_KEY ou CLAUDE_API_KEY).';
     if (res.status === 402) return 'Orçamento de IA da campanha esgotado.';
     if (res.status === 429) return 'Muitas chamadas em sequência. Aguarde alguns segundos e tente de novo.';
-    return j?.error || 'Erro inesperado.';
+    // Inclui o detalhe do provedor (quando houver) pra diagnóstico — ex.: modelo
+    // inválido, chave sem crédito, etc.
+    return [j?.error, j?.detail].filter(Boolean).join(' — ') || 'Erro inesperado.';
   };
   const currentOpinion = (id: string): number => {
     for (let i = transcript.length - 1; i >= 0; i--) {
