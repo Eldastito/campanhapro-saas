@@ -185,7 +185,8 @@ const AdminPlansPanel: React.FC = () => {
       )}
 
       <Card>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead className="text-xs uppercase text-slate-500 border-b border-slate-700">
             <tr>
               <th className="text-left py-2 px-2">ID</th>
@@ -224,6 +225,7 @@ const AdminPlansPanel: React.FC = () => {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
 
       {editing && (
@@ -239,7 +241,7 @@ const AdminPlansPanel: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-slate-400 mb-1 block">ID do plano *</label>
                   <input
@@ -276,7 +278,7 @@ const AdminPlansPanel: React.FC = () => {
 
               <div>
                 <label className="text-xs text-slate-400 mb-2 block">Funcionalidades incluídas</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {ALL_FEATURES.map(f => (
                     <label key={f} className={`cursor-pointer border rounded-lg px-2 py-1.5 text-xs transition-colors ${
                       editing.features.includes(f)
@@ -303,7 +305,7 @@ const AdminPlansPanel: React.FC = () => {
 
               <div>
                 <label className="text-xs text-slate-400 mb-2 block">Limites (use -1 para ilimitado)</label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {LIMITS.map(l => (
                     <div key={l.key}>
                       <label className="text-[10px] text-slate-500 block mb-0.5">{l.label}</label>

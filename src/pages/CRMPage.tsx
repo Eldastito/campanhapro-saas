@@ -261,7 +261,7 @@ const CRMPage: React.FC = () => {
           </h1>
           <p className="text-gray-400">Gestão de eleitores e apoiadores assistida por IA.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mr-2">
             <button
               onClick={() => setViewMode('table')}
@@ -721,7 +721,7 @@ const CRMPage: React.FC = () => {
                 </div>
                 )}
                 {!hideC('zonaSecao') && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] text-gray-500 font-bold uppercase">Zona</label>
                     <input
@@ -749,7 +749,7 @@ const CRMPage: React.FC = () => {
                 {!hideC('funil') && (
                 <div className="pt-3 mt-1 border-t border-white/5">
                   <p className="text-[10px] font-black uppercase text-blue-400 tracking-widest mb-3">Funil de Conversão (para a IA)</p>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase">Intenção de voto</label>
                       <select
@@ -778,7 +778,7 @@ const CRMPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
                     <div>
                       <label className="text-[10px] text-gray-500 font-bold uppercase">Estágio no funil</label>
                       <select

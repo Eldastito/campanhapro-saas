@@ -236,7 +236,7 @@ const PartyCandidatePage: React.FC = () => {
         </button>
 
         {/* 4 slots de foto padronizados */}
-        <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
           {COMMITTEE_SLOTS.map((slot, i) => (
             <label key={slot.key} className="relative block rounded-xl overflow-hidden border border-white/10 bg-slate-950 cursor-pointer aspect-[4/3]">
               {photos[i]

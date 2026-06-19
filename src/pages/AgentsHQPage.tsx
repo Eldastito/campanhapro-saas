@@ -623,7 +623,7 @@ const AgentRoom: React.FC<AgentRoomProps> = ({ title, description, agentId, camp
                     <p className="text-[10px] font-bold text-slate-500 uppercase mb-2 tracking-widest flex items-center gap-2">
                         <SparklesIcon className="w-3 h-3 text-yellow-400" /> Ativos Criativos Recentes
                     </p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                         {history
                             .filter(m => m.content.includes('![ATIVO GERADO]'))
                             .slice(-3)

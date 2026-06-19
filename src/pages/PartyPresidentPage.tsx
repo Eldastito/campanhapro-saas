@@ -643,7 +643,7 @@ const PartyPresidentPage: React.FC = () => {
               {ranked.length >= 3 && (
                 <div className="bg-gradient-to-br from-indigo-600/15 to-purple-600/10 border border-white/10 rounded-3xl p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-indigo-300 mb-3 flex items-center gap-1.5"><Trophy className="w-4 h-4" /> Destaques do partido</p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {ranked.slice(0, 3).map((c, i) => (
                       <button key={c.id} onClick={() => openProof(c)} className="text-center bg-[#1c2128] rounded-2xl border border-white/5 hover:border-white/20 p-3 transition-colors">
                         <div className="text-2xl">{medal(i)}</div>
@@ -917,7 +917,7 @@ const PartyPresidentPage: React.FC = () => {
             </div>
             <div className="space-y-2">
               <input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <select value={form.cargo} onChange={(e) => setForm({ ...form, cargo: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white">
                   <option value="">Cargo</option>
                   {CARGOS.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -950,7 +950,7 @@ const PartyPresidentPage: React.FC = () => {
             </div>
             <div className="space-y-2">
               <input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <select value={editForm.cargo} onChange={(e) => setEditForm({ ...editForm, cargo: e.target.value })} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white">
                   <option value="">Cargo</option>
                   {CARGOS.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -1096,7 +1096,7 @@ const PartyPresidentPage: React.FC = () => {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
               <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor total recebido *" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold" />
               <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
             </div>
@@ -1203,7 +1203,7 @@ const PartyPresidentPage: React.FC = () => {
                   {VALVE_META[proofFor.repasseStatus || 'liberado']?.emoji} {VALVE_META[proofFor.repasseStatus || 'liberado']?.label}
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {(['liberado', 'retido', 'cortado'] as const).map((d) => (
                   <button key={d} onClick={() => setValve(d)} disabled={!!valveBusy}
                     className={`text-xs font-bold rounded-lg px-2 py-2 border disabled:opacity-50 transition-colors ${
@@ -1263,7 +1263,7 @@ const PartyPresidentPage: React.FC = () => {
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Check-ins ({proofData?.checkins?.length || 0})</p>
                   {proofData?.checkins?.length ? (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {proofData.checkins.map((ck) => (
                         <div key={ck.id} className="bg-[#1c2128] rounded-xl border border-white/5 overflow-hidden">
                           {ck.photo

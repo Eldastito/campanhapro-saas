@@ -409,7 +409,7 @@ const RoutinesPage: React.FC = () => {
                   className="w-full bg-slate-700 text-slate-200 rounded-lg px-3 py-2 text-sm border border-slate-600 focus:outline-none focus:border-violet-500 resize-none"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-slate-400 block mb-1">Concorrência</label>
                   <select

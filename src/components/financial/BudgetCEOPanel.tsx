@@ -221,7 +221,7 @@ const BudgetCEOPanel: React.FC = () => {
         </div>
 
         {/* Top stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
           <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-3">
             <p className="text-xs text-slate-500">Orçamento total</p>
             <p className="text-base font-bold text-slate-200 mt-0.5">{brl(summary.totalBudgetCents)}</p>
