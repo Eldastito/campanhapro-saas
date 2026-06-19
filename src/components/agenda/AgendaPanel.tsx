@@ -243,10 +243,13 @@ const AgendaPanel: React.FC<AgendaPanelProps> = ({ voiceSlot }) => {
     const totalAwaiting = events.filter(e => e.status === 'aguardando_ok').length;
 
     return (
-        <div className="flex bg-[#161b22] border border-white/5 rounded-3xl overflow-hidden" style={{ minHeight: 520 }}>
+        <div className="flex flex-col lg:flex-row bg-[#161b22] border border-white/5 rounded-3xl overflow-hidden lg:min-h-[520px]">
 
-            {/* ── Left: calendar + mini stats ── */}
-            <div className="w-72 flex-shrink-0 border-r border-white/5 flex flex-col bg-slate-900/30">
+            {/* ── Left: calendar + mini stats ──
+                No mobile vira faixa no topo (w-full + borda embaixo); em ≥lg
+                volta a ser a coluna lateral fixa. Antes era w-72 flex-shrink-0
+                num flex-row → no celular comia 288px e truncava o conteúdo. */}
+            <div className="w-full lg:w-72 lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-white/5 flex flex-col bg-slate-900/30">
 
                 {/* Calendar */}
                 <div className="p-5 border-b border-white/5">
@@ -329,7 +332,7 @@ const AgendaPanel: React.FC<AgendaPanelProps> = ({ voiceSlot }) => {
             <div className="flex-1 flex flex-col overflow-hidden">
 
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-slate-900/20">
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-white/5 bg-slate-900/20">
                     <div>
                         <h2 className="text-lg font-bold text-slate-100">
                             {new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', {
