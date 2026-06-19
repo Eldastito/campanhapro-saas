@@ -11,10 +11,18 @@
  * adversário) não trocam de lado; conduzem o debate.
  */
 import { chatCompletion } from '../ai/chatCompletion';
-// NÃO forçamos modelo aqui: o chatCompletion já escolhe o modelo certo do provedor
-// ATIVO (gpt-4o no OpenAI / claude-sonnet-4-6 no Claude). Forçar um id do registro
-// (ex.: claude-opus-4-7) quebrava quando o provedor configurado era OpenAI, ou
-// quando a conta não tinha aquele modelo → 'personas_failed'.
+
+// IA PADRÃO desta aba = ChatGPT (OpenAI), por decisão de produto. Cai pro Claude
+// só se a chave da OpenAI não existir (chatCompletion trata o fallback). Modelo
+// padrão gpt-4o-mini (barato/rápido, ótimo p/ debate multi-agente); overridável
+// por AI_MODEL_SCENARIO_OPENAI. NÃO forçar um id de modelo da Anthropic aqui —
+// foi o que causou o 'personas_failed' antes.
+const SCENARIO_AI = {
+  preferProvider: 'openai' as const,
+  // Só fixa o modelo da OpenAI se a chave existir; senão deixa undefined p/ o
+  // Claude usar o default dele (evita mandar id da OpenAI pra API da Anthropic).
+  model: process.env.OPENAI_API_KEY ? (process.env.AI_MODEL_SCENARIO_OPENAI || 'gpt-4o-mini') : undefined,
+};
 
 export interface AgentSpec {
   id: string;
@@ -74,7 +82,7 @@ export async function generatePersonas(
     `e a intenção de voto em uma palavra. Responda JSON: ` +
     `{"personas":[{"id":"...","persona":"...","opinion":0.0,"voteIntention":"..."}]}`;
 
-  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1400, temperature: 0.8 });
+  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1400, temperature: 0.8, ...SCENARIO_AI });
   const parsed = safeParse<{ personas: Array<Record<string, unknown>> }>(raw, { personas: [] });
   const byId = new Map(parsed.personas.map((p) => [String(p.id), p]));
   return agents.map((a) => {
@@ -112,7 +120,7 @@ export async function runDebateTurn(
     `Mudanças devem ser graduais e plausíveis. Responda JSON: ` +
     `{"agents":[{"id":"...","utterance":"...","opinion":0.0}]}`;
 
-  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1600, temperature: 0.85 });
+  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1600, temperature: 0.85, ...SCENARIO_AI });
   const parsed = safeParse<{ agents: Array<Record<string, unknown>> }>(raw, { agents: [] });
   const byId = new Map(parsed.agents.map((a) => [String(a.id), a]));
   return personas.map((p) => {
@@ -152,7 +160,7 @@ export async function generateReport(
     `**Resumo**, **Como a opinião migrou**, **Riscos**, **Narrativa vencedora**, **Recomendações** ` +
     `(3-5 bullets acionáveis). Seja conciso e direto.`;
 
-  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 1200, temperature: 0.6 });
+  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 1200, temperature: 0.6, ...SCENARIO_AI });
 }
 
 /** Conversa 1–1 com uma persona simulada (depois do debate). */
@@ -171,5 +179,5 @@ export async function chatWithAgent(
     `Mensagem do estrategista: "${message}"\n\n` +
     `Responda EM 1ª PESSOA, no tom da persona, curto (1-3 frases). Não saia do personagem.`;
 
-  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 400, temperature: 0.9 });
+  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 400, temperature: 0.9, ...SCENARIO_AI });
 }

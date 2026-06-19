@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
-import { useScenarioStore, type Agent, type Edge, type DebateTurn } from '../../stores/useScenarioStore';
+import { useScenarioStore, sampleSize, type Agent, type Edge, type DebateTurn } from '../../stores/useScenarioStore';
 
 /**
  * SIMULAÇÃO — grafo VIVO de população (estilo MiroFish).
@@ -18,11 +18,19 @@ import { useScenarioStore, type Agent, type Edge, type DebateTurn } from '../../
  * ao vivo. Estado persiste em store (não some ao trocar de aba / F5).
  */
 
+// archetype do cidadão:
+//  - 'militante': convicto, quase não muda (baixa abertura)
+//  - 'comum': muda gradualmente com o entorno (abertura média)
+//  - 'ponderado': reavalia a fundo — quando exposto a fontes críveis (âncoras) com
+//    visão forte e diferente da sua, reconhece e MUDA de ideia (alta abertura +
+//    sensível a argumento embasado). Modela "tinha visão superficial, se aprofundou".
+type Archetype = 'militante' | 'comum' | 'ponderado';
 interface P {
   id: string; kind: 'anchor' | 'citizen';
   label: string; type: Agent['type'] | 'citizen';
   segment?: string; stubborn?: boolean; persona?: string;
   opinion: number; opinionAnim: number; weight: number;
+  openness?: number; archetype?: Archetype;
   x: number; y: number; vx: number; vy: number; fx?: number | null; fy?: number | null;
 }
 interface Link { a: string; b: string; w: number; explicit?: boolean; etype?: Edge['type']; }
@@ -59,7 +67,10 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const ScenarioSimulator: React.FC = () => {
   const store = useScenarioStore();
-  const { label, scenario, nodes, edges, transcript, report, population } = store;
+  const { label, scenario, nodes, edges, transcript, report, electorate } = store;
+  const sample = sampleSize(electorate);             // nº de pontos desenhados
+  const perDot = Math.max(1, Math.round(electorate / sample)); // ≈ eleitores por ponto
+  const [hoods, setHoods] = React.useState<Array<{ id: string; label: string; pct: number; n: number }>>([]);
 
   const [turns, setTurns] = React.useState(3);
   const [phase, setPhase] = React.useState<string | null>(null);
@@ -113,30 +124,28 @@ export const ScenarioSimulator: React.FC = () => {
   // (Re)gera a MULTIDÃO só quando muda o conjunto de segmentos ou o tamanho —
   // NÃO quando só a opinião das âncoras muda (pra não resetar no meio do debate).
   const segments = nodes.filter((n) => n.type === 'voter_group');
-  const segKey = segments.map((s) => s.id).join(',') + '|' + population;
+  const segKey = segments.map((s) => s.id).join(',') + '|' + sample;
   React.useEffect(() => {
     const m = partsRef.current;
     for (const [id, p] of m) if (p.kind === 'citizen') m.delete(id);
     const segs = segments.length ? segments : [{ id: 'cand', label: 'Base', type: 'voter_group', opinion: 0.3, weight: 1 } as Agent];
     const totalW = segs.reduce((s, x) => s + (x.weight ?? 1), 0) || 1;
+    // sorteia o archetype: ~20% militante, ~55% comum, ~25% ponderado.
+    const pickArch = (): Archetype => { const r = Math.random(); return r < 0.2 ? 'militante' : r < 0.75 ? 'comum' : 'ponderado'; };
+    const opennessFor = (a: Archetype) => a === 'militante' ? 0.04 + Math.random() * 0.04 : a === 'comum' ? 0.12 + Math.random() * 0.1 : 0.28 + Math.random() * 0.12;
     let idx = 0;
     segs.forEach((seg) => {
-      const k = Math.max(3, Math.round((population * (seg.weight ?? 1)) / totalW));
+      // amostra proporcional ao peso do bairro/segmento (≥3 por bairro p/ existir).
+      const k = Math.max(3, Math.round((sample * (seg.weight ?? 1)) / totalW));
       const base = seg.opinion ?? 0;
       for (let i = 0; i < k; i++) {
         const op = clampO(base + randn() * 0.22);
-        const ang = Math.random() * Math.PI * 2, rad = 40 + Math.random() * 150;
-        m.set(`cz${idx}`, { id: `cz${idx}`, kind: 'citizen', label: '', type: 'citizen', segment: seg.id, opinion: op, opinionAnim: op, weight: 1, x: W / 2 + Math.cos(ang) * rad, y: H / 2 + Math.sin(ang) * rad, vx: 0, vy: 0 });
+        const arch = pickArch();
+        const ang = Math.random() * Math.PI * 2, rad = 40 + Math.random() * 160;
+        m.set(`cz${idx}`, { id: `cz${idx}`, kind: 'citizen', label: '', type: 'citizen', segment: seg.id, opinion: op, opinionAnim: op, weight: 1, openness: opennessFor(arch), archetype: arch, x: W / 2 + Math.cos(ang) * rad, y: H / 2 + Math.sin(ang) * rad, vx: 0, vy: 0 });
         idx++;
       }
     });
-    // alguns indecisos "soltos"
-    const floaters = Math.round(population * 0.08);
-    for (let i = 0; i < floaters; i++) {
-      const op = clampO(randn() * 0.3);
-      m.set(`fz${idx}`, { id: `fz${idx}`, kind: 'citizen', label: '', type: 'citizen', opinion: op, opinionAnim: op, weight: 1, x: W / 2 + randn() * 120, y: H / 2 + randn() * 120, vx: 0, vy: 0 });
-      idx++;
-    }
     linksRef.current = [];
   }, [segKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -161,39 +170,62 @@ export const ScenarioSimulator: React.FC = () => {
       if (frame % REWIRE_EVERY === 0) {
         const links: Link[] = [];
         const citizens = parts.filter((p) => p.kind === 'citizen');
-        const anchors = parts.filter((p) => p.kind === 'anchor');
         // laços explícitos entre âncoras
         for (const e of edgesRef.current) {
           if (byId.has(e.source) && byId.has(e.target)) links.push({ a: e.source, b: e.target, w: 1.4, explicit: true, etype: e.type });
         }
+        // índice de laços por cidadão (p/ influência sem reescanear tudo)
+        const nbr = new Map<string, P[]>();
+        const addNbr = (id: string, p: P) => { const a = nbr.get(id) ?? []; a.push(p); nbr.set(id, a); };
         for (const c of citizens) {
-          // laço com a âncora do segmento (puxa o cidadão pro seu grupo)
-          if (c.segment && byId.has(c.segment)) links.push({ a: c.id, b: c.segment, w: 0.7 });
-          // até 3 vizinhos parecidos e próximos
+          if (c.segment && byId.has(c.segment)) { links.push({ a: c.id, b: c.segment, w: 0.7 }); addNbr(c.id, byId.get(c.segment)!); }
+          // até 3 vizinhos parecidos e próximos (homofilia)
           const cand = parts
             .filter((o) => o.id !== c.id && Math.abs(o.opinion - c.opinion) < LINK_CONF)
             .map((o) => ({ o, d: (o.x - c.x) ** 2 + (o.y - c.y) ** 2 }))
             .sort((a, b) => a.d - b.d).slice(0, 3);
-          for (const { o } of cand) links.push({ a: c.id, b: o.id, w: 0.5 });
+          for (const { o } of cand) { links.push({ a: c.id, b: o.id, w: 0.5 }); addNbr(c.id, o); }
         }
         linksRef.current = links;
-        // Influência (confiança limitada): cidadãos migram p/ a média dos laços + âncora de segmento.
+
+        // Influência (confiança limitada + ABERTURA por archetype): cada cidadão
+        // migra rumo à média dos seus laços, na velocidade da sua abertura. Âncoras
+        // pesam mais (fontes mais visíveis/críveis).
         for (const c of citizens) {
-          let sum = 0, n = 0;
-          for (const l of links) {
-            const other = l.a === c.id ? byId.get(l.b) : l.b === c.id ? byId.get(l.a) : null;
-            if (other) { sum += other.opinion * (other.kind === 'anchor' ? 2 : 1); n += (other.kind === 'anchor' ? 2 : 1); }
+          const others = nbr.get(c.id); if (!others?.length) continue;
+          let sum = 0, n = 0; let cred: P | null = null;
+          for (const o of others) {
+            const w = o.kind === 'anchor' ? 2.2 : 1; sum += o.opinion * w; n += w;
+            if (o.kind === 'anchor' && (!cred || Math.abs(o.opinion) > Math.abs(cred.opinion))) cred = o;
           }
-          if (n) c.opinion = clampO(c.opinion + ((sum / n) - c.opinion) * 0.06);
+          const target = sum / n;
+          c.opinion = clampO(c.opinion + (target - c.opinion) * (c.openness ?? 0.12));
+          // PONDERADO se aprofunda: exposto a fonte crível com visão forte e bem
+          // diferente da sua, reconhece e muda com mais convicção rumo a ela.
+          if (c.archetype === 'ponderado' && cred) {
+            const gap = cred.opinion - c.opinion;
+            if (Math.abs(gap) > 0.4) c.opinion = clampO(c.opinion + gap * 0.10);
+          }
         }
-        void anchors;
+
+        // Posição do político por bairro/segmento (% de apoio = opinião > 0.15).
+        const agg = new Map<string, { lab: string; n: number; pro: number }>();
+        for (const c of citizens) {
+          if (!c.segment) continue;
+          const lab = byId.get(c.segment)?.label ?? c.segment;
+          const a = agg.get(c.segment) ?? { lab, n: 0, pro: 0 };
+          a.n++; if (c.opinion > 0.15) a.pro++; agg.set(c.segment, a);
+        }
+        setHoods([...agg.entries()].map(([id, v]) => ({ id, label: v.lab, pct: v.n ? Math.round((v.pro / v.n) * 100) : 0, n: v.n })).sort((a, b) => b.pct - a.pct));
       }
 
       // ── Física: homofilia (semelhante atrai, diferente repele) ──
-      const K_REP = 950, K_ATT = 0.0016, CENTER = 0.004, DAMP = 0.9;
+      // Movimento SUAVE: forças fracas (STEP), bastante atrito (DAMP) e teto de
+      // velocidade (VMAX) → deriva lenta e orgânica, sem "pular".
+      const K_REP = 620, K_ATT = 0.0011, CENTER = 0.0028, DAMP = 0.9, STEP = 0.5, VMAX = 1.25;
       for (let i = 0; i < parts.length; i++) {
         const a = parts[i];
-        a.opinionAnim += (a.opinion - a.opinionAnim) * 0.07;
+        a.opinionAnim += (a.opinion - a.opinionAnim) * 0.05;
         if (a.fx != null) continue;
         let ax = 0, ay = 0;
         for (let j = 0; j < parts.length; j++) {
@@ -205,29 +237,29 @@ export const ScenarioSimulator: React.FC = () => {
           const d = Math.sqrt(d2);
           const diff = Math.abs(a.opinion - b.opinion);     // 0 (igual) .. 2 (oposto)
           const affinity = SIM_THRESH - diff;               // >0 parecido, <0 diferente
-          // repulsão base (anti-sobreposição) + repulsão extra p/ diferentes
-          const rep = (K_REP * (diff > SIM_THRESH ? 1.8 : 0.6)) / d2;
+          const rep = (K_REP * (diff > SIM_THRESH ? 1.8 : 0.55)) / d2;
           ax += (dx / d) * rep; ay += (dy / d) * rep;
-          // atração entre parecidos (homofilia) quando estão longe
-          if (affinity > 0 && d > 60) {
-            const att = affinity * K_ATT * d;
-            ax -= (dx / d) * att; ay -= (dy / d) * att;
-          }
+          if (affinity > 0 && d > 60) { const att = affinity * K_ATT * d; ax -= (dx / d) * att; ay -= (dy / d) * att; }
         }
         ax += (cssW / 2 - a.x) * CENTER; ay += (cssH / 2 - a.y) * CENTER;
-        a.vx = (a.vx + ax) * DAMP; a.vy = (a.vy + ay) * DAMP;
+        a.vx = (a.vx + ax * STEP) * DAMP; a.vy = (a.vy + ay * STEP) * DAMP;
       }
-      // molas dos laços
+      // molas dos laços (suaves)
       for (const l of linksRef.current) {
         const a = byId.get(l.a), b = byId.get(l.b);
         if (!a || !b) continue;
         const dx = b.x - a.x, dy = b.y - a.y; const d = Math.sqrt(dx * dx + dy * dy) || 1;
         const target = l.explicit ? 95 : 55;
-        const f = (d - target) * 0.012 * l.w;
+        const f = (d - target) * 0.006 * l.w;
         if (a.fx == null) { a.vx += (dx / d) * f; a.vy += (dy / d) * f; }
         if (b.fx == null) { b.vx -= (dx / d) * f; b.vy -= (dy / d) * f; }
       }
-      for (const a of parts) { if (a.fx != null) { a.x = a.fx!; a.y = a.fy!; } else { a.x += a.vx; a.y += a.vy; } }
+      for (const a of parts) {
+        if (a.fx != null) { a.x = a.fx!; a.y = a.fy!; continue; }
+        const sp = Math.hypot(a.vx, a.vy);
+        if (sp > VMAX) { a.vx = (a.vx / sp) * VMAX; a.vy = (a.vy / sp) * VMAX; } // teto de velocidade
+        a.x += a.vx; a.y += a.vy;
+      }
 
       // ── Render ──
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -474,11 +506,12 @@ export const ScenarioSimulator: React.FC = () => {
               {savedGraphs.map((g) => <option key={g.id} value={g.id}>{g.label} ({g.nodes?.length ?? 0})</option>)}
             </select>
           )}
-          <label className="text-xs text-slate-500 flex items-center gap-1"><Users className="w-3.5 h-3.5" /> Pop.
-            <select className="text-xs bg-slate-700 border border-slate-600 rounded px-1 py-1 text-slate-300" value={population} onChange={(e) => store.setPopulation(Number(e.target.value))} disabled={!!phase}>
-              {[40, 70, 100, 140].map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
+          <label className="text-xs text-slate-500 flex items-center gap-1"><Users className="w-3.5 h-3.5" /> Eleitorado
+            <input type="number" min={1000} step={1000} value={electorate} disabled={!!phase}
+              onChange={(e) => store.setElectorate(Math.max(1000, Number(e.target.value) || 0))}
+              className="w-24 text-xs bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-indigo-500" />
           </label>
+          <span className="text-[11px] text-slate-500">{sample} pontos · ≈ {perDot.toLocaleString('pt-BR')}/ponto</span>
           <Button variant="secondary" className="text-xs px-3 py-1.5 ml-auto" onClick={save} disabled={!!phase}>
             {phase === 'save' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />} Salvar
           </Button>
@@ -539,6 +572,25 @@ export const ScenarioSimulator: React.FC = () => {
           )}
         </div>
         <p className="text-[11px] text-slate-500 mt-2">A multidão se reorganiza sozinha por afinidade · clique num agente nomeado pra conversar · arraste · scroll = zoom.</p>
+
+        {/* Posição do político por bairro/região */}
+        {hoods.length > 0 && (
+          <div className="mt-3">
+            <p className="text-[11px] font-semibold text-slate-400 mb-1.5">Posição do candidato por região (% de apoio na amostra)</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+              {hoods.map((h) => (
+                <div key={h.id} className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-400 w-28 truncate" title={h.label}>{h.label}</span>
+                  <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${h.pct}%`, backgroundColor: opinionColor((h.pct / 50) - 1) }} />
+                  </div>
+                  <span className="text-[11px] font-bold w-9 text-right" style={{ color: opinionColor((h.pct / 50) - 1) }}>{h.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {error && <p className="text-xs text-red-400 bg-red-500/10 rounded px-2 py-1 mt-2">{error}</p>}
 
         {/* Editor colapsável */}

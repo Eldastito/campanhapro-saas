@@ -10,6 +10,8 @@ type ChatArgs = {
   temperature?: number;
   jsonMode?: boolean;
   model?: string; // optional override; otherwise uses provider default
+  /** Força um provedor específico (cai pro outro se a chave do preferido faltar). */
+  preferProvider?: 'openai' | 'claude';
 };
 
 function anthropicKey(): string | undefined {
@@ -26,9 +28,16 @@ export function activeChatProvider(): 'openai' | 'claude' | null {
   return null;
 }
 
+/** Resolve o provedor honrando a preferência quando a respectiva chave existe. */
+function resolveProvider(prefer?: 'openai' | 'claude'): 'openai' | 'claude' | null {
+  if (prefer === 'openai' && process.env.OPENAI_API_KEY) return 'openai';
+  if (prefer === 'claude' && anthropicKey()) return 'claude';
+  return activeChatProvider();
+}
+
 export async function chatCompletion(args: ChatArgs): Promise<string> {
   const { system, user, maxTokens = 1200, temperature = 0.5, jsonMode = false, model } = args;
-  const provider = activeChatProvider();
+  const provider = resolveProvider(args.preferProvider);
 
   if (provider === 'openai') {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {

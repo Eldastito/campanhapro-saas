@@ -34,7 +34,7 @@ interface ScenarioState {
   transcript: DebateTurn[];
   report: string | null;
   hasPersonas: boolean;
-  population: number;        // tamanho da multidão de cidadãos
+  electorate: number;        // eleitorado estimado da região (define a amostra)
   setLabel: (v: string) => void;
   setScenario: (v: string) => void;
   setGraph: (nodes: Agent[], edges: Edge[]) => void;
@@ -44,8 +44,22 @@ interface ScenarioState {
   setTranscript: (t: DebateTurn[]) => void;
   setReport: (r: string | null) => void;
   setHasPersonas: (v: boolean) => void;
-  setPopulation: (n: number) => void;
+  setElectorate: (n: number) => void;
   resetDebate: () => void;
+}
+
+/**
+ * Fórmula da amostra: quantos PONTOS desenhar pra representar o eleitorado.
+ * Não dá pra desenhar milhões — então amostramos proporcionalmente, com piso de
+ * 140 (cenário mínimo crível) e teto ~420 (performance do canvas). Cada ponto
+ * passa a representar `eleitorado / amostra` eleitores. Crescimento sublinear
+ * (potência 0.5) → cidade pequena ~140, média ~250, capital chega no teto.
+ *   S = clamp( round( 140 * (E / 8000)^0.5 ), 140, 420 )
+ */
+export function sampleSize(electorate: number): number {
+  const E = Math.max(1000, electorate || 0);
+  const s = Math.round(140 * Math.pow(E / 8000, 0.5));
+  return Math.max(140, Math.min(420, s));
 }
 
 const DEFAULT_NODES: Agent[] = [
@@ -73,7 +87,7 @@ export const useScenarioStore = create<ScenarioState>()(
       transcript: [],
       report: null,
       hasPersonas: false,
-      population: 70,
+      electorate: 50000,
       setLabel: (label) => set({ label }),
       setScenario: (scenario) => set({ scenario }),
       setGraph: (nodes, edges) => set({ nodes, edges, transcript: [], report: null, hasPersonas: nodes.some((n) => n.persona) }),
@@ -83,7 +97,7 @@ export const useScenarioStore = create<ScenarioState>()(
       setTranscript: (transcript) => set({ transcript }),
       setReport: (report) => set({ report }),
       setHasPersonas: (hasPersonas) => set({ hasPersonas }),
-      setPopulation: (population) => set({ population }),
+      setElectorate: (electorate) => set({ electorate }),
       resetDebate: () => set({ transcript: [], report: null }),
     }),
     {
