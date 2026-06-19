@@ -33,7 +33,7 @@ import { createScenariosRouter } from './src/server/modules/scenarios/scenariosR
 import { createObservabilityRouter } from './src/server/modules/observability/observabilityRouter';
 import { requestTracer } from './src/server/modules/observability/requestTracer';
 import {
-  expensiveLimiter, messagingLimiter, mutationLimiter, webhookLimiter,
+  expensiveLimiter, aiInteractiveLimiter, messagingLimiter, mutationLimiter, webhookLimiter,
 } from './src/server/middleware/perCampaignRateLimit';
 import { createBillingRouter } from './src/server/modules/billing/billingRouter';
 import { createPlanStatusRouter } from './src/server/modules/billing/planStatusRouter';
@@ -280,7 +280,11 @@ async function startServer() {
       return requireAuth(req, res, next);        // /invites/token/:token/accept auth
     }, createTeamInvitesPublicRouter(supabaseAdmin));
     // Webhooks must NOT use requireAuth — they're authenticated via X-Hub-Signature-256
-    app.use('/api/v1/scenarios', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'scenarios'), createScenariosRouter(supabaseAdmin));
+    // Debate IA (/debate/*) é multi-passo interativo → limiter mais generoso;
+    // demais rotas de Cenários (simulate/graphs) seguem no expensiveLimiter.
+    const scenariosLimiter = (req: any, res: any, next: any) =>
+      (req.path.startsWith('/debate') ? aiInteractiveLimiter : expensiveLimiter)(req, res, next);
+    app.use('/api/v1/scenarios', requireAuth, scenariosLimiter, requireFeature(supabaseAdmin, 'scenarios'), createScenariosRouter(supabaseAdmin));
     app.use('/api/v1/goals', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'goals'), createGoalsRouter(supabaseAdmin));
     app.use('/api/v1/routines', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'routines'), createRoutinesRouter(supabaseAdmin));
     app.use('/api/v1/budget', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'budget_ceo'), createBudgetRouter(supabaseAdmin, requireAiBudget(supabaseAdmin)));
