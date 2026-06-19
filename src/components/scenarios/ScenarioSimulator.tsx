@@ -102,7 +102,7 @@ export const ScenarioSimulator: React.FC = () => {
     authedFetch('/api/v1/scenarios/graphs').then((r) => (r.ok ? r.json() : { graphs: [] })).then((j) => setSavedGraphs(j.graphs ?? [])).catch(() => {});
   }, []);
 
-  const W = 660, H = 440;
+  const W = 760, H = 560;
 
   // Sincroniza ÂNCORAS (store.nodes) → partículas, preservando posição. Roda quando
   // os nós mudam (inclui debate atualizando opinião → só ajusta o alvo).
@@ -225,8 +225,10 @@ export const ScenarioSimulator: React.FC = () => {
       // ── Física: homofilia + ESPAÇAMENTO (anti-aglomeração) ──
       // Movimento suave (STEP/DAMP/VMAX) + repulsão forte e anti-sobreposição por
       // "raio pessoal" → os nós se espalham e dá pra clicar num agente.
-      const K_REP = 1500, K_ATT = 0.0007, CENTER = 0.0016, DAMP = 0.9, STEP = 0.5, VMAX = 1.25;
-      const personalR = (p: P) => (p.kind === 'anchor' ? anchorRadius(p) + 16 : 9);
+      // Mais espaço (K_REP/raio pessoal altos), movimento mais lento (~0,75x via
+      // VMAX/STEP menores) e cenário maior (W/H) → leitura mais confortável.
+      const K_REP = 2300, K_ATT = 0.0006, CENTER = 0.0012, DAMP = 0.9, STEP = 0.42, VMAX = 0.9;
+      const personalR = (p: P) => (p.kind === 'anchor' ? anchorRadius(p) + 24 : 13);
       for (let i = 0; i < parts.length; i++) {
         const a = parts[i];
         a.opinionAnim += (a.opinion - a.opinionAnim) * 0.05;
@@ -247,7 +249,7 @@ export const ScenarioSimulator: React.FC = () => {
           const minSep = prA + personalR(b);
           if (d < minSep) { const push = (minSep - d) * 0.5; ax += (dx / d) * push; ay += (dy / d) * push; }
           // atração entre parecidos (homofilia), folgada
-          if (affinity > 0 && d > 90) { const att = affinity * K_ATT * d; ax -= (dx / d) * att; ay -= (dy / d) * att; }
+          if (affinity > 0 && d > 130) { const att = affinity * K_ATT * d; ax -= (dx / d) * att; ay -= (dy / d) * att; }
         }
         ax += (cssW / 2 - a.x) * CENTER; ay += (cssH / 2 - a.y) * CENTER;
         a.vx = (a.vx + ax * STEP) * DAMP; a.vy = (a.vy + ay * STEP) * DAMP;
@@ -257,7 +259,7 @@ export const ScenarioSimulator: React.FC = () => {
         const a = byId.get(l.a), b = byId.get(l.b);
         if (!a || !b) continue;
         const dx = b.x - a.x, dy = b.y - a.y; const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const target = l.explicit ? 150 : 78;
+        const target = l.explicit ? 205 : 100;
         const f = (d - target) * 0.005 * l.w;
         if (a.fx == null) { a.vx += (dx / d) * f; a.vy += (dy / d) * f; }
         if (b.fx == null) { b.vx -= (dx / d) * f; b.vy -= (dy / d) * f; }
@@ -586,13 +588,13 @@ export const ScenarioSimulator: React.FC = () => {
 
         {/* Palco vivo */}
         <div className="relative">
-          <canvas ref={canvasRef} className="w-full rounded-xl border border-slate-700 touch-none cursor-grab active:cursor-grabbing" style={{ height: 440 }}
+          <canvas ref={canvasRef} className="w-full rounded-xl border border-slate-700 touch-none cursor-grab active:cursor-grabbing" style={{ height: 560 }}
             onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp} />
           <div className="absolute top-2 left-2 flex items-center gap-3 text-[11px] font-semibold bg-slate-900/70 rounded-lg px-2.5 py-1">
             <span className="text-emerald-400">{stats.apoio} apoio</span><span className="text-slate-400">{stats.neutro} neutro</span><span className="text-red-400">{stats.oposicao} oposição</span>
           </div>
           {selectedNode && (
-            <div className="absolute top-2 right-2 w-64 max-h-[416px] overflow-y-auto bg-slate-900/95 border border-slate-700 rounded-xl p-3 shadow-xl">
+            <div className="absolute top-2 right-2 w-64 max-h-[536px] overflow-y-auto bg-slate-900/95 border border-slate-700 rounded-xl p-3 shadow-xl">
               <div className="flex items-start justify-between gap-2 mb-1">
                 <div><p className="text-sm font-bold text-slate-100">{selectedNode.label}</p><p className="text-[10px] text-slate-500">{NODE_TYPE_LABELS[selectedNode.type]}{selectedNode.stubborn ? ' · âncora' : ''}</p></div>
                 <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-slate-300"><X className="w-3.5 h-3.5" /></button>
