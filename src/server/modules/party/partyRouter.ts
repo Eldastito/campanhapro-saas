@@ -256,7 +256,9 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
 
     let duplicates = 0, invalid = 0;
     const toInsert: any[] = [];
-    for (const r of rows.slice(0, 500)) {
+    // Sem teto pequeno: processa TODOS os candidatos colados (limite alto só como
+    // proteção contra payload absurdo/timeout).
+    for (const r of rows.slice(0, 5000)) {
       const displayName = String(r.displayName || r.nome || '').trim().slice(0, 160);
       if (!displayName) { invalid++; continue; }
       const nk = normName(displayName);
@@ -295,7 +297,9 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const party = await partyOf(userId);
     if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
 
-    const text = String((req.body || {}).text || '').slice(0, 16000);
+    // Teto alto de entrada: a planilha colada inteira precisa chegar na IA (antes
+    // cortava em 16k chars e candidatos do fim da lista nem eram analisados).
+    const text = String((req.body || {}).text || '').slice(0, 200000);
     if (!text.trim()) return res.status(400).json({ error: 'texto_vazio' });
 
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -304,7 +308,9 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     try {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 8192 } });
+      // maxOutputTokens alto: listas grandes (centenas de candidatos) precisam caber
+      // INTEIRAS no JSON de saída, senão a IA "corta" no meio e some com o resto.
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 65536 } });
       const prompt = `Você recebe o conteúdo BRUTO de uma planilha/tabela de candidatos colada por um usuário. Pode ter cabeçalho, colunas a mais (CPF, e-mail, partido, observações, etc.), ordem qualquer, separadores variados (vírgula, ponto-e-vírgula, tab) e linhas vazias.
 
 Sua tarefa: extrair a lista de candidatos pegando APENAS estes campos:
@@ -348,7 +354,7 @@ JSON:`;
         regiao: String(r?.regiao || r?.cidade || '').trim().slice(0, 80),
         estado: normalizeUF(r?.estado || r?.uf) || '',
         phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
-      })).filter((r: any) => r.displayName).slice(0, 500);
+      })).filter((r: any) => r.displayName).slice(0, 5000);
 
       // Log leve pra observabilidade (não bloqueia, custo escondido do usuário).
       supabase.from('party_ai_command_logs').insert({
