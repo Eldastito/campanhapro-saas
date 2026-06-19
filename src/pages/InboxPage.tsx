@@ -152,7 +152,7 @@ const InboxPage: React.FC = () => {
     const selectedConvo = conversations.find(c => c.id === selectedId) ?? null;
 
     const fetchConversations = React.useCallback(async () => {
-        if (!user?.campaignId) return;
+        if (!user?.campaignId) { setLoading(false); return; }
         setLoading(true);
         try {
             const res = await authedFetch('/api/v1/channels/conversations');

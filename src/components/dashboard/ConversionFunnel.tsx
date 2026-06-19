@@ -9,14 +9,21 @@ const ConversionFunnel: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user?.campaignId) return;
+    if (!user?.campaignId) { setLoading(false); return; }
     fetchStats();
   }, [user?.campaignId]);
 
   const fetchStats = async () => {
-    const data = await getConversionFunnelStats(user!.campaignId!);
-    setStats(data);
-    setLoading(false);
+    setLoading(true);
+    try {
+      const data = await getConversionFunnelStats(user!.campaignId!);
+      setStats(data ?? []);
+    } catch {
+      setStats([]);
+    } finally {
+      // sem o finally, um erro deixava "Calculando funil…" girando pra sempre.
+      setLoading(false);
+    }
   };
 
   const getIcon = (stage: string) => {
