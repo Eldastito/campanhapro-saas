@@ -13,7 +13,7 @@ interface RankingsProps {
 }
 
 const RankingList = ({ title, data }: { title: string; data: RankingItem[] }) => (
-    <div className="flex-1 min-w-[300px]">
+    <div className="flex-1 min-w-full sm:min-w-[300px]">
         <h4 className="font-black text-xs text-slate-500 mb-4 uppercase tracking-[0.2em] border-l-2 border-slate-700 pl-3">{title}</h4>
         <ul className="space-y-2">
             {data.slice(0, 5).map((item, index) => (

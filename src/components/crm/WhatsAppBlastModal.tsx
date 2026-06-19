@@ -367,7 +367,7 @@ export const WhatsAppBlastModal: React.FC<WhatsAppBlastModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
               <div className="bg-emerald-500/10 rounded-xl p-3">
                 <p className="text-xl font-black text-emerald-400">{blastStatus.sentCount}</p>
                 <p className="text-[10px] text-gray-500">Enviados</p>
@@ -399,7 +399,7 @@ export const WhatsAppBlastModal: React.FC<WhatsAppBlastModalProps> = ({
                 {blastStatus.status === 'completed' ? 'Disparo concluído!' : 'Disparo encerrado com erros'}
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
               <div className="bg-emerald-500/10 rounded-xl p-3">
                 <p className="text-xl font-black text-emerald-400">{blastStatus.sentCount}</p>
                 <p className="text-[10px] text-gray-500">Enviados</p>

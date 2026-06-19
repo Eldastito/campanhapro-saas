@@ -196,7 +196,7 @@ const FiscalPage: React.FC = () => {
         </Card>
 
         {/* Linha de ações rápidas: incidente + coordenador */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button onClick={() => setIncidentOpen(true)}
             className="bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-300 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors">
             <AlertTriangle className="w-5 h-5" />

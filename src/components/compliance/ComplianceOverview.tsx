@@ -138,7 +138,7 @@ export const ComplianceOverview: React.FC = () => {
               <ShieldCheck className="w-4 h-4 text-indigo-400" />
               LGPD — Consentimentos
             </h3>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <StatCard icon={<Users className="w-5 h-5" />} label="Total" value={summary.consents.total} />
               <StatCard icon={<CheckCircle className="w-5 h-5" />} label="Granted" value={summary.consents.granted} />
               <StatCard icon={<AlertTriangle className="w-5 h-5" />} label="Revogados" value={summary.consents.revoked} tone="warn" />
@@ -203,7 +203,7 @@ export const ComplianceOverview: React.FC = () => {
 
           <div>
             <h3 className="text-sm font-semibold text-slate-300 mb-2">Auditoria (24h)</h3>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <StatCard icon={<Activity className="w-5 h-5" />} label="Eventos" value={summary.audit.total24h} />
               <StatCard
                 icon={<AlertTriangle className="w-5 h-5" />}
