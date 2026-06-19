@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned,
   Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle, Search, Pencil, Trash2,
-  Eye, EyeOff, Sparkles,
+  Eye, EyeOff, Sparkles, FileText,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -158,6 +158,10 @@ const PartyPresidentPage: React.FC = () => {
   const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string }[] | null>(null);
   const [aiIgnored, setAiIgnored] = React.useState<string[]>([]);
   const [aiError, setAiError] = React.useState<string | null>(null);
+  // Arquivo arrastado (imagem/PDF) que vai direto pra IA multimodal; CSV/Excel
+  // viram texto e caem em importText.
+  const [aiFile, setAiFile] = React.useState<{ base64: string; mimeType: string; name: string } | null>(null);
+  const [dragOver, setDragOver] = React.useState(false);
   const [importSummary, setImportSummary] = React.useState<{ created: number; duplicates: number; invalid: number } | null>(null);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = React.useState(false);
@@ -198,8 +202,18 @@ const PartyPresidentPage: React.FC = () => {
     if (!window.confirm(`Excluir "${c.displayName}"? Isso remove o candidato e todos os dados dele (comitê, check-ins, repasses).${c.status === 'active' ? ' A conta de acesso dele também será apagada.' : ''}`)) return;
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${c.id}`, { method: 'DELETE' });
-      if (r.ok) { setCandidates((prev) => prev.filter((x) => x.id !== c.id)); }
-    } catch { /* */ }
+      if (r.ok) {
+        setCandidates((prev) => prev.filter((x) => x.id !== c.id));
+      } else {
+        // Antes falhava em silêncio (o item "voltava" no reload). Agora avisa.
+        const j = await r.json().catch(() => ({}));
+        alert(j?.error === 'not_found'
+          ? 'Não consegui excluir: candidato não encontrado ou fora do seu partido.'
+          : `Não consegui excluir (${j?.error || r.status}).`);
+      }
+    } catch {
+      alert('Falha de rede ao excluir. Tente de novo.');
+    }
   };
 
   // Válvula de repasse — funciona tanto no modal de prova quanto inline (aba Repasses).
@@ -312,17 +326,57 @@ const PartyPresidentPage: React.FC = () => {
     } finally { setImporting(false); }
   };
 
-  // IA: extrai candidatos de uma planilha "suja" → preview (não salva ainda).
+  // Lê o arquivo arrastado/escolhido. CSV/TXT e Excel viram texto (no navegador);
+  // imagem e PDF vão como base64 pra IA ler nativamente (multimodal).
+  const handleDroppedFile = async (file: File) => {
+    setAiError(null); setAiPreview(null); setAiIgnored([]); setAiFile(null);
+    const name = file.name.toLowerCase();
+    const isExcel = /\.(xlsx|xls)$/.test(name) || /sheet|excel/.test(file.type);
+    const isText = file.type.startsWith('text/') || /\.(csv|tsv|txt)$/.test(name);
+    const isImg = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/.test(name);
+    try {
+      if (isExcel) {
+        const XLSX = await import('xlsx');
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const csv = wb.SheetNames.map((n) => XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n');
+        setImportText(csv);
+        setAiError(csv.trim() ? null : 'A planilha veio vazia. Confira o arquivo.');
+      } else if (isText) {
+        setImportText(await file.text());
+      } else if (isImg || isPdf) {
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result));
+          fr.onerror = () => reject(new Error('read_fail'));
+          fr.readAsDataURL(file);
+        });
+        const base64 = dataUrl.split(',')[1] || '';
+        setAiFile({ base64, mimeType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'), name: file.name });
+        setImportText('');
+      } else {
+        setAiError('Formato não suportado. Use CSV, TXT, Excel, PDF ou imagem.');
+      }
+    } catch {
+      setAiError('Não consegui ler o arquivo. Tente outro formato ou cole o texto.');
+    }
+  };
+
+  // IA: extrai candidatos de planilha colada OU de arquivo (imagem/PDF) → preview.
   const parseWithAI = async () => {
-    if (!importText.trim()) return;
+    if (!importText.trim() && !aiFile) return;
     setAiParsing(true); setAiError(null); setAiPreview(null); setAiIgnored([]);
     try {
-      const r = await authedFetch('/api/v1/party/candidates/parse-ai', { method: 'POST', body: JSON.stringify({ text: importText }) });
+      const payload = aiFile
+        ? { fileBase64: aiFile.base64, mimeType: aiFile.mimeType }
+        : { text: importText };
+      const r = await authedFetch('/api/v1/party/candidates/parse-ai', { method: 'POST', body: JSON.stringify(payload) });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message || j?.error || 'Falha ao organizar');
       setAiPreview(j.candidates || []);
       setAiIgnored(j.ignored || []);
-      if (!(j.candidates || []).length) setAiError('Não encontrei candidatos nessa planilha. Confira o conteúdo colado.');
+      if (!(j.candidates || []).length) setAiError('Não encontrei candidatos. Confira o conteúdo colado ou o arquivo.');
     } catch (e: any) {
       setAiError(e?.message || 'Erro ao organizar com IA.');
     } finally { setAiParsing(false); }
@@ -347,6 +401,7 @@ const PartyPresidentPage: React.FC = () => {
   const closeImport = () => {
     setImportOpen(false); setImportText(''); setImportMode('manual');
     setAiPreview(null); setAiIgnored([]); setAiError(null); setImportSummary(null);
+    setAiFile(null); setDragOver(false);
   };
 
   const inviteUrl = (token: string) => `${window.location.origin}/cadastro/partido/${token}`;
@@ -1001,7 +1056,7 @@ const PartyPresidentPage: React.FC = () => {
             {/* Seletor de modo */}
             <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 border border-white/10 rounded-xl mb-3">
               {([['manual', 'Colar simples'], ['ia', '🤖 Organizar com IA']] as const).map(([m, label]) => (
-                <button key={m} onClick={() => { setImportMode(m); setAiPreview(null); setAiError(null); }}
+                <button key={m} onClick={() => { setImportMode(m); setAiPreview(null); setAiError(null); setAiFile(null); }}
                   className={`text-xs font-bold py-2 rounded-lg transition-colors ${importMode === m ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>{label}</button>
               ))}
             </div>
@@ -1019,13 +1074,43 @@ const PartyPresidentPage: React.FC = () => {
               </>
             ) : (
               <>
-                <p className="text-xs text-slate-400 mb-2">Cole a planilha <b>do jeito que ela está</b> — com cabeçalho, colunas extras (CPF, e-mail, observações), ordem qualquer. A IA acha sozinha o nome, cargo, cidade, UF e telefone. Você confere antes de salvar.</p>
-                <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={7} disabled={aiParsing}
-                  placeholder={'Cole aqui (ex: copie direto do Excel/Google Sheets)\nNome\tCPF\tCargo\tCidade\tUF\tWhatsApp\tObs\nJoão Silva\t000...\tVereador\tNiterói\tRJ\t21999990000\tamigo do diretório'}
-                  className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono disabled:opacity-60" />
+                <p className="text-xs text-slate-400 mb-2">Arraste um arquivo (CSV, Excel, PDF ou foto da lista) <b>ou</b> cole a planilha do jeito que ela está. A IA acha sozinha o nome, cargo, cidade, UF e telefone, limpa o resto, e você confere antes de salvar.</p>
+
+                {/* Zona de arrastar/soltar arquivo */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) handleDroppedFile(f); }}
+                  className={`mb-2 rounded-xl border border-dashed px-3 py-4 text-center transition-colors ${dragOver ? 'border-fuchsia-400 bg-fuchsia-500/10' : 'border-white/15 bg-slate-950/50'}`}
+                >
+                  {aiFile ? (
+                    <div className="flex items-center justify-center gap-2 text-sm text-emerald-300">
+                      <FileText className="w-4 h-4" /> {aiFile.name}
+                      <button onClick={() => setAiFile(null)} className="text-slate-400 hover:text-rose-400"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5 text-slate-500 mx-auto mb-1" />
+                      <p className="text-xs text-slate-400">Arraste o arquivo aqui ou{' '}
+                        <label className="text-fuchsia-400 hover:text-fuchsia-300 underline cursor-pointer">
+                          escolha
+                          <input type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.pdf,image/*" className="hidden"
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDroppedFile(f); e.currentTarget.value = ''; }} />
+                        </label>
+                      </p>
+                      <p className="text-[10px] text-slate-600 mt-0.5">CSV · Excel · PDF · imagem</p>
+                    </>
+                  )}
+                </div>
+
+                {!aiFile && (
+                  <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={6} disabled={aiParsing}
+                    placeholder={'…ou cole aqui (copie direto do Excel/Google Sheets)\nNome\tCPF\tCargo\tCidade\tUF\tWhatsApp\tObs\nJoão Silva\t000...\tVereador\tNiterói\tRJ\t21999990000\tamigo do diretório'}
+                    className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono disabled:opacity-60" />
+                )}
 
                 {!aiPreview && (
-                  <button onClick={parseWithAI} disabled={aiParsing || !importText.trim()} className="w-full mt-3 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
+                  <button onClick={parseWithAI} disabled={aiParsing || (!importText.trim() && !aiFile)} className="w-full mt-3 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
                     {aiParsing ? <><Loader2 className="w-4 h-4 animate-spin" /> Organizando…</> : <><Sparkles className="w-4 h-4" /> Organizar com IA</>}
                   </button>
                 )}

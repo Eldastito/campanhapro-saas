@@ -256,7 +256,9 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
 
     let duplicates = 0, invalid = 0;
     const toInsert: any[] = [];
-    for (const r of rows.slice(0, 500)) {
+    // Sem teto pequeno: processa TODOS os candidatos colados (limite alto só como
+    // proteção contra payload absurdo/timeout).
+    for (const r of rows.slice(0, 5000)) {
       const displayName = String(r.displayName || r.nome || '').trim().slice(0, 160);
       if (!displayName) { invalid++; continue; }
       const nk = normName(displayName);
@@ -295,8 +297,18 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     const party = await partyOf(userId);
     if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
 
-    const text = String((req.body || {}).text || '').slice(0, 16000);
-    if (!text.trim()) return res.status(400).json({ error: 'texto_vazio' });
+    // Entrada: texto colado OU um arquivo (imagem/PDF) arrastado. CSV/Excel viram
+    // texto no frontend; imagem e PDF chegam aqui em base64 pra IA ler nativamente.
+    const body = (req.body || {}) as any;
+    const text = String(body.text || '').slice(0, 200000);
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : '';
+    const mimeType = String(body.mimeType || '');
+    const isFile = !!fileBase64 && /^(image\/|application\/pdf)/.test(mimeType);
+    // ~10MB de base64 (≈7,5MB de arquivo) — protege contra payload absurdo.
+    if (isFile && fileBase64.length > 10_000_000) {
+      return res.status(413).json({ error: 'arquivo_grande', message: 'Arquivo muito grande. Use um menor ou cole o texto.' });
+    }
+    if (!text.trim() && !isFile) return res.status(400).json({ error: 'texto_vazio' });
 
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) return res.status(503).json({ error: 'ia_indisponivel', message: 'A IA está indisponível agora. Use o modo "Colar simples".' });
@@ -304,8 +316,10 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     try {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(geminiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 8192 } });
-      const prompt = `Você recebe o conteúdo BRUTO de uma planilha/tabela de candidatos colada por um usuário. Pode ter cabeçalho, colunas a mais (CPF, e-mail, partido, observações, etc.), ordem qualquer, separadores variados (vírgula, ponto-e-vírgula, tab) e linhas vazias.
+      // maxOutputTokens alto: listas grandes (centenas de candidatos) precisam caber
+      // INTEIRAS no JSON de saída, senão a IA "corta" no meio e some com o resto.
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 65536 } });
+      const regras = `Você recebe uma lista de candidatos de um partido — pode vir como planilha colada (com cabeçalho, colunas extras tipo CPF/e-mail/observações, ordem qualquer, separadores variados) OU como um ARQUIVO (imagem/foto de uma lista, ou PDF).
 
 Sua tarefa: extrair a lista de candidatos pegando APENAS estes campos:
 - displayName: nome da pessoa (obrigatório)
@@ -317,23 +331,22 @@ Sua tarefa: extrair a lista de candidatos pegando APENAS estes campos:
 Responda SOMENTE em JSON válido (nada fora do JSON):
 {
   "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "" } ],
-  "colunasIgnoradas": ["nome das colunas extras que você descartou"]
+  "colunasIgnoradas": ["nome das colunas/seções extras que você descartou"]
 }
 
 REGRAS:
-- IGNORE a linha de cabeçalho e linhas vazias — não vire candidato.
-- Não invente dados: se um campo não existe na planilha, deixe "".
+- IGNORE a linha de cabeçalho e linhas/itens vazios — não vire candidato.
+- Não invente dados: se um campo não existe, deixe "".
 - NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os 5 campos acima.
 - phone só com dígitos (remova (), -, espaços).
-- Liste TODOS os candidatos encontrados.
+- Liste TODOS os candidatos encontrados.`;
 
-CONTEÚDO COLADO:
-"""
-${text}
-"""
-
-JSON:`;
-      const result = await model.generateContent(prompt);
+      const result = isFile
+        ? await model.generateContent([
+            { inlineData: { data: fileBase64, mimeType } },
+            { text: `${regras}\n\nO conteúdo acima é o ARQUIVO com a lista. Extraia os candidatos.\n\nJSON:` },
+          ])
+        : await model.generateContent(`${regras}\n\nCONTEÚDO COLADO:\n"""\n${text}\n"""\n\nJSON:`);
       const raw = result.response.text().trim();
 
       let parsed: any = null;
@@ -348,12 +361,12 @@ JSON:`;
         regiao: String(r?.regiao || r?.cidade || '').trim().slice(0, 80),
         estado: normalizeUF(r?.estado || r?.uf) || '',
         phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
-      })).filter((r: any) => r.displayName).slice(0, 500);
+      })).filter((r: any) => r.displayName).slice(0, 5000);
 
       // Log leve pra observabilidade (não bloqueia, custo escondido do usuário).
       supabase.from('party_ai_command_logs').insert({
         partyId: party.id, userId, inputType: 'import_parse',
-        userCommand: `import IA: ${text.length} chars`, detectedIntent: 'import_parse',
+        userCommand: isFile ? `import IA: arquivo ${mimeType}` : `import IA: ${text.length} chars`, detectedIntent: 'import_parse',
         actionStatus: candidates.length ? 'preview' : 'vazio',
       }).then(() => {}, () => {});
 
