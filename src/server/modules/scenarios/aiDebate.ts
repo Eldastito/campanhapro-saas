@@ -21,7 +21,8 @@ const SCENARIO_AI = {
   preferProvider: 'openai' as const,
   // Só fixa o modelo da OpenAI se a chave existir; senão deixa undefined p/ o
   // Claude usar o default dele (evita mandar id da OpenAI pra API da Anthropic).
-  model: process.env.OPENAI_API_KEY ? (process.env.AI_MODEL_SCENARIO_OPENAI || 'gpt-4o-mini') : undefined,
+  // Default gpt-4o (mais qualidade por cenário); overridável por env.
+  model: process.env.OPENAI_API_KEY ? (process.env.AI_MODEL_SCENARIO_OPENAI || 'gpt-4o') : undefined,
 };
 
 export interface AgentSpec {
@@ -134,11 +135,20 @@ export async function runDebateTurn(
   });
 }
 
-/** Agente relator: sintetiza o debate em um relatório acionável (markdown). */
+/** Métricas da população (amostra) p/ ancorar o relatório em números reais. */
+export interface PopulationMetrics {
+  before: { apoio: number; neutro: number; oposicao: number };
+  after: { apoio: number; neutro: number; oposicao: number };
+  total: number;
+  hoods?: Array<{ label: string; pct: number }>;
+}
+
+/** Agente relator: sintetiza o debate num relatório de DECISÃO (markdown). */
 export async function generateReport(
   scenario: string,
   personas: Persona[],
   transcript: DebateTurn[],
+  metrics?: PopulationMetrics,
 ): Promise<string> {
   const start = personas.map((p) => `${p.label}: ${p.opinion.toFixed(2)}`).join(', ');
   const last = transcript[transcript.length - 1];
@@ -152,15 +162,33 @@ export async function generateReport(
       return `  ${p?.label ?? a.id}: "${a.utterance}"`;
     }).join('\n')).join('\n\n');
 
+  let metricsBlock = '';
+  if (metrics) {
+    const pct = (v: number) => (metrics.total ? Math.round((v / metrics.total) * 100) : 0);
+    const d = pct(metrics.after.apoio) - pct(metrics.before.apoio);
+    metricsBlock =
+      `\nMÉTRICAS DA POPULAÇÃO (amostra de ${metrics.total}):\n` +
+      `- Apoio: ${pct(metrics.before.apoio)}% → ${pct(metrics.after.apoio)}% (${d >= 0 ? '+' : ''}${d} p.p.)\n` +
+      `- Neutro: ${pct(metrics.before.neutro)}% → ${pct(metrics.after.neutro)}%\n` +
+      `- Oposição: ${pct(metrics.before.oposicao)}% → ${pct(metrics.after.oposicao)}%\n` +
+      (metrics.hoods?.length ? `- Por região: ${metrics.hoods.map((h) => `${h.label} ${h.pct}%`).join(', ')}\n` : '');
+  }
+
   const user =
     `Cenário simulado: ${scenario}\n\n` +
-    `Opinião inicial: ${start}\nOpinião final: ${end}\n\n` +
+    `Opinião inicial (representantes): ${start}\nOpinião final: ${end}\n` +
+    metricsBlock + `\n` +
     `Transcrição do debate:\n${highlights}\n\n` +
-    `Escreva um relatório de estratégia em markdown (PT-BR), com as seções: ` +
-    `**Resumo**, **Como a opinião migrou**, **Riscos**, **Narrativa vencedora**, **Recomendações** ` +
-    `(3-5 bullets acionáveis). Seja conciso e direto.`;
+    `Você é o estrategista-chefe. Escreva um relatório de DECISÃO em markdown (PT-BR), direto e ` +
+    `acionável, EXATAMENTE com estas seções:\n` +
+    `**Veredito** (1 frase: o cenário ajuda, prejudica ou é neutro pro candidato, e por quê)\n` +
+    `**Impacto na intenção de voto** (use os números das métricas; diga ganho/perda em p.p. e onde)\n` +
+    `**Como a opinião migrou** (quem mudou, quem segurou, por quê)\n` +
+    `**Riscos** (2-3)\n` +
+    `**Narrativa vencedora** (a mensagem que mais converteu)\n` +
+    `**Recomendações** (3-5 bullets de ação prática: o que fazer já, onde, com qual mensagem)`;
 
-  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 1200, temperature: 0.6, ...SCENARIO_AI });
+  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 1500, temperature: 0.55, ...SCENARIO_AI });
 }
 
 /** Conversa 1–1 com uma persona simulada (depois do debate). */
