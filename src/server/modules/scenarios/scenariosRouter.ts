@@ -83,6 +83,67 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
     return res.json({ runs: data ?? [] });
   });
 
+  // POST /api/v1/scenarios/monte-carlo/suggest — pré-preenche o Monte Carlo a
+  // partir de DADOS REAIS: agrega a intenção de voto das pesquisas internas
+  // (com margem de erro estatística correta) e garante que os adversários
+  // cadastrados (competitor_intel) apareçam. Sem chute manual.
+  router.post('/monte-carlo/suggest', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      // Respostas que NÃO são candidato (não viram fatia).
+      const NON_CAND = /^(n[ãa]o sabe|nsnr|ns\/nr|branco|nulo|nenhum|ningu[ée]m|indeciso|n[ãa]o respondeu|outro|outros)$/i;
+      const { data: rows } = await supabase.from('pesquisas')
+        .select('"intencaoVoto"').eq('campaignId', campaignId).not('intencaoVoto', 'is', null).limit(20000);
+
+      const counts = new Map<string, number>();
+      let validN = 0;
+      (rows ?? []).forEach((r: any) => {
+        const v = (r.intencaoVoto || '').trim();
+        if (!v || NON_CAND.test(v)) return;
+        counts.set(v, (counts.get(v) ?? 0) + 1); validN++;
+      });
+
+      // Garante adversários cadastrados mesmo sem entrevista (fatia 0 → mínimo depois).
+      const { data: comps } = await supabase.from('competitor_intel')
+        .select('name').eq('campaignId', campaignId);
+      (comps ?? []).forEach((c: any) => {
+        const n = (c.name || '').trim();
+        if (n && !counts.has(n)) counts.set(n, 0);
+      });
+
+      if (counts.size === 0) {
+        return res.json({ candidates: [], sampleSize: 0, source: 'none',
+          note: 'Sem intenção de voto nas pesquisas nem adversários cadastrados. Preencha os números na mão ou registre pesquisas.' });
+      }
+
+      // Ordena por votos desc; calcula share + margem de erro (95% CI).
+      const z = 1.96;
+      const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+      const candidates = entries.map(([name, n], i) => {
+        const p = validN > 0 ? n / validN : 0;
+        // Margem de erro clássica; piso de 3% quando amostra é pequena/zero.
+        const moe = validN > 0 ? z * Math.sqrt(Math.max(p * (1 - p), 0.0025) / validN) : 0.08;
+        return {
+          id: `c${i + 1}`,
+          name,
+          baseShare: Math.max(0.01, Math.round(p * 1000) / 1000),
+          margin: Math.min(0.3, Math.max(0.03, Math.round(moe * 1000) / 1000)),
+        };
+      });
+
+      return res.json({
+        candidates, sampleSize: validN,
+        source: validN > 0 ? 'pesquisas' : 'competitor_intel',
+        note: validN > 0
+          ? `Baseado em ${validN} entrevistas internas (margem = erro amostral 95%). Confira antes de simular.`
+          : 'Sem entrevistas com intenção de voto — listei os adversários cadastrados com fatia mínima. Ajuste os números.',
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'suggest_failed', detail: String(err?.message ?? err) });
+    }
+  });
+
   // POST /api/v1/scenarios/graphs — upsert political relationship graph
   router.post('/graphs', async (req, res) => {
     const campaignId = (req as any).user?.campaignId;
