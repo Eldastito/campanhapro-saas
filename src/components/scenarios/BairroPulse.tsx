@@ -1,4 +1,5 @@
 import { authedFetch } from '../../lib/authedFetch';
+import DOMPurify from 'dompurify';
 import * as React from 'react';
 import { Radar, Plus, Trash2, RefreshCw, MessageSquare, AlertTriangle, Instagram, Loader2 } from 'lucide-react';
 import Card from '../ui/Card';
@@ -17,9 +18,11 @@ const Md: React.FC<{ text: string }> = ({ text }) => (
       const html = tl
         .replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>')
         .replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noreferrer" class="text-indigo-400 underline">link</a>');
-      if (/^#{1,6}\s/.test(tl)) return <p key={i} className="text-slate-100 font-bold mt-1.5" dangerouslySetInnerHTML={{ __html: html.replace(/^#{1,6}\s/, '') }} />;
-      if (/^[-*]\s/.test(tl)) return <p key={i} className="pl-3 text-slate-400" dangerouslySetInnerHTML={{ __html: '• ' + html.replace(/^[-*]\s/, '') }} />;
-      return <p key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+      // Sanitiza: o texto vem de saída de IA + legendas/comentários do Instagram
+      // (conteúdo externo). Sem isto, um <img onerror=...> passaria como HTML cru.
+      if (/^#{1,6}\s/.test(tl)) return <p key={i} className="text-slate-100 font-bold mt-1.5" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html.replace(/^#{1,6}\s/, '')) }} />;
+      if (/^[-*]\s/.test(tl)) return <p key={i} className="pl-3 text-slate-400" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize('• ' + html.replace(/^[-*]\s/, '')) }} />;
+      return <p key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />;
     })}
   </div>
 );

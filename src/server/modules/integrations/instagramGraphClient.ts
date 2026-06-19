@@ -127,6 +127,11 @@ export async function businessDiscovery(
   postLimit = 12,
 ): Promise<DiscoveryResult> {
   const handle = targetUsername.replace(/^@/, '').trim();
+  // Valida o handle ANTES de interpolar na query (anti-injeção/SSRF de parâmetro).
+  // Usernames do Instagram: letras, números, ponto e underscore, até 30 chars.
+  if (!/^[A-Za-z0-9._]{1,30}$/.test(handle)) {
+    throw new Error('graph_error:invalid_username');
+  }
   const fields =
     `business_discovery.username(${handle}){username,followers_count,media_count,` +
     `media.limit(${postLimit}){caption,like_count,comments_count,timestamp,permalink,media_type}}`;

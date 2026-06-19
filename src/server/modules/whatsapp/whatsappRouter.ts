@@ -13,9 +13,10 @@ import {
 } from '../integrations/evolutionApiClient';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { checkWhatsAppQuota } from '../billing/quotaEnforcer';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 function campaignIdOf(req: Request): string | undefined {
-  return (req as any).user?.campaignId ?? (req.query.campaignId as string | undefined);
+  return tenantCampaignId(req);
 }
 
 function slugify(s: string): string {

@@ -22,11 +22,12 @@
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { randomBytes } from 'crypto';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 // ---------- helpers ----------
 
 function campaignIdOf(req: Request): string | undefined {
-  return (req as any).user?.campaignId ?? (req.query.campaignId as string | undefined);
+  return tenantCampaignId(req);
 }
 
 function userOf(req: Request): { id?: string; type?: string; isSupremeAdmin?: boolean } {

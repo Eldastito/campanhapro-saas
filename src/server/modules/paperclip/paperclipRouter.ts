@@ -3,6 +3,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { AgentTask } from '../integrations/paperclipClient';
 import { enqueueTask, executeTask, approveTask, rejectTask, syncTaskStatus } from './taskQueue';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
@@ -14,7 +15,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { type, payload, requiresApproval } = req.body as Partial<AgentTask>;
@@ -47,7 +48,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.get('/tasks', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? (req.query.campaignId as string);
+      const campaignId = tenantCampaignId(req);
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { data, error } = await supabaseAdmin
@@ -70,7 +71,8 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.get('/tasks/:id', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? (req.query.campaignId as string);
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const taskId = req.params.id;
 
       // Try to sync from Paperclip if running
@@ -96,7 +98,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks/:id/approve', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const userId = (req as any).user?.id;
       const taskId = req.params.id;
 
@@ -129,7 +131,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks/:id/reject', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const userId = (req as any).user?.id;
       const taskId = req.params.id;
 
@@ -155,7 +157,8 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks/:id/retry', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const taskId = req.params.id;
 
       const { error } = await supabaseAdmin

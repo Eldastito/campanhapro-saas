@@ -8,6 +8,7 @@
  * estar usando. Não chegue no Dia D sem o Plano Pro.
  */
 import * as React from 'react';
+import DOMPurify from 'dompurify';
 import { Sparkles, X, ArrowRight, Lock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -124,7 +125,7 @@ const UpgradeModal: React.FC<Props> = ({
         <ul className="space-y-2 mb-6">
           {copy.bullets.map((b, i) => (
             <li key={i} className="text-sm text-slate-300 flex gap-2"
-              dangerouslySetInnerHTML={{ __html: `<span class="text-indigo-400 shrink-0">✓</span> <span>${b.replace(/\*\*(.+?)\*\*/g, '<b class="text-rose-300">$1</b>')}</span>` }} />
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(`<span class="text-indigo-400 shrink-0">✓</span> <span>${b.replace(/\*\*(.+?)\*\*/g, '<b class="text-rose-300">$1</b>')}</span>`) }} />
           ))}
         </ul>
 

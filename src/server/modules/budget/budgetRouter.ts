@@ -3,6 +3,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { callAgent } from '../../../lib/aiCallAgent';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { enqueueTask, executeTask, registerLocalTaskHandler } from '../paperclip/taskQueue';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 type Bucket = 'recursos' | 'financeiro' | 'material' | 'pessoal' | 'redes_sociais' | 'outros' | 'reserva';
 
@@ -28,7 +29,7 @@ const CATEGORY_TO_BUCKET: Record<string, Bucket> = {
 const ALL_BUCKETS: Bucket[] = ['recursos', 'financeiro', 'material', 'pessoal', 'redes_sociais', 'outros', 'reserva'];
 
 function campaignIdOf(req: Request): string | undefined {
-  return (req as any).user?.campaignId ?? (req.query.campaignId as string | undefined);
+  return tenantCampaignId(req);
 }
 
 interface CampaignBudgetContext {

@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 function campaignId(req: Request): string | undefined {
-  return (req as any).user?.campaignId ?? (req.query.campaignId as string | undefined);
+  return tenantCampaignId(req);
 }
 
 export function createRoutinesRouter(supabaseAdmin: SupabaseClient) {

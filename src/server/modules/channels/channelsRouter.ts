@@ -3,6 +3,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { sendMessage, Channel } from '../integrations/channelsClient';
 import { hasOutboundConsent } from './consent';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
@@ -13,7 +14,7 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
    */
   router.get('/conversations', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? (req.query.campaignId as string);
+      const campaignId = tenantCampaignId(req);
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { data, error } = await supabaseAdmin
@@ -78,7 +79,7 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/send', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const userId = (req as any).user?.id ?? null;
       const { channel, to, text, contactId, templateName, templateParams, whatsappInstanceId } = req.body as {
         channel: Channel;
@@ -336,7 +337,7 @@ export function createChannelsRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/consent', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const { contactId, channel, granted, source, note } = req.body;
       if (!campaignId || !contactId || !channel || granted === undefined) {
         return res.status(400).json({ error: 'campos obrigatórios ausentes' });

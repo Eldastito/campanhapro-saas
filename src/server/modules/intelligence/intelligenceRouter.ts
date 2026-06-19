@@ -6,6 +6,7 @@ import {
   getLatestFactors,
   getScenarios,
 } from '../integrations/campanhaproCenariosClient';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 export function createIntelligenceRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
@@ -18,7 +19,7 @@ export function createIntelligenceRouter(supabaseAdmin: SupabaseClient) {
   router.post('/sync', async (req: Request, res: Response) => {
     try {
       const campaignId: string | undefined =
-        (req as any).user?.campaignId ?? req.body?.campaignId;
+        tenantCampaignId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: 'campaignId obrigatório' });
@@ -62,7 +63,7 @@ export function createIntelligenceRouter(supabaseAdmin: SupabaseClient) {
   router.get('/factors', async (req: Request, res: Response) => {
     try {
       const campaignId: string | undefined =
-        (req as any).user?.campaignId ?? (req.query.campaignId as string);
+        tenantCampaignId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: 'campaignId obrigatório' });
@@ -91,7 +92,7 @@ export function createIntelligenceRouter(supabaseAdmin: SupabaseClient) {
   router.get('/scenarios', async (req: Request, res: Response) => {
     try {
       const campaignId: string | undefined =
-        (req as any).user?.campaignId ?? (req.query.campaignId as string);
+        tenantCampaignId(req);
 
       if (!campaignId) {
         return res.status(400).json({ error: 'campaignId obrigatório' });
