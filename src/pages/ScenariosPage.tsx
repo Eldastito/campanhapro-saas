@@ -7,10 +7,11 @@ const MonteCarloChart = React.lazy(() => import('../components/scenarios/MonteCa
 const ScenarioSimulator = React.lazy(() => import('../components/scenarios/ScenarioSimulator'));
 const DossierPanel = React.lazy(() => import('../components/scenarios/DossierPanel'));
 const SimulationHistory = React.lazy(() => import('../components/scenarios/SimulationHistory'));
+const BairroPulse = React.lazy(() => import('../components/scenarios/BairroPulse'));
 
 // "Simulação" funde o antigo Grafo Político + Debate IA: o grafo animado é o
 // palco onde os agentes (dados reais) debatem o cenário ao vivo.
-const SUBTABS = ['Simulação', 'Monte Carlo', 'Dossiês', 'Histórico'];
+const SUBTABS = ['Simulação', 'Monte Carlo', 'Pulso dos Bairros', 'Dossiês', 'Histórico'];
 
 const ScenariosPage: React.FC = () => (
   <div className="space-y-6">
@@ -29,6 +30,12 @@ const ScenariosPage: React.FC = () => (
       <ErrorBoundary label="Monte Carlo">
         <React.Suspense fallback={<div className="py-8 text-center text-slate-500 text-sm">Carregando...</div>}>
           <MonteCarloChart />
+        </React.Suspense>
+      </ErrorBoundary>
+
+      <ErrorBoundary label="Pulso dos Bairros">
+        <React.Suspense fallback={<div className="py-8 text-center text-slate-500 text-sm">Carregando...</div>}>
+          <BairroPulse />
         </React.Suspense>
       </ErrorBoundary>
 

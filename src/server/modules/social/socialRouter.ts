@@ -31,6 +31,12 @@ import {
 } from '../../../lib/socialSyncLinkedIn';
 import { fetchKwaiPublicProfile } from '../../../lib/socialSyncKwai';
 import { runSocialSync, SyncProvider } from '../../../lib/socialSyncRunner';
+import {
+  resolveInstagram, autoResolveIgUserId, businessDiscovery, fetchOwnMediaWithComments,
+  type DiscoveryResult,
+} from '../integrations/instagramGraphClient';
+import { callAgent } from '../../../lib/aiCallAgent';
+import { ingestArtifact } from '../rag/knowledgeIngest';
 
 const VALID_OAUTH_PROVIDERS = new Set(['x', 'linkedin']);
 const VALID_SYNC_PROVIDERS = new Set(['x', 'linkedin', 'kwai']);
@@ -308,6 +314,165 @@ export function createSocialRouter(supabase: SupabaseClient): Router {
       .eq('campaignId', campaignId)
       .maybeSingle();
     return res.json(data || {});
+  });
+
+  // ════════════════════════════════════════════════════════════════════
+  // INSTAGRAM — inteligência social (Business Discovery + comentários próprios)
+  // ════════════════════════════════════════════════════════════════════
+
+  // GET /instagram/status — conta IG conectada?
+  router.get('/instagram/status', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const conn = await resolveInstagram(supabase, campaignId);
+    return res.json({ connected: !!conn, igUserId: conn?.igUserId ?? null, username: conn?.username ?? null });
+  });
+
+  // POST /instagram/connect — conecta a conta IG Business. Sem body, tenta
+  // auto-resolver via /me/accounts (token global). Com { igUserId } usa o informado.
+  router.post('/instagram/connect', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    if (!isAdmin(req)) return res.status(403).json({ error: 'forbidden' });
+    let { igUserId, username } = req.body as { igUserId?: string; username?: string };
+    try {
+      if (!igUserId) {
+        const auto = await autoResolveIgUserId();
+        if (!auto) return res.status(400).json({ error: 'ig_autoresolve_failed', detail: 'Informe o IG Business Account ID ou configure META_ACCESS_TOKEN/META_IG_USER_ID.' });
+        igUserId = auto.igUserId; username = auto.username;
+      }
+      const { error } = await supabase.from('social_tokens').upsert({
+        campaignId, provider: 'instagram', token: 'env',
+        settings: { igUserId, username }, updatedAt: new Date().toISOString(),
+      }, { onConflict: 'campaignId,provider' });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ connected: true, igUserId, username });
+    } catch (err: any) {
+      return res.status(502).json({ error: 'ig_connect_failed', detail: String(err?.message ?? err) });
+    }
+  });
+
+  // ── WATCHLIST de páginas de bairro ────────────────────────────────────
+  router.get('/watchlist', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const { data, error } = await supabase.from('social_watchlist')
+      .select('id, username, label, bairro, "lastSnapshot", "createdAt"')
+      .eq('campaignId', campaignId).order('createdAt', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ watchlist: data ?? [] });
+  });
+
+  router.post('/watchlist', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const { username, label, bairro } = req.body as { username?: string; label?: string; bairro?: string };
+    const handle = (username || '').replace(/^@/, '').trim();
+    if (!handle) return res.status(400).json({ error: 'username required' });
+    const { data, error } = await supabase.from('social_watchlist')
+      .upsert({ campaignId, username: handle, label: label ?? null, bairro: bairro ?? null }, { onConflict: 'campaignId,username' })
+      .select('id, username, label, bairro').maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json(data ?? {});
+  });
+
+  router.delete('/watchlist/:id', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const { error } = await supabase.from('social_watchlist')
+      .delete().eq('campaignId', campaignId).eq('id', req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true });
+  });
+
+  // POST /instagram/pulse — "Pulso dos Bairros": roda Business Discovery em cada
+  // página da watchlist, junta posts (legenda + engajamento) e a IA rankeia os
+  // TEMAS QUENTES por bairro. Sem texto de comentário de terceiros (a Meta não dá).
+  router.post('/instagram/pulse', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const conn = await resolveInstagram(supabase, campaignId);
+    if (!conn) return res.status(400).json({ error: 'ig_not_connected' });
+
+    const { data: wl } = await supabase.from('social_watchlist')
+      .select('id, username, label, bairro').eq('campaignId', campaignId);
+    if (!wl?.length) return res.status(400).json({ error: 'watchlist_empty' });
+
+    const pages: Array<{ username: string; label: string | null; bairro: string | null; discovery?: DiscoveryResult; error?: string }> = [];
+    for (const w of wl) {
+      try {
+        const d = await businessDiscovery(conn, w.username, 12);
+        pages.push({ username: w.username, label: w.label, bairro: w.bairro, discovery: d });
+        await supabase.from('social_watchlist')
+          .update({ lastSnapshot: { at: new Date().toISOString(), followers: d.followersCount, topPostComments: Math.max(0, ...d.posts.map(p => p.commentsCount)) } })
+          .eq('id', w.id);
+      } catch (err: any) {
+        pages.push({ username: w.username, label: w.label, bairro: w.bairro, error: String(err?.message ?? err) });
+      }
+    }
+
+    // Monta o material pra IA: posts mais comentados de cada página.
+    const material = pages.filter(p => p.discovery).map((p) => {
+      const top = [...p.discovery!.posts].sort((a, b) => b.commentsCount - a.commentsCount).slice(0, 6);
+      return `### ${p.label || p.username} (@${p.username}${p.bairro ? `, ${p.bairro}` : ''}) — ${p.discovery!.followersCount} seguidores\n` +
+        top.map(t => `- [${t.commentsCount} coment., ${t.likeCount} likes] ${(t.caption || '(sem legenda)').slice(0, 220).replace(/\n/g, ' ')}`).join('\n');
+    }).join('\n\n');
+
+    let temas = '';
+    if (material.trim()) {
+      try {
+        const result = await callAgent(supabase, 'competitive_intel',
+          `Abaixo, posts recentes de páginas de bairro (com nº de comentários como proxy de engajamento). ` +
+          `Identifique os TEMAS/DORES mais quentes POR BAIRRO, do mais inflamado pro menos, citando a página. ` +
+          `Diga o sentimento provável (positivo/negativo/cobrança) e uma sugestão de ação pra campanha. ` +
+          `Responda em markdown PT-BR, conciso.\n\n${material}`,
+          {
+            campaignId, userId: (req as any).user?.id ?? null,
+            systemInstruction: 'Você é analista de inteligência social de campanha. Não invente: trabalhe só com o material dado. Engajamento alto = tema quente.',
+            complexity: 'balanced', maxTokens: 1800,
+          });
+        temas = result.text || '';
+        await ingestArtifact(supabase, {
+          campaignId, source: 'agent:bairro-pulse',
+          title: 'Pulso dos bairros (Instagram)', text: temas,
+          metadata: { kind: 'bairro_pulse', pages: pages.map(p => p.username) },
+        }).catch(() => {});
+      } catch { /* devolve só os dados crus se a IA falhar */ }
+    }
+
+    return res.json({ pages, temas });
+  });
+
+  // GET /instagram/own-comments — comentários (COM texto) dos posts do próprio
+  // candidato + análise de sentimento/temas pela IA. A API libera por completo.
+  router.get('/instagram/own-comments', async (req: Request, res: Response) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    const conn = await resolveInstagram(supabase, campaignId);
+    if (!conn) return res.status(400).json({ error: 'ig_not_connected' });
+    try {
+      const media = await fetchOwnMediaWithComments(conn, 8, 30);
+      const allComments = media.flatMap(m => m.comments.map(c => c.text)).filter(Boolean);
+      let analysis = '';
+      if (allComments.length) {
+        const sample = allComments.slice(0, 120).map(t => `- ${t.slice(0, 180).replace(/\n/g, ' ')}`).join('\n');
+        try {
+          const result = await callAgent(supabase, 'competitive_intel',
+            `Comentários reais nos posts do candidato. Faça: (1) sentimento geral (% aprox. positivo/negativo/neutro), ` +
+            `(2) 5 temas/dores mais citados, (3) comentários que pedem resposta urgente (crise), ` +
+            `(4) 2 sugestões de pauta. Markdown PT-BR conciso.\n\n${sample}`,
+            {
+              campaignId, userId: (req as any).user?.id ?? null,
+              systemInstruction: 'Analista de comunidade de campanha. Trabalhe só com os comentários dados; não invente.',
+              complexity: 'balanced', maxTokens: 1500,
+            });
+          analysis = result.text || '';
+        } catch { /* devolve crus */ }
+      }
+      return res.json({ media, totalComments: allComments.length, analysis });
+    } catch (err: any) {
+      return res.status(502).json({ error: 'ig_fetch_failed', detail: String(err?.message ?? err) });
+    }
   });
 
   // ── CLEANUP: limpa states expirados (chamado pelo routinesWorker) ─────

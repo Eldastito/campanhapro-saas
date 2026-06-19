@@ -92,6 +92,24 @@ export const MonteCarloChart: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [showHelp, setShowHelp] = React.useState(false);
+  const [suggesting, setSuggesting] = React.useState(false);
+  const [suggestNote, setSuggestNote] = React.useState<string | null>(null);
+
+  // Pré-preenche a partir de dados REAIS (pesquisas internas + adversários).
+  const suggestFromData = async () => {
+    setSuggesting(true); setError(null); setSuggestNote(null);
+    try {
+      const res = await authedFetch('/api/v1/scenarios/monte-carlo/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Erro ao sugerir');
+      if (Array.isArray(json.candidates) && json.candidates.length >= 2) {
+        setCandidates(json.candidates.slice(0, 6));
+      } else if (json.candidates?.length === 1) {
+        setError('Só achei 1 candidato nos dados — adicione adversários ou registre mais pesquisas.');
+      }
+      setSuggestNote(json.note ?? null);
+    } catch (err: any) { setError(err.message); } finally { setSuggesting(false); }
+  };
 
   const sumIntencao = candidates.reduce((s, c) => s + (c.baseShare || 0), 0);
   const sumPct = Math.round(sumIntencao * 100);
@@ -220,6 +238,14 @@ export const MonteCarloChart: React.FC = () => {
             >
               + Adicionar candidato
             </button>
+            <button
+              className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-40"
+              onClick={suggestFromData}
+              disabled={suggesting}
+              title="Puxa a intenção de voto das suas pesquisas internas + adversários cadastrados, com margem de erro real."
+            >
+              {suggesting ? 'Puxando…' : '⤓ Sugerir números reais'}
+            </button>
             <span
               className={`text-[11px] ${sumPct >= 90 && sumPct <= 110 ? 'text-slate-500' : 'text-amber-400'}`}
               title="Soma das intenções. O cálculo normaliza pra 100%, mas o ideal é ficar perto de 100."
@@ -245,6 +271,9 @@ export const MonteCarloChart: React.FC = () => {
           </div>
         </div>
 
+        {suggestNote && (
+          <p className="text-[11px] text-emerald-300/90 bg-emerald-500/10 rounded px-2 py-1.5 mt-2">{suggestNote}</p>
+        )}
         {error && (
           <p className="text-xs text-red-400 bg-red-500/10 rounded px-2 py-1 mt-2">{error}</p>
         )}
