@@ -5,10 +5,11 @@ import ErrorBoundary from '../components/dev/ErrorBoundary';
 
 const MonteCarloChart = React.lazy(() => import('../components/scenarios/MonteCarloChart'));
 const PoliticalGraph = React.lazy(() => import('../components/scenarios/PoliticalGraph'));
+const AiDebate = React.lazy(() => import('../components/scenarios/AiDebate'));
 const DossierPanel = React.lazy(() => import('../components/scenarios/DossierPanel'));
 const SimulationHistory = React.lazy(() => import('../components/scenarios/SimulationHistory'));
 
-const SUBTABS = ['Simulação Monte Carlo', 'Grafo Político', 'Dossiês', 'Histórico'];
+const SUBTABS = ['Simulação Monte Carlo', 'Grafo Político', 'Debate IA', 'Dossiês', 'Histórico'];
 
 const ScenariosPage: React.FC = () => (
   <div className="space-y-6">
@@ -27,6 +28,12 @@ const ScenariosPage: React.FC = () => (
       <ErrorBoundary label="Grafo Político">
         <React.Suspense fallback={<div className="py-8 text-center text-slate-500 text-sm">Carregando...</div>}>
           <PoliticalGraph />
+        </React.Suspense>
+      </ErrorBoundary>
+
+      <ErrorBoundary label="Debate IA">
+        <React.Suspense fallback={<div className="py-8 text-center text-slate-500 text-sm">Carregando...</div>}>
+          <AiDebate />
         </React.Suspense>
       </ErrorBoundary>
 
