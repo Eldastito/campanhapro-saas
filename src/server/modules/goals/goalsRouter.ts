@@ -31,7 +31,7 @@ export function createGoalsRouter(supabaseAdmin: SupabaseClient) {
 
   router.post('/goals', async (req: Request, res: Response) => {
     try {
-      const cid = campaignId(req) ?? req.body.campaignId;
+      const cid = campaignId(req);
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { title, description, level, status, priority, parentId, ownerAgentId, startDate, dueDate, metadata } = req.body;
@@ -137,7 +137,7 @@ export function createGoalsRouter(supabaseAdmin: SupabaseClient) {
 
   router.post('/projects', async (req: Request, res: Response) => {
     try {
-      const cid = campaignId(req) ?? req.body.campaignId;
+      const cid = campaignId(req);
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { title, description, goalId, status, priority, ownerAgentId, startDate, endDate, metadata } = req.body;

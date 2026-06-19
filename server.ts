@@ -941,10 +941,10 @@ async function startServer() {
   // --- Classificação IA de eleitores (Indeciso → Apoiador → Multiplicador) ---
   app.post('/api/ai/classify-contacts', requireAuth, async (req, res) => {
     try {
-      const campaignId = req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const userId = req.user?.id;
       const limit = Math.min(Number(req.body.limit) || 30, 100);
-      if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
+      if (!campaignId || !supabaseAdmin) return res.status(401).json({ error: 'campaignId ausente na sessão' });
 
       // Pega contatos ainda não classificados (ou classificados há mais de 14 dias).
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();

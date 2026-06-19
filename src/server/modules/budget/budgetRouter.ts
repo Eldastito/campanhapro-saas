@@ -289,7 +289,7 @@ export function createBudgetRouter(supabaseAdmin: SupabaseClient, aiBudgetGuard?
   // POST /allocations — create manual allocation (already approved if user creates it)
   router.post('/allocations', async (req: Request, res: Response) => {
     try {
-      const cid = campaignIdOf(req) ?? req.body.campaignId;
+      const cid = campaignIdOf(req);
       const userId = (req as any).user?.id ?? null;
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
@@ -420,7 +420,7 @@ export function createBudgetRouter(supabaseAdmin: SupabaseClient, aiBudgetGuard?
   // Returns 202 immediately; frontend polls GET /ceo-plan/status/:taskId.
   const ceoPlanCore: RequestHandler = async (req: Request, res: Response) => {
     try {
-      const cid = campaignIdOf(req) ?? req.body.campaignId;
+      const cid = campaignIdOf(req);
       const userId = (req as any).user?.id ?? null;
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
