@@ -30,18 +30,86 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
       .maybeSingle();
 
     res.json({
-      bootstrapped: !!user?.campaignId,
+      // Partido é "bootstrapped" por ter type='Presidente de Partido' (sem campaignId).
+      bootstrapped: !!user?.campaignId || user?.type === 'Presidente de Partido',
       user: user ?? null,
     });
   });
 
   // POST /api/v1/onboarding/bootstrap
-  // Body: { campaignName, candidateName?, party? }
+  // Body campanha: { accountType?: 'campaign', campaignName, candidateName?, party?, name? }
+  // Body partido:  { accountType: 'party', partyName, name? }
   router.post('/bootstrap', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
     const email = (req as any).user?.email;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
+    const accountType = (req.body?.accountType as string) === 'party' ? 'party' : 'campaign';
+
+    // ─────────────────────────── CONTA DE PARTIDO ───────────────────────────
+    // Self-serve: cria o presidente (type='Presidente de Partido') + o partido e
+    // dá acesso completo ao módulo na hora. Cobrança é manual (billingNote), o
+    // operador acerta depois pela aba Partidos do Supreme. NÃO cria campanha.
+    if (accountType === 'party') {
+      const partyName = String(req.body?.partyName ?? req.body?.campaignName ?? '').trim();
+      if (!partyName) return res.status(400).json({ error: 'partyName obrigatório' });
+
+      // Idempotência: já é presidente ou já tem partido → devolve sem duplicar.
+      const [{ data: u }, { data: existingParty }] = await Promise.all([
+        supabase.from('users').select('id, type').eq('id', userId).maybeSingle(),
+        supabase.from('parties').select('id').eq('presidentId', userId).maybeSingle(),
+      ]);
+      if (existingParty || u?.type === 'Presidente de Partido') {
+        if (u?.type !== 'Presidente de Partido') {
+          await supabase.from('users').update({ type: 'Presidente de Partido' }).eq('id', userId);
+        }
+        return res.json({ alreadyBootstrapped: true, accountType: 'party', partyId: existingParty?.id ?? null });
+      }
+
+      const presidentName = (req.body?.name as string | undefined)?.trim() || email?.split('@')[0] || 'Presidente';
+
+      const { error: userErr } = await supabase.from('users').upsert({
+        id: userId,
+        email,
+        name: presidentName,
+        type: 'Presidente de Partido',
+        role: 'active',
+        campaignId: null,
+        isSupremeAdmin: false,
+      }, { onConflict: 'id' });
+      if (userErr) {
+        console.error('[onboarding] party user upsert failed:', userErr);
+        return res.status(500).json({ error: 'user_upsert_failed', detail: userErr.message });
+      }
+
+      // parties tem defaults plan='paid', status='active'.
+      const { data: party, error: partyErr } = await supabase.from('parties')
+        .insert({ name: partyName, presidentId: userId })
+        .select('id, name, plan, status').single();
+      if (partyErr) {
+        console.error('[onboarding] party insert failed:', partyErr);
+        return res.status(500).json({ error: 'party_insert_failed', detail: partyErr.message });
+      }
+
+      await audit(supabase, {
+        ...actorFromRequest(req),
+        action: 'onboarding.bootstrap_party',
+        resourceType: 'party',
+        resourceId: party.id,
+        severity: 'info',
+        metadata: { partyName },
+      }).catch(() => {});
+
+      if (email) {
+        sendWelcomeEmail(supabase, {
+          campaignId: party.id, userId, email, name: presidentName, campaignName: partyName,
+        }).catch(err => console.warn('[onboarding] welcome email (party) failed:', err.message));
+      }
+
+      return res.status(201).json({ bootstrapped: true, accountType: 'party', partyId: party.id });
+    }
+
+    // ─────────────────────────── CONTA DE CAMPANHA ──────────────────────────
     const { campaignName, candidateName, party } = req.body as {
       campaignName: string;
       candidateName?: string;
