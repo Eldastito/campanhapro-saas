@@ -2,6 +2,7 @@ import * as React from 'react';
 import { ScrollText, Filter, Loader2, RefreshCw } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
+import { authedFetch } from '../../lib/authedFetch';
 
 interface AuditEntry {
   id: string;
@@ -44,7 +45,9 @@ export const AuditLogTable: React.FC = () => {
       if (severity) qs.set('severity', severity);
       if (action) qs.set('action', action);
       qs.set('limit', '100');
-      const res = await fetch(`/api/v1/observability/audit?${qs}`);
+      // authedFetch: a rota /observability exige Authorization (requireAuth).
+      // Com fetch cru vinha 401 → lista sempre vazia.
+      const res = await authedFetch(`/api/v1/observability/audit?${qs}`);
       if (res.ok) {
         const json = await res.json();
         setEntries(json.entries ?? []);
