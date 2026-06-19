@@ -222,15 +222,16 @@ export const ScenarioSimulator: React.FC = () => {
         setHoods([...agg.entries()].map(([id, v]) => ({ id, label: v.lab, pct: v.n ? Math.round((v.pro / v.n) * 100) : 0, n: v.n })).sort((a, b) => b.pct - a.pct));
       }
 
-      // ── Física: homofilia (semelhante atrai, diferente repele) ──
-      // Movimento SUAVE: forças fracas (STEP), bastante atrito (DAMP) e teto de
-      // velocidade (VMAX) → deriva lenta e orgânica, sem "pular".
-      const K_REP = 620, K_ATT = 0.0011, CENTER = 0.0028, DAMP = 0.9, STEP = 0.5, VMAX = 1.25;
+      // ── Física: homofilia + ESPAÇAMENTO (anti-aglomeração) ──
+      // Movimento suave (STEP/DAMP/VMAX) + repulsão forte e anti-sobreposição por
+      // "raio pessoal" → os nós se espalham e dá pra clicar num agente.
+      const K_REP = 1500, K_ATT = 0.0007, CENTER = 0.0016, DAMP = 0.9, STEP = 0.5, VMAX = 1.25;
+      const personalR = (p: P) => (p.kind === 'anchor' ? anchorRadius(p) + 16 : 9);
       for (let i = 0; i < parts.length; i++) {
         const a = parts[i];
         a.opinionAnim += (a.opinion - a.opinionAnim) * 0.05;
         if (a.fx != null) continue;
-        let ax = 0, ay = 0;
+        let ax = 0, ay = 0; const prA = personalR(a);
         for (let j = 0; j < parts.length; j++) {
           if (i === j) continue;
           const b = parts[j];
@@ -238,22 +239,26 @@ export const ScenarioSimulator: React.FC = () => {
           let d2 = dx * dx + dy * dy;
           if (d2 < 1) { d2 = 1; dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
           const d = Math.sqrt(d2);
-          const diff = Math.abs(a.opinion - b.opinion);     // 0 (igual) .. 2 (oposto)
-          const affinity = SIM_THRESH - diff;               // >0 parecido, <0 diferente
-          const rep = (K_REP * (diff > SIM_THRESH ? 1.8 : 0.55)) / d2;
+          const diff = Math.abs(a.opinion - b.opinion);
+          const affinity = SIM_THRESH - diff;
+          const rep = (K_REP * (diff > SIM_THRESH ? 2.0 : 0.9)) / d2;
           ax += (dx / d) * rep; ay += (dy / d) * rep;
-          if (affinity > 0 && d > 60) { const att = affinity * K_ATT * d; ax -= (dx / d) * att; ay -= (dy / d) * att; }
+          // anti-sobreposição: empurra forte quando entram no raio pessoal um do outro
+          const minSep = prA + personalR(b);
+          if (d < minSep) { const push = (minSep - d) * 0.5; ax += (dx / d) * push; ay += (dy / d) * push; }
+          // atração entre parecidos (homofilia), folgada
+          if (affinity > 0 && d > 90) { const att = affinity * K_ATT * d; ax -= (dx / d) * att; ay -= (dy / d) * att; }
         }
         ax += (cssW / 2 - a.x) * CENTER; ay += (cssH / 2 - a.y) * CENTER;
         a.vx = (a.vx + ax * STEP) * DAMP; a.vy = (a.vy + ay * STEP) * DAMP;
       }
-      // molas dos laços (suaves)
+      // molas dos laços (suaves, mais longas p/ não colar)
       for (const l of linksRef.current) {
         const a = byId.get(l.a), b = byId.get(l.b);
         if (!a || !b) continue;
         const dx = b.x - a.x, dy = b.y - a.y; const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const target = l.explicit ? 95 : 55;
-        const f = (d - target) * 0.006 * l.w;
+        const target = l.explicit ? 150 : 78;
+        const f = (d - target) * 0.005 * l.w;
         if (a.fx == null) { a.vx += (dx / d) * f; a.vy += (dy / d) * f; }
         if (b.fx == null) { b.vx -= (dx / d) * f; b.vy -= (dy / d) * f; }
       }
@@ -349,7 +354,7 @@ export const ScenarioSimulator: React.FC = () => {
   const onPointerDown = (e: React.PointerEvent) => {
     const { x, y } = toWorld(e.clientX, e.clientY);
     // só âncoras são "clicáveis"/arrastáveis (cidadãos são multidão)
-    const hit = [...partsRef.current.values()].find((p) => p.kind === 'anchor' && Math.hypot(p.x - x, p.y - y) <= anchorRadius(p) + 4);
+    const hit = [...partsRef.current.values()].find((p) => p.kind === 'anchor' && Math.hypot(p.x - x, p.y - y) <= anchorRadius(p) + 8);
     dragRef.current = { id: hit?.id ?? null, panning: !hit, lastX: e.clientX, lastY: e.clientY, moved: false };
     if (hit) { hit.fx = hit.x; hit.fy = hit.y; }
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -365,7 +370,23 @@ export const ScenarioSimulator: React.FC = () => {
     if (d.id) { const n = partsRef.current.get(d.id); if (n) { n.fx = null; n.fy = null; } if (!d.moved) setSelected((s) => (s === d.id ? null : d.id)); }
     dragRef.current = { id: null, panning: false, lastX: 0, lastY: 0, moved: false };
   };
-  const onWheel = (e: React.WheelEvent) => { const v = viewRef.current; v.scale = Math.max(0.4, Math.min(2.5, v.scale * (e.deltaY < 0 ? 1.1 : 0.9))); };
+  // Zoom no GRAFO (não na página): listener nativo non-passive p/ poder
+  // preventDefault no scroll, com zoom centrado no cursor.
+  React.useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const ns = Math.max(0.3, Math.min(3, v.scale * (e.deltaY < 0 ? 1.12 : 0.89)));
+      v.ox = mx - (mx - v.ox) * (ns / v.scale);
+      v.oy = my - (my - v.oy) * (ns / v.scale);
+      v.scale = ns;
+    };
+    canvas.addEventListener('wheel', onWheelNative, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheelNative);
+  }, []);
 
   // ── API ──
   const apiError = async (res: Response): Promise<string> => {
@@ -566,7 +587,7 @@ export const ScenarioSimulator: React.FC = () => {
         {/* Palco vivo */}
         <div className="relative">
           <canvas ref={canvasRef} className="w-full rounded-xl border border-slate-700 touch-none cursor-grab active:cursor-grabbing" style={{ height: 440 }}
-            onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp} onWheel={onWheel} />
+            onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp} />
           <div className="absolute top-2 left-2 flex items-center gap-3 text-[11px] font-semibold bg-slate-900/70 rounded-lg px-2.5 py-1">
             <span className="text-emerald-400">{stats.apoio} apoio</span><span className="text-slate-400">{stats.neutro} neutro</span><span className="text-red-400">{stats.oposicao} oposição</span>
           </div>
