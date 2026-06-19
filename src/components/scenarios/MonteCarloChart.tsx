@@ -1,6 +1,6 @@
 import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
-import { TrendingUp, AlertTriangle } from 'lucide-react';
+import { TrendingUp, AlertTriangle, Info, ChevronDown } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 
@@ -91,6 +91,10 @@ export const MonteCarloChart: React.FC = () => {
   const [result, setResult] = React.useState<SimulationResult | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [showHelp, setShowHelp] = React.useState(false);
+
+  const sumIntencao = candidates.reduce((s, c) => s + (c.baseShare || 0), 0);
+  const sumPct = Math.round(sumIntencao * 100);
 
   const addCandidate = () => {
     if (candidates.length >= 6) return;
@@ -130,10 +134,44 @@ export const MonteCarloChart: React.FC = () => {
     <div className="space-y-6">
       {/* Config Panel */}
       <Card>
-        <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
-          <TrendingUp className="w-4 h-4 text-indigo-400" />
-          Configuração da Simulação
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-indigo-400" />
+            Configuração da Simulação
+          </h3>
+          <button
+            onClick={() => setShowHelp((s) => !s)}
+            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
+          >
+            <Info className="w-3.5 h-3.5" />
+            Como funciona
+            <ChevronDown className={`w-3 h-3 transition-transform ${showHelp ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {showHelp && (
+          <div className="mb-4 text-xs text-slate-400 bg-slate-800/50 border border-slate-700 rounded-lg p-3 space-y-2">
+            <p>
+              <span className="text-slate-200 font-semibold">Intenção (%)</span> — a intenção de voto
+              estimada do candidato hoje (o <em>centro</em> da previsão). Ex.: 40 = "gira em torno de 40%".
+            </p>
+            <p>
+              <span className="text-slate-200 font-semibold">Margem (±%)</span> — a incerteza, igual ao
+              "±X%" de uma pesquisa. Internamente vira o desvio-padrão da curva. Ex.: Intenção 40 / Margem 5
+              significa que ~95% dos cenários simulados caem entre <strong>35% e 45%</strong>.
+            </p>
+            <p>
+              A cada rodada (das milhares de <span className="text-slate-200 font-semibold">iterações</span>),
+              o sistema sorteia uma fatia pra cada candidato dentro da sua curva, normaliza pra somar 100% e
+              anota quem venceu. Daí saem a <span className="text-slate-200 font-semibold">probabilidade de
+              vitória</span> e as faixas P10–P90. Quanto maior a margem, mais incerto o resultado.
+            </p>
+            <p className="text-slate-500">
+              Dica: as intenções não precisam somar exatamente 100% (o cálculo normaliza), mas mantê-las
+              perto de 100% deixa o cenário mais realista.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-3">
           {candidates.map((c) => (
@@ -145,7 +183,7 @@ export const MonteCarloChart: React.FC = () => {
                 placeholder="Nome"
               />
               <div className="flex flex-col">
-                <label className="text-[10px] text-slate-500 mb-0.5">Intenção (%)</label>
+                <label className="text-[10px] text-slate-500 mb-0.5" title="Intenção de voto estimada (centro da previsão).">Intenção (%)</label>
                 <input
                   type="number"
                   min={1} max={99} step={1}
@@ -155,7 +193,7 @@ export const MonteCarloChart: React.FC = () => {
                 />
               </div>
               <div className="flex flex-col">
-                <label className="text-[10px] text-slate-500 mb-0.5">Margem (±%)</label>
+                <label className="text-[10px] text-slate-500 mb-0.5" title="Incerteza (±%), como o erro de uma pesquisa. Vira o desvio-padrão da curva.">Margem (±%)</label>
                 <input
                   type="number"
                   min={1} max={30} step={1}
@@ -173,14 +211,22 @@ export const MonteCarloChart: React.FC = () => {
           ))}
         </div>
 
-        <div className="flex items-center justify-between mt-4">
-          <button
-            className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-30"
-            onClick={addCandidate}
-            disabled={candidates.length >= 6}
-          >
-            + Adicionar candidato
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
+          <div className="flex items-center gap-3">
+            <button
+              className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-30"
+              onClick={addCandidate}
+              disabled={candidates.length >= 6}
+            >
+              + Adicionar candidato
+            </button>
+            <span
+              className={`text-[11px] ${sumPct >= 90 && sumPct <= 110 ? 'text-slate-500' : 'text-amber-400'}`}
+              title="Soma das intenções. O cálculo normaliza pra 100%, mas o ideal é ficar perto de 100."
+            >
+              Soma: {sumPct}%{(sumPct < 90 || sumPct > 110) ? ' ⚠' : ''}
+            </span>
+          </div>
           <div className="flex items-center gap-3">
             <label className="text-xs text-slate-500">Iterações:</label>
             <select
