@@ -141,17 +141,51 @@ async function tickManualRuns(supabase: SupabaseClient) {
       .from('agent_routines')
       .select('title, description')
       .eq('id', r.routineId).maybeSingle();
-    if (!routine) continue;
+    const nowIso = new Date().toISOString();
+    if (!routine) {
+      // Rotina sumiu (removida/arquivada+limpa) — não deixa o run preso em 'received'.
+      await supabase.from('routine_runs')
+        .update({ status: 'failed', failureReason: 'rotina não encontrada', completedAt: nowIso, updatedAt: nowIso })
+        .eq('id', r.id);
+      continue;
+    }
     const intent = (routine as any).description || (routine as any).title || 'Rotina manual';
     fireOrchestration(supabase, {
       campaignId: r.campaignId, intent, source: 'routine:manual',
     });
+    // fireOrchestration é fire-and-forget → marcamos 'completed' logo após o
+    // dispatch, IGUAL ao caminho cron. ANTES ficava preso em 'running' pra
+    // sempre (o status nunca mais mudava → spinner eterno na UI de Execuções).
+    // O detalhe do que o agente fez fica em manager_runs.
     await supabase.from('routine_runs')
-      .update({ status: 'running', updatedAt: new Date().toISOString() })
+      .update({ status: 'completed', completedAt: nowIso, updatedAt: nowIso })
       .eq('id', r.id);
-    // Marcamos 'running' (não 'completed') pra UI ver progresso;
-    // o manager loga em manager_runs separadamente.
   }
+}
+
+/**
+ * Watchdog: reconcilia runs presos em 'received'/'running' além do tempo limite.
+ * Cobre o órfão histórico (bug do tickManualRuns) e crashes do worker entre o
+ * dispatch e o update de status. Marca como 'completed' (convenção fire-and-forget:
+ * o dispatch já ocorreu; a execução em si é auditada em manager_runs).
+ */
+const STUCK_MINUTES = 15;
+
+async function tickReconcileStuckRuns(supabase: SupabaseClient) {
+  const cutoff = new Date(Date.now() - STUCK_MINUTES * 60_000).toISOString();
+  const { data: stuck } = await supabase
+    .from('routine_runs')
+    .select('id')
+    .in('status', ['received', 'running'])
+    .lt('triggeredAt', cutoff)
+    .limit(100);
+  if (!stuck?.length) return;
+
+  const nowIso = new Date().toISOString();
+  await supabase.from('routine_runs')
+    .update({ status: 'completed', completedAt: nowIso, updatedAt: nowIso })
+    .in('id', (stuck as any[]).map((s) => s.id));
+  console.log(`[routines-worker] reconciliou ${stuck.length} run(s) presos em running/received`);
 }
 
 /**
@@ -334,6 +368,7 @@ export function startRoutinesWorker(supabase: SupabaseClient) {
     try {
       await tick(supabase);
       await tickManualRuns(supabase);
+      await tickReconcileStuckRuns(supabase);
       await tickSocialSync(supabase);
       await tickDailyBackup(supabase);
       await tickRecurringRepasses(supabase);
