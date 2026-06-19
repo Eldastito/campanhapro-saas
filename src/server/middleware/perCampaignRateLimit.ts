@@ -36,6 +36,10 @@ export function buildRateLimiter(
 const DEV_MULTIPLIER = process.env.NODE_ENV === 'production' ? 1 : 20;
 
 export const expensiveLimiter = buildRateLimiter(60_000, 5 * DEV_MULTIPLIER, 'campaign');
+// Fluxos de IA INTERATIVOS multi-passo (ex.: Debate de Cenários: personas +
+// vários turnos + relatório + chat numa mesma sessão). O custo real já é barrado
+// pelo requireAiBudget; aqui só evitamos abuso. 40/min comporta um debate inteiro.
+export const aiInteractiveLimiter = buildRateLimiter(60_000, 40 * DEV_MULTIPLIER, 'campaign');
 export const messagingLimiter = buildRateLimiter(60_000, 30 * DEV_MULTIPLIER, 'campaign');
 export const mutationLimiter = buildRateLimiter(60_000, 60 * DEV_MULTIPLIER, 'campaign');
 export const webhookLimiter = buildRateLimiter(60_000, 300, 'ip');
