@@ -5,6 +5,14 @@ import { enqueueTask, executeTask, approveTask, rejectTask, syncTaskStatus } fro
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { tenantCampaignId } from '../../lib/tenantScope';
 
+// Aprovar/rejeitar tarefa de agente é ação privilegiada (gasta orçamento de IA /
+// executa ações). Só papéis de gestão. Set amplo pra não travar gestão legítima.
+const MGMT_ROLES = new Set(['Admin', 'Coordenador', 'Candidato', 'Candidato de Partido']);
+function isManager(req: Request): boolean {
+  const t = (req as any).user?.userType;
+  return MGMT_ROLES.has(t) || (req as any).user?.isSupremeAdmin === true;
+}
+
 export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
 
@@ -103,6 +111,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
       const taskId = req.params.id;
 
       if (!campaignId || !userId) return res.status(400).json({ error: 'auth obrigatório' });
+      if (!isManager(req)) return res.status(403).json({ error: 'forbidden', detail: 'Apenas gestão pode aprovar tarefas.' });
 
       await approveTask(supabaseAdmin, taskId, campaignId, userId);
 
@@ -136,6 +145,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
       const taskId = req.params.id;
 
       if (!campaignId || !userId) return res.status(400).json({ error: 'auth obrigatório' });
+      if (!isManager(req)) return res.status(403).json({ error: 'forbidden', detail: 'Apenas gestão pode rejeitar tarefas.' });
 
       await rejectTask(supabaseAdmin, taskId, campaignId, userId);
       await audit(supabaseAdmin, {
