@@ -63,9 +63,12 @@ async function graphGet(path: string, token: string): Promise<any> {
 }
 
 /**
- * Resolve a conta IG conectada da campanha. Ordem:
- *  1. social_tokens (provider='instagram') → settings.igUserId + token da própria linha
- *  2. env META_IG_USER_ID + META_ACCESS_TOKEN (modelo single-token atual)
+ * Resolve a conta IG conectada da campanha. FONTE ÚNICA: a aba "Conexões"
+ * (Agentes IA → SocialConnectionsHub), que grava o Instagram como uma linha
+ * `social_tokens` com provider='meta', settings.accountId (= IG Business
+ * Account ID) e settings.accessToken. Ordem:
+ *   1. social_tokens(provider='meta') → settings.accountId + settings.accessToken
+ *   2. env META_IG_USER_ID + META_ACCESS_TOKEN (modelo single-token de fallback)
  * Retorna null se nada estiver configurado.
  */
 export async function resolveInstagram(
@@ -77,12 +80,13 @@ export async function resolveInstagram(
       .from('social_tokens')
       .select('token, settings')
       .eq('campaignId', campaignId)
-      .eq('provider', 'instagram')
+      .eq('provider', 'meta')
       .maybeSingle();
-    const igUserId = data?.settings?.igUserId as string | undefined;
+    // O Hub salva o IG Business Account ID em settings.accountId.
+    const igUserId = (data?.settings?.accountId || data?.settings?.igUserId) as string | undefined;
     if (igUserId) {
-      // token 'env' (sentinela) → usa o global; senão usa o token salvo.
-      const token = data?.token && data.token !== 'env' ? data.token : GLOBAL_TOKEN;
+      // token: settings.accessToken (o que o Hub colou) → coluna token → global.
+      const token = data?.settings?.accessToken || data?.token || GLOBAL_TOKEN;
       if (token) return { igUserId, token, username: data?.settings?.username };
     }
   } catch { /* fallback abaixo */ }

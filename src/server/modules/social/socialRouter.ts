@@ -32,7 +32,7 @@ import {
 import { fetchKwaiPublicProfile } from '../../../lib/socialSyncKwai';
 import { runSocialSync, SyncProvider } from '../../../lib/socialSyncRunner';
 import {
-  resolveInstagram, autoResolveIgUserId, businessDiscovery, fetchOwnMediaWithComments,
+  resolveInstagram, businessDiscovery, fetchOwnMediaWithComments,
   type DiscoveryResult,
 } from '../integrations/instagramGraphClient';
 import { callAgent } from '../../../lib/aiCallAgent';
@@ -320,36 +320,13 @@ export function createSocialRouter(supabase: SupabaseClient): Router {
   // INSTAGRAM — inteligência social (Business Discovery + comentários próprios)
   // ════════════════════════════════════════════════════════════════════
 
-  // GET /instagram/status — conta IG conectada?
+  // GET /instagram/status — conta IG conectada? (lê a conexão da aba Conexões,
+  // que grava provider='meta'. Conectar/desconectar é SÓ lá — fonte única.)
   router.get('/instagram/status', async (req: Request, res: Response) => {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
     const conn = await resolveInstagram(supabase, campaignId);
     return res.json({ connected: !!conn, igUserId: conn?.igUserId ?? null, username: conn?.username ?? null });
-  });
-
-  // POST /instagram/connect — conecta a conta IG Business. Sem body, tenta
-  // auto-resolver via /me/accounts (token global). Com { igUserId } usa o informado.
-  router.post('/instagram/connect', async (req: Request, res: Response) => {
-    const campaignId = (req as any).user?.campaignId;
-    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
-    if (!isAdmin(req)) return res.status(403).json({ error: 'forbidden' });
-    let { igUserId, username } = req.body as { igUserId?: string; username?: string };
-    try {
-      if (!igUserId) {
-        const auto = await autoResolveIgUserId();
-        if (!auto) return res.status(400).json({ error: 'ig_autoresolve_failed', detail: 'Informe o IG Business Account ID ou configure META_ACCESS_TOKEN/META_IG_USER_ID.' });
-        igUserId = auto.igUserId; username = auto.username;
-      }
-      const { error } = await supabase.from('social_tokens').upsert({
-        campaignId, provider: 'instagram', token: 'env',
-        settings: { igUserId, username }, updatedAt: new Date().toISOString(),
-      }, { onConflict: 'campaignId,provider' });
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json({ connected: true, igUserId, username });
-    } catch (err: any) {
-      return res.status(502).json({ error: 'ig_connect_failed', detail: String(err?.message ?? err) });
-    }
   });
 
   // ── WATCHLIST de páginas de bairro ────────────────────────────────────
