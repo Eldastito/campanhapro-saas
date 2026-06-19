@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runMonteCarlo, CandidateInput } from './monteCarloService';
+import {
+  generatePersonas, runDebateTurn, generateReport, chatWithAgent,
+  type AgentSpec, type Persona, type DebateTurn,
+} from './aiDebate';
+import { isChatConfigured } from '../ai/chatCompletion';
+import { isWithinAiBudget } from '../billing/billingService';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
 export function createScenariosRouter(supabase: SupabaseClient): Router {
@@ -312,6 +318,144 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
       severity: 'info',
     });
     return res.json({ status: 'rejected' });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // DEBATE por IA (estilo MiroFish): personas → turnos → relatório → chat.
+  // Endpoints de IA gateados por isChatConfigured (503) + orçamento (402).
+  // ──────────────────────────────────────────────────────────────────────────
+
+  async function aiGate(req: any, res: any): Promise<boolean> {
+    if (!isChatConfigured()) { res.status(503).json({ error: 'ai_not_configured' }); return false; }
+    const ok = await isWithinAiBudget(supabase, req.user?.campaignId).catch(() => true);
+    if (!ok) { res.status(402).json({ error: 'ai_budget_exceeded' }); return false; }
+    return true;
+  }
+
+  // Monta um contexto curto da campanha (candidato, adversários, clima da base)
+  // pra ancorar as personas em dados reais. Best-effort: fonte que falhar é pulada.
+  async function buildCampaignContext(campaignId: string): Promise<string> {
+    const parts: string[] = [];
+    try {
+      const { data: camp } = await supabase.from('campaigns')
+        .select('"candidateName", party, "electionRole", "electionCity", "electionState"')
+        .eq('id', campaignId).maybeSingle();
+      if (camp) parts.push(
+        `Candidato: ${(camp as any).candidateName || '?'} (${(camp as any).party || 'partido?'}), ` +
+        `concorrendo a ${(camp as any).electionRole || 'cargo'} em ${(camp as any).electionCity || ''} ${(camp as any).electionState || ''}.`.trim());
+    } catch { /* skip */ }
+    try {
+      const { data: opps } = await supabase.from('competitor_intel')
+        .select('name, cargo, narrative').eq('campaignId', campaignId).limit(4);
+      if (opps?.length) parts.push('Adversários: ' + opps.map((o: any) =>
+        `${o.name}${o.cargo ? ` (${o.cargo})` : ''}${o.narrative ? ` — ${String(o.narrative).slice(0, 140)}` : ''}`).join('; '));
+    } catch { /* skip */ }
+    try {
+      const { data: contacts } = await supabase.from('contacts')
+        .select('"supportLevel"').eq('campaignId', campaignId).limit(3000);
+      if (contacts?.length) {
+        const c: Record<string, number> = {};
+        (contacts as any[]).forEach((r) => { const k = (r.supportLevel || 'indefinido').toLowerCase(); c[k] = (c[k] || 0) + 1; });
+        parts.push('Clima da base de contatos: ' + Object.entries(c).map(([k, v]) => `${v} ${k}`).join(', ') + '.');
+      }
+    } catch { /* skip */ }
+    return parts.join('\n') || 'Campanha eleitoral brasileira.';
+  }
+
+  // POST /debate/personas — gera personas pros agentes (nós do grafo).
+  router.post('/debate/personas', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await aiGate(req, res))) return;
+    const { agents } = req.body as { agents: AgentSpec[] };
+    if (!Array.isArray(agents) || agents.length === 0) return res.status(400).json({ error: 'agents required' });
+    if (agents.length > 14) return res.status(400).json({ error: 'too_many_agents' });
+    try {
+      const ctx = await buildCampaignContext(campaignId);
+      const personas = await generatePersonas(agents.slice(0, 14), ctx);
+      return res.json({ personas });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'personas_failed', detail: String(err?.message ?? err) });
+    }
+  });
+
+  // POST /debate/turn — roda um turno (batch de todos os agentes).
+  router.post('/debate/turn', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await aiGate(req, res))) return;
+    const { personas, scenario, prior, turn } = req.body as {
+      personas: Persona[]; scenario: string; prior: DebateTurn | null; turn: number;
+    };
+    if (!Array.isArray(personas) || !personas.length || !scenario) return res.status(400).json({ error: 'personas and scenario required' });
+    try {
+      const agents = await runDebateTurn(personas.slice(0, 14), scenario, prior ?? null, turn || 1);
+      return res.json({ turn: turn || 1, agents });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'turn_failed', detail: String(err?.message ?? err) });
+    }
+  });
+
+  // POST /debate/report — relatório final do relator.
+  router.post('/debate/report', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await aiGate(req, res))) return;
+    const { scenario, personas, transcript } = req.body as {
+      scenario: string; personas: Persona[]; transcript: DebateTurn[];
+    };
+    if (!scenario || !Array.isArray(personas) || !Array.isArray(transcript)) return res.status(400).json({ error: 'invalid_body' });
+    try {
+      const report = await generateReport(scenario, personas, transcript);
+      return res.json({ report });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'report_failed', detail: String(err?.message ?? err) });
+    }
+  });
+
+  // POST /debate/chat — conversa 1–1 com uma persona simulada.
+  router.post('/debate/chat', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await aiGate(req, res))) return;
+    const { persona, scenario, history, message } = req.body as {
+      persona: Persona; scenario: string; history: Array<{ role: 'user' | 'agent'; text: string }>; message: string;
+    };
+    if (!persona || !message) return res.status(400).json({ error: 'persona and message required' });
+    try {
+      const reply = await chatWithAgent(persona, scenario || '', history ?? [], message);
+      return res.json({ reply });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'chat_failed', detail: String(err?.message ?? err) });
+    }
+  });
+
+  // POST /debate — persiste o debate concluído (aparece no Histórico).
+  router.post('/debate', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { label, scenario, agents, transcript, report, turns } = req.body as any;
+    if (!scenario) return res.status(400).json({ error: 'scenario required' });
+    const { data, error } = await supabase.from('scenario_debates').insert({
+      campaignId, label: label ?? 'Debate', scenario,
+      agents: agents ?? [], transcript: transcript ?? [], report: report ?? null,
+      turns: turns ?? (Array.isArray(transcript) ? transcript.length : 0),
+    }).select('id').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(201).json({ debateId: data?.id });
+  });
+
+  // GET /debate — lista debates salvos (pro Histórico).
+  router.get('/debate', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data, error } = await supabase.from('scenario_debates')
+      .select('id, label, scenario, agents, transcript, report, turns, "createdAt"')
+      .eq('campaignId', campaignId)
+      .order('createdAt', { ascending: false })
+      .limit(20);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ debates: data ?? [] });
   });
 
   return router;

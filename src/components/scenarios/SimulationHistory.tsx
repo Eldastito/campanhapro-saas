@@ -1,6 +1,6 @@
 import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
-import { History, Loader2, RefreshCw, FlaskConical, Network } from 'lucide-react';
+import { History, Loader2, RefreshCw, FlaskConical, Network, Bot } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 
@@ -32,9 +32,20 @@ interface GraphRecord {
   createdAt: string;
 }
 
+interface DebateRecord {
+  id: string;
+  label: string;
+  scenario: string;
+  agents: Array<unknown>;
+  turns: number;
+  report?: string | null;
+  createdAt: string;
+}
+
 type HistoryItem =
   | { kind: 'simulation'; createdAt: string; run: SimulationRun }
-  | { kind: 'graph'; createdAt: string; graph: GraphRecord };
+  | { kind: 'graph'; createdAt: string; graph: GraphRecord }
+  | { kind: 'debate'; createdAt: string; debate: DebateRecord };
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
@@ -46,16 +57,19 @@ export const SimulationHistory: React.FC = () => {
   const fetchAll = React.useCallback(async () => {
     setLoading(true);
     try {
-      // Histórico unificado: simulações Monte Carlo + grafos salvos, num só lugar.
-      const [simRes, graphRes] = await Promise.all([
+      // Histórico unificado: simulações Monte Carlo + grafos salvos + debates IA.
+      const [simRes, graphRes, debRes] = await Promise.all([
         authedFetch('/api/v1/scenarios/simulate'),
         authedFetch('/api/v1/scenarios/graphs'),
+        authedFetch('/api/v1/scenarios/debate'),
       ]);
       const sims: SimulationRun[] = simRes.ok ? ((await simRes.json()).runs ?? []) : [];
       const graphs: GraphRecord[] = graphRes.ok ? ((await graphRes.json()).graphs ?? []) : [];
+      const debates: DebateRecord[] = debRes.ok ? ((await debRes.json()).debates ?? []) : [];
       const merged: HistoryItem[] = [
         ...sims.map((run) => ({ kind: 'simulation' as const, createdAt: run.createdAt, run })),
         ...graphs.map((graph) => ({ kind: 'graph' as const, createdAt: graph.createdAt, graph })),
+        ...debates.map((debate) => ({ kind: 'debate' as const, createdAt: debate.createdAt, debate })),
       ].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       setItems(merged);
     } catch {
@@ -108,6 +122,39 @@ export const SimulationHistory: React.FC = () => {
                   <span className="text-xs text-slate-500 ml-3 shrink-0">
                     {g.nodes?.length ?? 0} nós · {when}
                   </span>
+                </div>
+              );
+            }
+
+            // ── Debate por IA ──
+            if (item.kind === 'debate') {
+              const d = item.debate;
+              const open = expanded === d.id;
+              return (
+                <div key={`d-${d.id}`} className="border border-slate-700 rounded-xl overflow-hidden">
+                  <button
+                    className="w-full flex items-center justify-between p-3 text-left hover:bg-slate-700/40 transition-colors"
+                    onClick={() => setExpanded((e) => (e === d.id ? null : d.id))}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-200 flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-300 flex items-center gap-1 shrink-0">
+                          <Bot className="w-3 h-3" /> Debate IA
+                        </span>
+                        <span className="truncate">{d.label}</span>
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5 truncate">
+                        {d.turns} turnos · {d.agents?.length ?? 0} agentes
+                      </p>
+                    </div>
+                    <span className="text-xs text-slate-500 ml-3 shrink-0">{when}</span>
+                  </button>
+                  {open && (
+                    <div className="px-4 pb-4 pt-2 border-t border-slate-700/60 space-y-2">
+                      <p className="text-xs text-slate-400"><span className="text-slate-500">Cenário:</span> {d.scenario}</p>
+                      {d.report && <p className="text-xs text-slate-400 whitespace-pre-wrap line-clamp-[12]">{d.report}</p>}
+                    </div>
+                  )}
                 </div>
               );
             }
