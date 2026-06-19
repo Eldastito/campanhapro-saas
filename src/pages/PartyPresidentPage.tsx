@@ -155,7 +155,7 @@ const PartyPresidentPage: React.FC = () => {
   // Import assistido por IA (#147d): cola planilha "suja" → IA extrai → preview → confirma.
   const [importMode, setImportMode] = React.useState<'manual' | 'ia'>('manual');
   const [aiParsing, setAiParsing] = React.useState(false);
-  const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string }[] | null>(null);
+  const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string; valor: string }[] | null>(null);
   const [aiIgnored, setAiIgnored] = React.useState<string[]>([]);
   const [aiError, setAiError] = React.useState<string | null>(null);
   // Arquivo arrastado (imagem/PDF) que vai direto pra IA multimodal; CSV/Excel
@@ -393,7 +393,7 @@ const PartyPresidentPage: React.FC = () => {
     } finally { setImporting(false); }
   };
   // edição inline da prévia da IA (#147e)
-  const updatePreviewRow = (i: number, field: 'displayName' | 'cargo' | 'regiao' | 'estado' | 'phone', value: string) => {
+  const updatePreviewRow = (i: number, field: 'displayName' | 'cargo' | 'regiao' | 'estado' | 'phone' | 'valor', value: string) => {
     setAiPreview((prev) => prev ? prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)) : prev);
   };
   const removePreviewRow = (i: number) => setAiPreview((prev) => (prev ? prev.filter((_, j) => j !== i) : prev));
@@ -1143,6 +1143,8 @@ const PartyPresidentPage: React.FC = () => {
                             </select>
                             <input value={c.phone} onChange={(e) => updatePreviewRow(i, 'phone', e.target.value)} placeholder="Telefone"
                               className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
+                            <input value={c.valor} onChange={(e) => updatePreviewRow(i, 'valor', e.target.value)} placeholder="Valor R$ (recebido)"
+                              className="col-span-2 bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-emerald-200" />
                           </div>
                           <button onClick={() => removePreviewRow(i)} title="Remover" className="p-1 text-slate-500 hover:text-rose-400 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>

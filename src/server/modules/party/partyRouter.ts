@@ -31,6 +31,25 @@ const normalizeUF = (v: any): string | null => {
 const normName = (v: any): string => String(v ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 const normPhone = (v: any): string => String(v ?? '').replace(/\D/g, '');
 
+// Converte "$"/valor (ex.: "25400", "R$ 25.400", "25.400,50") em número de reais.
+// BR: ponto = milhar, vírgula = decimal.
+const parseBRL = (v: any): number => {
+  if (v == null) return 0;
+  let s = String(v).replace(/[^\d.,-]/g, '').trim();
+  if (!s) return 0;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  else s = s.replace(/\./g, '');
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+};
+
+// Linhas de cabeçalho que NÃO podem virar candidato (ex.: "Nome", "nome na urna...").
+const HEADER_TERMS = new Set([
+  'nome', 'name', 'candidato', 'candidata', 'nome do candidato', 'displayname',
+  'nome na urna', 'nome na urna eletronica', 'nome urna',
+]);
+const isHeaderName = (v: any): boolean => HEADER_TERMS.has(normName(v));
+
 // Cargos eletivos (lista fixa). normalizeCargo mapeia variações (inclusive
 // femininas) pro valor canônico da lista; vazio se não reconhecer.
 const CARGOS = ['Presidente', 'Senador', 'Deputado Federal', 'Deputado Estadual', 'Prefeito', 'Vereador'];
@@ -39,6 +58,9 @@ const normalizeCargo = (v: any): string => {
   if (!s) return '';
   const direct = CARGOS.find((c) => normName(c) === s);
   if (direct) return direct;
+  // Códigos comuns em planilhas de partido: F = Deputado Federal, E = Estadual.
+  if (s === 'f' || s === 'fed') return 'Deputado Federal';
+  if (s === 'e' || s === 'est') return 'Deputado Estadual';
   if (s.includes('vereador') || s.includes('vereadora')) return 'Vereador';
   if (s.includes('prefeit')) return 'Prefeito';
   if (s.includes('senador')) return 'Senador';
@@ -261,18 +283,23 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     for (const r of rows.slice(0, 5000)) {
       const displayName = String(r.displayName || r.nome || '').trim().slice(0, 160);
       if (!displayName) { invalid++; continue; }
+      // Não deixa a linha de cabeçalho ("Nome", "nome na urna eletronica"…) virar candidato.
+      if (isHeaderName(displayName)) { invalid++; continue; }
       const nk = normName(displayName);
       const pk = normPhone(r.phone || r.telefone);
       const isDup = existNames.has(nk) || seenNames.has(nk) || (pk.length >= 8 && (existPhones.has(pk) || seenPhones.has(pk)));
       if (isDup) { duplicates++; continue; }
       seenNames.add(nk); if (pk.length >= 8) seenPhones.add(pk);
+      // valor (coluna "$"/valor/repasse) → valorRecebido. 0 quando não houver.
+      const valorRecebido = parseBRL(r.valor ?? r.valorRecebido ?? r.repasse ?? r['$']);
       toInsert.push({
         partyId: party.id,
         displayName,
-        cargo: (r.cargo || '').toString().trim() || null,
+        cargo: normalizeCargo(r.cargo) || ((r.cargo || '').toString().trim() || null),
         regiao: (r.regiao || r.cidade || '').toString().trim() || null,
         estado: normalizeUF(r.estado || r.uf),
         phone: (r.phone || r.telefone || '').toString().trim() || null,
+        valorRecebido,
         status: 'pending',
         inviteToken: newToken(),
       });
@@ -321,25 +348,26 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 65536 } });
       const regras = `Você recebe uma lista de candidatos de um partido — pode vir como planilha colada (com cabeçalho, colunas extras tipo CPF/e-mail/observações, ordem qualquer, separadores variados) OU como um ARQUIVO (imagem/foto de uma lista, ou PDF).
 
-Sua tarefa: extrair a lista de candidatos pegando APENAS estes campos:
-- displayName: nome da pessoa (obrigatório)
-- cargo: cargo pretendido (Vereador, Prefeito, Deputado...) se houver
+Use o CABEÇALHO da planilha pra entender o que é cada coluna. Extraia APENAS estes campos:
+- displayName: nome da pessoa / "nome na urna" (obrigatório)
+- cargo: o cargo. Se vier código, EXPANDA: "F" = "Deputado Federal", "E" = "Deputado Estadual". Senão use Vereador/Prefeito/Senador/Deputado conforme o texto.
 - regiao: a CIDADE/município se houver
-- estado: a UF/estado (sigla de 2 letras quando der: RJ, SP...) se houver
-- phone: telefone/WhatsApp — só os dígitos
+- estado: a UF/estado (sigla de 2 letras: RJ, SP...) se houver
+- phone: telefone/WhatsApp — só os dígitos. NUNCA use valor em R$ como telefone.
+- valor: o VALOR EM REAIS repassado/pago ao candidato (colunas tipo "$", "valor", "valor repassado", "pagamento", "repasse"). Se houver VÁRIAS colunas de valor (ex.: "Valor Previsto", "Valor Repassado", "Valor Comprovado"), use a de "Valor Repassado". Só o número (ex.: "25400" ou "25.400,00"). "" se não houver. NÃO confunda valor com telefone nem com número do candidato.
 
 Responda SOMENTE em JSON válido (nada fora do JSON):
 {
-  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "" } ],
+  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "", "valor": "" } ],
   "colunasIgnoradas": ["nome das colunas/seções extras que você descartou"]
 }
 
 REGRAS:
-- IGNORE a linha de cabeçalho e linhas/itens vazios — não vire candidato.
+- IGNORE a linha de cabeçalho e linhas/itens vazios — cabeçalho NUNCA vira candidato.
 - Não invente dados: se um campo não existe, deixe "".
-- NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os 5 campos acima.
-- phone só com dígitos (remova (), -, espaços).
-- Liste TODOS os candidatos encontrados.`;
+- NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os campos acima.
+- phone só com dígitos; valor só com número (pode ter vírgula decimal).
+- Liste TODOS os candidatos encontrados, sem repetir o mesmo (mesmo nome) duas vezes.`;
 
       const result = isFile
         ? await model.generateContent([
@@ -355,13 +383,24 @@ REGRAS:
       const listRaw = Array.isArray(parsed) ? parsed : (parsed?.candidatos || parsed?.candidates || []);
       const ignored = (parsed?.colunasIgnoradas || parsed?.ignored || []).filter((x: any) => typeof x === 'string').slice(0, 20);
 
-      const candidates = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => ({
-        displayName: String(r?.displayName || r?.nome || '').trim().slice(0, 160),
-        cargo: String(r?.cargo || '').trim().slice(0, 80),
-        regiao: String(r?.regiao || r?.cidade || '').trim().slice(0, 80),
-        estado: normalizeUF(r?.estado || r?.uf) || '',
-        phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
-      })).filter((r: any) => r.displayName).slice(0, 5000);
+      const seen = new Set<string>();
+      const candidates = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => {
+        const valorNum = parseBRL(r?.valor ?? r?.valorRecebido ?? r?.['$']);
+        return {
+          displayName: String(r?.displayName || r?.nome || '').trim().slice(0, 160),
+          cargo: (normalizeCargo(r?.cargo) || String(r?.cargo || '').trim()).slice(0, 80),
+          regiao: String(r?.regiao || r?.cidade || '').trim().slice(0, 80),
+          estado: normalizeUF(r?.estado || r?.uf) || '',
+          phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
+          // string pra edição na prévia; "" quando 0/sem valor.
+          valor: valorNum > 0 ? String(valorNum) : '',
+        };
+      }).filter((r: any) => {
+        if (!r.displayName || isHeaderName(r.displayName)) return false; // pula vazio/cabeçalho
+        const k = normName(r.displayName);
+        if (seen.has(k)) return false;                                   // corta duplicado (mesmo nome)
+        seen.add(k); return true;
+      }).slice(0, 5000);
 
       // Log leve pra observabilidade (não bloqueia, custo escondido do usuário).
       supabase.from('party_ai_command_logs').insert({
