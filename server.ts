@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { createServer as createHttpServer } from 'http';
 import { createAuthMiddleware } from './src/middleware/authMiddleware';
+import { tenantCampaignId } from './src/server/lib/tenantScope';
 import { getConversionFunnelStats, getTerritorialAlerts } from './src/services/intelligenceService';
 import { getLeaderConversionStats } from './src/services/engagementService';
 import { createIntelligenceRouter } from './src/server/modules/intelligence/intelligenceRouter';
@@ -366,16 +367,14 @@ async function startServer() {
   });
 
   app.get('/api/auth/callback/simulate', async (req, res) => {
-    const { campaignId, provider } = req.query;
-    
-    if (supabaseAdmin && campaignId) {
-        await supabaseAdmin.from('social_tokens').upsert({
-            campaignId,
-            provider,
-            token: 'SIMULATED_TOKEN_' + Math.random().toString(36).substring(7),
-            updatedAt: new Date().toISOString()
-        }, { onConflict: 'campaignId,provider' });
-    }
+    const { provider } = req.query;
+
+    // SEGURANÇA: esta página é navegação de popup (sem Bearer), então não dá pra
+    // autenticar/escopar por usuário aqui. Antes ela fazia upsert em social_tokens
+    // com o campaignId VINDO DA QUERY (sem auth) — qualquer um podia injetar/
+    // SOBRESCREVER (onConflict) a conexão real de QUALQUER campanha. Removido.
+    // A conexão de verdade acontece autenticada na aba "Conexões"
+    // (SocialConnectionsHub) e no fluxo OAuth do socialRouter (com state CSRF).
 
     res.send(`
       <html>
@@ -403,8 +402,11 @@ async function startServer() {
 
   app.post('/api/agents/chat', requireAuth, async (req, res) => {
     try {
-      const { prompt, systemInstruction, campaignId, userId, agentId } = req.body;
-      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const { prompt, systemInstruction, agentId } = req.body;
+      // Tenant SEMPRE do token autenticado — nunca do body (anti-IDOR).
+      const campaignId = tenantCampaignId(req);
+      const userId = req.user?.id;
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
 
       if (supabaseAdmin && agentId) {
           await supabaseAdmin.from('agent_chat_history').insert({
@@ -663,7 +665,8 @@ async function startServer() {
 
   app.get('/api/agents/history/:agentId', requireAuth, async (req, res) => {
     const { agentId } = req.params;
-    const { campaignId } = req.query;
+    const campaignId = tenantCampaignId(req);
+    if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
     const { data } = await supabaseAdmin.from('agent_chat_history')
       .select('*').eq('campaignId', campaignId).eq('agentId', agentId)
       .order('createdAt', { ascending: true }).limit(50);
@@ -672,7 +675,9 @@ async function startServer() {
 
   app.post('/api/agents/generate-image', requireAuth, async (req, res) => {
     try {
-      const { prompt, campaignId, agentId } = req.body;
+      const { prompt, agentId } = req.body;
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const ptPrompt = `ESTRITAMENTE EM PORTUGUÊS DO BRASIL: Qualquer texto na imagem deve ser em português brasileiro. Tema: ${prompt}.`;
       const response = await axios.post('https://api.openai.com/v1/images/generations', {
         model: "dall-e-3", prompt: ptPrompt, n: 1, size: "1024x1792"
@@ -688,7 +693,8 @@ async function startServer() {
 
   // --- Dashboard Feed ---
   app.get('/api/war-room/feed', requireAuth, async (req, res) => {
-    const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
+    const campaignId = tenantCampaignId(req);
+    if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
     const { data } = await supabaseAdmin.from('war_room_intelligence')
       .select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false }).limit(10);
     res.json({ insights: toCamel(data || []) });
@@ -696,7 +702,8 @@ async function startServer() {
 
   // --- Auditoria de Fraude ---
   app.get('/api/fraud/logs', requireAuth, async (req, res) => {
-    const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
+    const campaignId = tenantCampaignId(req);
+    if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
     const { data } = await supabaseAdmin.from('fraud_audit_logs')
       .select('*').eq('campaignId', campaignId).order('createdAt', { ascending: false });
     res.json({ logs: toCamel(data || []) });
@@ -756,8 +763,10 @@ async function startServer() {
   // --- API Externa v1 (Ingestão de Dados) ---
   app.post('/api/agents/advisor', requireAuth, async (req, res) => {
     try {
-      const { campaignDataPrompt, campaignId, userId } = req.body;
-      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const { campaignDataPrompt } = req.body;
+      const campaignId = tenantCampaignId(req);
+      const userId = req.user?.id;
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
 
       const aiResponse = await callAgent(supabaseAdmin, 'advisor', campaignDataPrompt, {
           campaignId, userId,
@@ -789,8 +798,10 @@ async function startServer() {
   // --- Pipeline Automática (Analisar Agora) ---
   app.post('/api/agents/pipeline', requireAuth, async (req, res) => {
     try {
-      const { campaignDataPrompt, campaignId, userId } = req.body;
-      if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const { campaignDataPrompt } = req.body;
+      const campaignId = tenantCampaignId(req);
+      const userId = req.user?.id;
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       console.log("[Pipeline] Iniciando análise profunda para campanha:", campaignId);
 
       const aiResponse = await callAgent(
@@ -842,9 +853,11 @@ async function startServer() {
   // --- Secretário de Agenda: multi-turn com validação de 5 campos obrigatórios ---
   app.post('/api/agents/secretary', requireAuth, async (req, res) => {
     try {
-      const { campaignId, command, context } = req.body;
+      const { command, context } = req.body;
       // context (opcional): { extracted?: {...}, pendingEvent?: {...}, awaitingFields?: string[] }
+      const campaignId = tenantCampaignId(req);
       const userId = req.user?.id;
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       if (!campaignId || !command || typeof command !== 'string' || command.trim().length < 1) {
         return res.status(400).json({ error: 'campaignId e command obrigatórios' });
       }
@@ -928,10 +941,10 @@ async function startServer() {
   // --- Classificação IA de eleitores (Indeciso → Apoiador → Multiplicador) ---
   app.post('/api/ai/classify-contacts', requireAuth, async (req, res) => {
     try {
-      const campaignId = req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const userId = req.user?.id;
       const limit = Math.min(Number(req.body.limit) || 30, 100);
-      if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
+      if (!campaignId || !supabaseAdmin) return res.status(401).json({ error: 'campaignId ausente na sessão' });
 
       // Pega contatos ainda não classificados (ou classificados há mais de 14 dias).
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
@@ -1026,7 +1039,8 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
 
   // --- Manager Agent (orquestrador) com SSE streaming ---
   app.post('/api/agents/manager', requireAuth, async (req, res) => {
-    const { campaignId, intent } = req.body;
+    const { intent } = req.body;
+    const campaignId = tenantCampaignId(req);
     const userId = req.user?.id;
     if (!campaignId || !intent || typeof intent !== 'string' || intent.trim().length < 5) {
       return res.status(400).json({ error: 'campaignId e intent (>=5 chars) obrigatórios' });
@@ -1070,8 +1084,8 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
   // GET histórico de execuções do Manager
   app.get('/api/agents/manager/runs', requireAuth, async (req, res) => {
     try {
-      const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
-      if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId || !supabaseAdmin) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const { data } = await supabaseAdmin.from('manager_runs')
           .select('id, intent, "finalSummary", "totalCostCentsUsd", iterations, status, "startedAt", "finishedAt"')
           .eq('campaignId', campaignId)
@@ -1086,8 +1100,8 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
   // --- AI Health (uso e custo do mês para o dashboard "Manager") ---
   app.get('/api/ai/health', requireAuth, async (req, res) => {
     try {
-      const campaignId = (req.query.campaign_id ?? req.query.campaignId) as string | undefined;
-      if (!campaignId || !supabaseAdmin) return res.status(400).json({ error: 'campaignId obrigatório' });
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId || !supabaseAdmin) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const startOfMonth = new Date(); startOfMonth.setUTCDate(1); startOfMonth.setUTCHours(0,0,0,0);
       const { data: runs } = await supabaseAdmin.from('agent_runs')
           .select('"agentId", provider, model, status, "costCentsUsd", "latencyMs", "createdAt"')
@@ -1123,7 +1137,9 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
   // --- Ordens de Produção (Passagem de Bola) ---
   app.post('/api/agents/production-order', requireAuth, async (req, res) => {
     try {
-      const { campaignId, originAgent, targetAgent, content } = req.body;
+      const { originAgent, targetAgent, content } = req.body;
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const { data, error } = await supabaseAdmin.from('production_orders').insert({
         campaignId,
         originAgent,
@@ -1138,7 +1154,9 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
 
   app.get('/api/agents/production-orders', requireAuth, async (req, res) => {
     try {
-      const { campaignId, targetAgent } = req.query;
+      const { targetAgent } = req.query;
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const { data } = await supabaseAdmin.from('production_orders')
         .select('*').eq('campaignId', campaignId).eq('targetAgent', targetAgent).eq('status', 'pending');
       res.json({ orders: toCamel(data || []) });

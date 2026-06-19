@@ -346,6 +346,8 @@ export function createSocialRouter(supabase: SupabaseClient): Router {
     const { username, label, bairro } = req.body as { username?: string; label?: string; bairro?: string };
     const handle = (username || '').replace(/^@/, '').trim();
     if (!handle) return res.status(400).json({ error: 'username required' });
+    // Username válido do Instagram (anti-injeção; mesmo padrão do graph client).
+    if (!/^[A-Za-z0-9._]{1,30}$/.test(handle)) return res.status(400).json({ error: 'invalid_username' });
     const { data, error } = await supabase.from('social_watchlist')
       .upsert({ campaignId, username: handle, label: label ?? null, bairro: bairro ?? null }, { onConflict: 'campaignId,username' })
       .select('id, username, label, bairro').maybeSingle();

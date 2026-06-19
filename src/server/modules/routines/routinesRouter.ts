@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 function campaignId(req: Request): string | undefined {
-  return (req as any).user?.campaignId ?? (req.query.campaignId as string | undefined);
+  return tenantCampaignId(req);
 }
 
 export function createRoutinesRouter(supabaseAdmin: SupabaseClient) {
@@ -30,7 +31,7 @@ export function createRoutinesRouter(supabaseAdmin: SupabaseClient) {
 
   router.post('/routines', async (req: Request, res: Response) => {
     try {
-      const cid = campaignId(req) ?? req.body.campaignId;
+      const cid = campaignId(req);
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { title, description, goalId, projectId, assigneeAgentId,
@@ -133,7 +134,7 @@ export function createRoutinesRouter(supabaseAdmin: SupabaseClient) {
 
   router.post('/routines/:id/triggers', async (req: Request, res: Response) => {
     try {
-      const cid = campaignId(req) ?? req.body.campaignId;
+      const cid = campaignId(req);
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { kind, label, cronExpression, timezone, enabled } = req.body;
@@ -236,7 +237,7 @@ export function createRoutinesRouter(supabaseAdmin: SupabaseClient) {
   // Manual dispatch: creates a routine_run with source='manual'
   router.post('/routines/:id/run', async (req: Request, res: Response) => {
     try {
-      const cid = campaignId(req) ?? req.body.campaignId;
+      const cid = campaignId(req);
       if (!cid) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       // Verify routine belongs to campaign

@@ -3,6 +3,15 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { AgentTask } from '../integrations/paperclipClient';
 import { enqueueTask, executeTask, approveTask, rejectTask, syncTaskStatus } from './taskQueue';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { tenantCampaignId } from '../../lib/tenantScope';
+
+// Aprovar/rejeitar tarefa de agente é ação privilegiada (gasta orçamento de IA /
+// executa ações). Só papéis de gestão. Set amplo pra não travar gestão legítima.
+const MGMT_ROLES = new Set(['Admin', 'Coordenador', 'Candidato', 'Candidato de Partido']);
+function isManager(req: Request): boolean {
+  const t = (req as any).user?.userType;
+  return MGMT_ROLES.has(t) || (req as any).user?.isSupremeAdmin === true;
+}
 
 export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
@@ -14,7 +23,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { type, payload, requiresApproval } = req.body as Partial<AgentTask>;
@@ -47,7 +56,7 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.get('/tasks', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? (req.query.campaignId as string);
+      const campaignId = tenantCampaignId(req);
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const { data, error } = await supabaseAdmin
@@ -70,7 +79,8 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.get('/tasks/:id', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? (req.query.campaignId as string);
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const taskId = req.params.id;
 
       // Try to sync from Paperclip if running
@@ -96,11 +106,12 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks/:id/approve', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const userId = (req as any).user?.id;
       const taskId = req.params.id;
 
       if (!campaignId || !userId) return res.status(400).json({ error: 'auth obrigatório' });
+      if (!isManager(req)) return res.status(403).json({ error: 'forbidden', detail: 'Apenas gestão pode aprovar tarefas.' });
 
       await approveTask(supabaseAdmin, taskId, campaignId, userId);
 
@@ -129,11 +140,12 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks/:id/reject', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       const userId = (req as any).user?.id;
       const taskId = req.params.id;
 
       if (!campaignId || !userId) return res.status(400).json({ error: 'auth obrigatório' });
+      if (!isManager(req)) return res.status(403).json({ error: 'forbidden', detail: 'Apenas gestão pode rejeitar tarefas.' });
 
       await rejectTask(supabaseAdmin, taskId, campaignId, userId);
       await audit(supabaseAdmin, {
@@ -155,7 +167,8 @@ export function createPaperclipRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/tasks/:id/retry', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
       const taskId = req.params.id;
 
       const { error } = await supabaseAdmin

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { ingestChunks, search } from './vectorStore';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
 /** Split text into ~chunkSize-word segments with overlap. */
 function chunkText(text: string, chunkSize = 400, overlap = 40): string[] {
@@ -30,7 +31,7 @@ export function createRagRouter(supabaseAdmin: SupabaseClient) {
    */
   router.post('/ingest', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? req.body.campaignId;
+      const campaignId = tenantCampaignId(req);
       if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
       const incoming = (req.body.chunks ?? []) as Array<{
@@ -58,7 +59,7 @@ export function createRagRouter(supabaseAdmin: SupabaseClient) {
    */
   router.get('/search', async (req: Request, res: Response) => {
     try {
-      const campaignId = (req as any).user?.campaignId ?? (req.query.campaignId as string);
+      const campaignId = tenantCampaignId(req);
       const q = (req.query.q as string)?.trim();
       const limit = Math.min(Number(req.query.limit) || 5, 20);
 

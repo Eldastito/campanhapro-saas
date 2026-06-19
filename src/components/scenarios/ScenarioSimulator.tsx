@@ -1,4 +1,5 @@
 import { authedFetch } from '../../lib/authedFetch';
+import DOMPurify from 'dompurify';
 import * as React from 'react';
 import {
   Play, Database, Save, Loader2, FileText, Send, X, ChevronDown, Sparkles, Users, Info, CheckCircle2, TrendingUp, TrendingDown,
@@ -630,9 +631,9 @@ export const ScenarioSimulator: React.FC = () => {
                 {briefing.split('\n').map((line, i) => {
                   const tl = line.trim(); if (!tl) return <div key={i} className="h-1" />;
                   const html = tl.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>').replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noreferrer" class="text-indigo-400 underline">fonte</a>');
-                  if (/^#{1,6}\s/.test(tl)) return <p key={i} className="text-slate-100 font-bold mt-1.5" dangerouslySetInnerHTML={{ __html: html.replace(/^#{1,6}\s/, '') }} />;
-                  if (/^[-*]\s/.test(tl)) return <p key={i} className="pl-3 text-slate-400" dangerouslySetInnerHTML={{ __html: '• ' + html.replace(/^[-*]\s/, '') }} />;
-                  return <p key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+                  if (/^#{1,6}\s/.test(tl)) return <p key={i} className="text-slate-100 font-bold mt-1.5" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html.replace(/^#{1,6}\s/, '')) }} />;
+                  if (/^[-*]\s/.test(tl)) return <p key={i} className="pl-3 text-slate-400" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize('• ' + html.replace(/^[-*]\s/, '')) }} />;
+                  return <p key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />;
                 })}
                 <p className="text-[10px] text-amber-400/80 pt-1">⚠ Insumo interno (web/IA) — confira fontes; não divulgar como pesquisa.</p>
               </div>
@@ -881,9 +882,9 @@ export const ScenarioSimulator: React.FC = () => {
             {report.split('\n').map((line, i) => {
               const t = line.trim(); if (!t) return <div key={i} className="h-1" />;
               const html = t.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>');
-              if (/^#{1,6}\s/.test(t)) return <p key={i} className="text-slate-100 font-bold mt-2" dangerouslySetInnerHTML={{ __html: html.replace(/^#{1,6}\s/, '') }} />;
-              if (/^[-*]\s/.test(t)) return <p key={i} className="pl-3 text-slate-400" dangerouslySetInnerHTML={{ __html: '• ' + html.replace(/^[-*]\s/, '') }} />;
-              return <p key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+              if (/^#{1,6}\s/.test(t)) return <p key={i} className="text-slate-100 font-bold mt-2" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html.replace(/^#{1,6}\s/, '')) }} />;
+              if (/^[-*]\s/.test(t)) return <p key={i} className="pl-3 text-slate-400" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize('• ' + html.replace(/^[-*]\s/, '')) }} />;
+              return <p key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />;
             })}
           </div>
           <p className="text-[10px] text-amber-400/80 mt-3">⚠ Simulação hipotética para estratégia interna — não é pesquisa eleitoral.</p>
