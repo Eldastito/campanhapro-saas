@@ -1,7 +1,7 @@
 import { authedFetch } from '../../lib/authedFetch';
 import * as React from 'react';
 import {
-  Play, Database, Save, Loader2, FileText, Send, X, ChevronDown, Sparkles, Users, Info,
+  Play, Database, Save, Loader2, FileText, Send, X, ChevronDown, Sparkles, Users, Info, CheckCircle2, TrendingUp, TrendingDown,
 } from 'lucide-react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
@@ -34,6 +34,7 @@ interface P {
   x: number; y: number; vx: number; vy: number; fx?: number | null; fy?: number | null;
 }
 interface Link { a: string; b: string; w: number; explicit?: boolean; etype?: Edge['type']; }
+interface Pop { apoio: number; neutro: number; oposicao: number; total: number; }
 
 const NODE_RING: Record<string, string> = {
   candidate: '#818cf8', leader: '#34d399', voter_group: '#fbbf24', opponent: '#f87171', ally: '#22d3ee',
@@ -71,6 +72,8 @@ export const ScenarioSimulator: React.FC = () => {
   const sample = sampleSize(electorate);             // nº de pontos desenhados
   const perDot = Math.max(1, Math.round(electorate / sample)); // ≈ eleitores por ponto
   const [hoods, setHoods] = React.useState<Array<{ id: string; label: string; pct: number; n: number }>>([]);
+  const [result, setResult] = React.useState<null | { before: Pop; after: Pop }>(null);
+  const baselineRef = React.useRef<Pop | null>(null);
 
   const [turns, setTurns] = React.useState(3);
   const [phase, setPhase] = React.useState<string | null>(null);
@@ -376,6 +379,13 @@ export const ScenarioSimulator: React.FC = () => {
     for (let i = transcript.length - 1; i >= 0; i--) { const a = transcript[i].agents.find((x) => x.id === id); if (a) return a.opinion; }
     return nodes.find((n) => n.id === id)?.opinion ?? 0;
   };
+  // Snapshot da população (toda a amostra) — base do "resultado" da simulação.
+  const snapshotPop = (): Pop => {
+    let apoio = 0, neutro = 0, oposicao = 0, total = 0;
+    for (const p of partsRef.current.values()) { total++; const o = p.opinion; if (o > 0.2) apoio++; else if (o < -0.2) oposicao++; else neutro++; }
+    return { apoio, neutro, oposicao, total };
+  };
+  const pct = (v: number, t: number) => (t ? Math.round((v / t) * 100) : 0);
 
   const seedAgents = async () => {
     setError(null); setPhase('seed');
@@ -383,7 +393,7 @@ export const ScenarioSimulator: React.FC = () => {
       const res = await authedFetch('/api/v1/scenarios/graph-seed'); const j = await res.json();
       if (!res.ok) throw new Error(j.error || 'Erro ao semear');
       if (!j.nodes?.length) { setError('Sem dados suficientes — cadastre contatos/adversários na Inteligência.'); return; }
-      store.setGraph(j.nodes.slice(0, 14), j.edges ?? []); store.setLabel('Simulação (dados reais)');
+      store.setGraph(j.nodes.slice(0, 14), j.edges ?? []); store.setLabel('Simulação (dados reais)'); setResult(null);
     } catch (e: any) { setError(e.message); } finally { setPhase(null); }
   };
 
@@ -403,7 +413,8 @@ export const ScenarioSimulator: React.FC = () => {
 
   const runDebate = async () => {
     if (!scenario.trim()) { setError('Descreva o cenário antes de rodar.'); return; }
-    setError(null); store.setReport(null); abortRef.current = false;
+    setError(null); store.setReport(null); setResult(null); abortRef.current = false;
+    baselineRef.current = snapshotPop(); // foto da opinião ANTES do acontecimento
     try {
       const withP = await ensurePersonas();
       let acc: DebateTurn[] = []; store.setTranscript([]);
@@ -430,6 +441,13 @@ export const ScenarioSimulator: React.FC = () => {
         // persiste opinião das âncoras no store (pra durar entre abas)
         store.setNodes(withP.map((n) => ({ ...n, opinion: currentFrom(acc, n) })));
       }
+      // Fim do debate: deixa a multidão reagir, fecha o resultado e gera o relatório.
+      if (!abortRef.current) {
+        await delay(1800);
+        const after = snapshotPop();
+        setResult({ before: baselineRef.current ?? after, after });
+        await genReport(after, acc);
+      }
     } catch (e: any) { setError(e.message); } finally { setPhase(null); speakerRef.current = null; }
   };
   const currentFrom = (acc: DebateTurn[], n: Agent): number => {
@@ -437,11 +455,15 @@ export const ScenarioSimulator: React.FC = () => {
     return n.opinion ?? DEFAULT_OPINION[n.type] ?? 0;
   };
 
-  const genReport = async () => {
-    if (!transcript.length) return; setError(null); setPhase('report');
+  const genReport = async (after?: Pop, tx?: DebateTurn[]) => {
+    const t = tx ?? useScenarioStore.getState().transcript;
+    if (!t.length) return; setError(null); setPhase('report');
     try {
-      const payload = nodes.map((n) => ({ id: n.id, label: n.label, type: n.type, stubborn: n.stubborn, persona: n.persona ?? '', opinion: n.opinion ?? 0 }));
-      const res = await authedFetch('/api/v1/scenarios/debate/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario, personas: payload, transcript }) });
+      const cur = useScenarioStore.getState().nodes;
+      const payload = cur.map((n) => ({ id: n.id, label: n.label, type: n.type, stubborn: n.stubborn, persona: n.persona ?? '', opinion: n.opinion ?? 0 }));
+      const aft = after ?? snapshotPop();
+      const metrics = { before: baselineRef.current ?? aft, after: aft, total: aft.total, hoods: hoods.map((h) => ({ label: h.label, pct: h.pct })) };
+      const res = await authedFetch('/api/v1/scenarios/debate/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario, personas: payload, transcript: t, metrics }) });
       if (!res.ok) throw new Error(await apiError(res));
       const j = await res.json(); store.setReport(j.report ?? '');
     } catch (e: any) { setError(e.message); } finally { setPhase(null); }
@@ -532,7 +554,7 @@ export const ScenarioSimulator: React.FC = () => {
             </select>
           </label>
           {transcript.length > 0 && (
-            <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={genReport} disabled={!!phase}>
+            <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={() => genReport()} disabled={!!phase}>
               {phase === 'report' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <FileText className="w-3 h-3 mr-1" />} Relatório
             </Button>
           )}
@@ -629,6 +651,45 @@ export const ScenarioSimulator: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* RESULTADO da simulação (aparece quando o debate termina) */}
+      {result && (() => {
+        const bA = pct(result.before.apoio, result.before.total), aA = pct(result.after.apoio, result.after.total);
+        const bO = pct(result.before.oposicao, result.before.total), aO = pct(result.after.oposicao, result.after.total);
+        const d = aA - bA;
+        const up = d > 0;
+        return (
+          <Card className={`border-l-4 ${d > 1 ? 'border-l-emerald-500' : d < -1 ? 'border-l-red-500' : 'border-l-slate-500'}`}>
+            <div className="flex items-center gap-2 mb-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              <h3 className="text-base font-bold text-slate-100">Simulação concluída — resultado</h3>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-slate-800/50 rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Apoio ao candidato</p>
+                <p className="text-2xl font-bold text-slate-100 flex items-center gap-2">
+                  {aA}%
+                  <span className={`text-sm flex items-center gap-0.5 ${up ? 'text-emerald-400' : d < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                    {up ? <TrendingUp className="w-4 h-4" /> : d < 0 ? <TrendingDown className="w-4 h-4" /> : null}{d >= 0 ? '+' : ''}{d} p.p.
+                  </span>
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">era {bA}% antes do cenário</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Oposição</p>
+                <p className="text-2xl font-bold text-slate-100">{aO}%<span className="text-sm text-slate-400 ml-2">{aO - bO >= 0 ? '+' : ''}{aO - bO} p.p.</span></p>
+                <p className="text-[11px] text-slate-500 mt-0.5">era {bO}%</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Amostra</p>
+                <p className="text-2xl font-bold text-slate-100">{result.after.total}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">≈ {perDot.toLocaleString('pt-BR')} eleitores/ponto</p>
+              </div>
+            </div>
+            {phase === 'report' && <p className="text-xs text-slate-500 mt-3 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Gerando relatório estratégico…</p>}
+          </Card>
+        );
+      })()}
 
       {transcript.length > 0 && (
         <Card>

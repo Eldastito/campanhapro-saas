@@ -401,12 +401,12 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
     if (!(await aiGate(req, res))) return;
-    const { scenario, personas, transcript } = req.body as {
-      scenario: string; personas: Persona[]; transcript: DebateTurn[];
+    const { scenario, personas, transcript, metrics } = req.body as {
+      scenario: string; personas: Persona[]; transcript: DebateTurn[]; metrics?: any;
     };
     if (!scenario || !Array.isArray(personas) || !Array.isArray(transcript)) return res.status(400).json({ error: 'invalid_body' });
     try {
-      const report = await generateReport(scenario, personas, transcript);
+      const report = await generateReport(scenario, personas, transcript, metrics);
       return res.json({ report });
     } catch (err: any) {
       return res.status(500).json({ error: 'report_failed', detail: String(err?.message ?? err) });
