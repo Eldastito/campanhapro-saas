@@ -7,7 +7,8 @@ import {
 } from './aiDebate';
 import { isChatConfigured } from '../ai/chatCompletion';
 import { isWithinAiBudget } from '../billing/billingService';
-import { ingestArtifact } from '../rag/knowledgeIngest';
+import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
+import { callAgent } from '../../../lib/aiCallAgent';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
 export function createScenariosRouter(supabase: SupabaseClient): Router {
@@ -363,17 +364,93 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
     return parts.join('\n') || 'Campanha eleitoral brasileira.';
   }
 
+  // POST /briefing — ORQUESTRADOR busca dados REAIS e atuais (com fontes) pra
+  // ancorar a simulação: últimas pesquisas divulgadas, notícias/portais/blogs e
+  // redes sociais por localidade (bairro/cidade/estado), guiado por palavras-chave.
+  // Usa o web_search nativo (callAgent). Já recebe o que TEMOS internamente +
+  // memória RAG, pra NÃO buscar repetido e focar no que falta / no mais recente.
+  router.post('/briefing', async (req, res) => {
+    const campaignId = (req as any).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!(await aiGate(req, res))) return;
+    const { scenario, neighborhoods, keywords } = req.body as {
+      scenario: string; neighborhoods?: string[]; keywords?: string[];
+    };
+    if (!scenario?.trim()) return res.status(400).json({ error: 'scenario required' });
+    try {
+      const ctx = await buildCampaignContext(campaignId);
+      // O que JÁ temos por dentro (pra a IA não re-buscar): clima por bairro.
+      let internos = '';
+      try {
+        const { data: contacts } = await supabase.from('contacts')
+          .select('neighborhood, "supportScore", "voteIntention"').eq('campaignId', campaignId).limit(3000);
+        const agg = new Map<string, { n: number; sum: number; sc: number }>();
+        (contacts ?? []).forEach((c: any) => {
+          const b = (c.neighborhood || '').trim(); if (!b) return;
+          const a = agg.get(b) ?? { n: 0, sum: 0, sc: 0 };
+          a.n++; if (typeof c.supportScore === 'number') { a.sum += c.supportScore; a.sc++; } agg.set(b, a);
+        });
+        const top = [...agg.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 8);
+        if (top.length) internos = 'Dados INTERNOS (nossos contatos) por bairro — já sabemos, NÃO re-busque: ' +
+          top.map(([b, v]) => `${b} (${v.n} contatos${v.sc ? `, apoio médio ${Math.round(v.sum / v.sc)}/100` : ''})`).join('; ') + '.';
+      } catch { /* skip */ }
+      // Memória RAG (cenários/dossiês passados) — evita redundância.
+      const mem = await retrieveContext(supabase, campaignId, `${scenario} ${(keywords || []).join(' ')}`, 4).catch(() => '');
+
+      const SYSTEM =
+        'Você é o ORQUESTRADOR de inteligência de uma campanha eleitoral brasileira. Sua missão é, ' +
+        'com web_search, levantar dados REAIS, ATUAIS e VERIFICÁVEIS pra ancorar uma simulação de cenário. ' +
+        'Cite as FONTES (URLs). Nunca invente números — se não achar, diga que não encontrou. NÃO repita o ' +
+        'que já temos internamente; foque no que falta e no mais recente.';
+      const prompt =
+        `Contexto da campanha:\n${ctx}\n\n` +
+        (internos ? internos + '\n\n' : '') +
+        (mem ? `Memória interna relevante (já temos):\n${mem}\n\n` : '') +
+        `CENÁRIO a simular: ${scenario}\n` +
+        (neighborhoods?.length ? `Bairros de interesse: ${neighborhoods.join(', ')}.\n` : '') +
+        (keywords?.length ? `Palavras-chave pra garimpar: ${keywords.join(', ')}.\n` : '') +
+        `\nUse web_search pra cobrir, por LOCALIDADE (bairro/cidade/estado quando der):\n` +
+        `1. Últimas PESQUISAS de intenção de voto divulgadas (instituto, data, números) e cenário no TSE/TRE.\n` +
+        `2. NOTÍCIAS/portais/blogs recentes sobre o tema do cenário e a disputa.\n` +
+        `3. REDES SOCIAIS (X/Twitter, Instagram, Facebook públicos): assuntos/sentimento mais falados, ` +
+        `incluindo o que circula nas páginas dos adversários, guiado pelas palavras-chave.\n\n` +
+        `Responda em markdown PT-BR, conciso, com seções: **Pesquisas recentes**, **Clima nas redes (por localidade)**, ` +
+        `**Movimentos dos adversários**, **O que mudou desde o que já sabíamos**, **Fontes** (lista de URLs). ` +
+        `Se uma fonte for fraca/indireta, sinalize.`;
+
+      const result = await callAgent(supabase, 'competitive_intel', prompt, {
+        campaignId, userId: (req as any).user?.id ?? null,
+        systemInstruction: SYSTEM, complexity: 'premium', enableWebSearch: true, maxTokens: 3500,
+      });
+      const briefing = result.text || '';
+
+      // Indexa no RAG (memória + orquestrador) — best-effort.
+      try {
+        await ingestArtifact(supabase, {
+          campaignId, source: 'agent:scenario-briefing',
+          title: `Briefing de realidade: ${scenario.slice(0, 70)}`,
+          text: briefing,
+          metadata: { kind: 'scenario_briefing', hasPrimarySources: true },
+        });
+      } catch { /* best-effort */ }
+
+      return res.json({ briefing, provider: result.provider, model: result.model, webSearches: result.webSearches ?? 0 });
+    } catch (err: any) {
+      return res.status(500).json({ error: 'briefing_failed', detail: String(err?.message ?? err) });
+    }
+  });
+
   // POST /debate/personas — gera personas pros agentes (nós do grafo).
   router.post('/debate/personas', async (req, res) => {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
     if (!(await aiGate(req, res))) return;
-    const { agents } = req.body as { agents: AgentSpec[] };
+    const { agents, briefing } = req.body as { agents: AgentSpec[]; briefing?: string };
     if (!Array.isArray(agents) || agents.length === 0) return res.status(400).json({ error: 'agents required' });
     if (agents.length > 14) return res.status(400).json({ error: 'too_many_agents' });
     try {
       const ctx = await buildCampaignContext(campaignId);
-      const personas = await generatePersonas(agents.slice(0, 14), ctx);
+      const personas = await generatePersonas(agents.slice(0, 14), ctx, typeof briefing === 'string' ? briefing : undefined);
       return res.json({ personas });
     } catch (err: any) {
       return res.status(500).json({ error: 'personas_failed', detail: String(err?.message ?? err) });
@@ -385,12 +462,12 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
     if (!(await aiGate(req, res))) return;
-    const { personas, scenario, prior, turn } = req.body as {
-      personas: Persona[]; scenario: string; prior: DebateTurn | null; turn: number;
+    const { personas, scenario, prior, turn, briefing } = req.body as {
+      personas: Persona[]; scenario: string; prior: DebateTurn | null; turn: number; briefing?: string;
     };
     if (!Array.isArray(personas) || !personas.length || !scenario) return res.status(400).json({ error: 'personas and scenario required' });
     try {
-      const agents = await runDebateTurn(personas.slice(0, 14), scenario, prior ?? null, turn || 1);
+      const agents = await runDebateTurn(personas.slice(0, 14), scenario, prior ?? null, turn || 1, typeof briefing === 'string' ? briefing : undefined);
       return res.json({ turn: turn || 1, agents });
     } catch (err: any) {
       return res.status(500).json({ error: 'turn_failed', detail: String(err?.message ?? err) });

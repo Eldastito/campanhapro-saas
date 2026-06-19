@@ -68,8 +68,10 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const ScenarioSimulator: React.FC = () => {
   const store = useScenarioStore();
-  const { label, scenario, nodes, edges, transcript, report, electorate, comparisons } = store;
+  const { label, scenario, nodes, edges, transcript, report, electorate, comparisons, briefing } = store;
   const segNodes = nodes.filter((n) => n.type === 'voter_group');
+  const [keywords, setKeywords] = React.useState('');
+  const [showBriefing, setShowBriefing] = React.useState(true);
   const sample = sampleSize(electorate);             // nº de pontos desenhados
   const perDot = Math.max(1, Math.round(electorate / sample)); // ≈ eleitores por ponto
   const [hoods, setHoods] = React.useState<Array<{ id: string; label: string; pct: number; n: number }>>([]);
@@ -429,12 +431,26 @@ export const ScenarioSimulator: React.FC = () => {
     } catch (e: any) { setError(e.message); } finally { setPhase(null); }
   };
 
+  // Orquestrador busca dados reais (web_search) pra ancorar a simulação.
+  const genBriefing = async () => {
+    if (!scenario.trim()) { setError('Descreva o cenário antes de gerar o briefing.'); return; }
+    setError(null); setPhase('briefing');
+    try {
+      const res = await authedFetch('/api/v1/scenarios/briefing', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario, neighborhoods: segNodes.map((n) => n.label), keywords: keywords.split(',').map((k) => k.trim()).filter(Boolean) }),
+      });
+      if (!res.ok) throw new Error(await apiError(res));
+      const j = await res.json(); store.setBriefing(j.briefing ?? ''); setShowBriefing(true);
+    } catch (e: any) { setError(e.message); } finally { setPhase(null); }
+  };
+
   const ensurePersonas = async (): Promise<Agent[]> => {
     if (store.hasPersonas) return nodes;
     setPhase('personas');
     const res = await authedFetch('/api/v1/scenarios/debate/personas', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agents: nodes.map(({ id, label, type, stubborn, opinion }) => ({ id, label, type, stubborn, opinion })) }),
+      body: JSON.stringify({ agents: nodes.map(({ id, label, type, stubborn, opinion }) => ({ id, label, type, stubborn, opinion })), briefing: store.briefing || undefined }),
     });
     if (!res.ok) throw new Error(await apiError(res));
     const j = await res.json(); const personas: any[] = j.personas ?? [];
@@ -457,7 +473,7 @@ export const ScenarioSimulator: React.FC = () => {
         const payload = withP.map((n) => ({ id: n.id, label: n.label, type: n.type, stubborn: n.stubborn, persona: n.persona ?? '', opinion: currentFrom(acc, n) }));
         const res = await authedFetch('/api/v1/scenarios/debate/turn', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ personas: payload, scenario, prior, turn: t }),
+          body: JSON.stringify({ personas: payload, scenario, prior, turn: t, briefing: store.briefing || undefined }),
         });
         if (!res.ok) throw new Error(await apiError(res));
         const j = await res.json(); const ta = j.agents ?? [];
@@ -592,6 +608,37 @@ export const ScenarioSimulator: React.FC = () => {
         <textarea className="w-full text-sm bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 resize-none mb-2" rows={2}
           placeholder="Descreva o acontecimento (ex.: 'Estourou uma denúncia contra o adversário' ou 'O candidato propõe transporte grátis')…"
           value={scenario} onChange={(e) => store.setScenario(e.target.value)} />
+
+        {/* Briefing de realidade: orquestrador busca dados reais (web) antes de simular */}
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <input className="flex-1 min-w-[180px] text-xs bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+            placeholder="Palavras-chave p/ garimpar nas redes (opcional, separadas por vírgula)"
+            value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+          <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={genBriefing} disabled={!!phase}>
+            {phase === 'briefing' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Database className="w-3 h-3 mr-1" />}
+            {briefing ? 'Atualizar briefing' : 'Gerar briefing (dados reais)'}
+          </Button>
+        </div>
+        {briefing && (
+          <div className="mb-3 bg-slate-800/40 border border-indigo-500/20 rounded-lg">
+            <button onClick={() => setShowBriefing((s) => !s)} className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-indigo-300">
+              <span className="flex items-center gap-1.5"><Info className="w-3.5 h-3.5" /> Briefing de realidade (dados atuais + fontes)</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showBriefing ? 'rotate-180' : ''}`} />
+            </button>
+            {showBriefing && (
+              <div className="px-3 pb-3 max-h-60 overflow-y-auto space-y-1 text-[12px] text-slate-300">
+                {briefing.split('\n').map((line, i) => {
+                  const tl = line.trim(); if (!tl) return <div key={i} className="h-1" />;
+                  const html = tl.replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100">$1</strong>').replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noreferrer" class="text-indigo-400 underline">fonte</a>');
+                  if (/^#{1,6}\s/.test(tl)) return <p key={i} className="text-slate-100 font-bold mt-1.5" dangerouslySetInnerHTML={{ __html: html.replace(/^#{1,6}\s/, '') }} />;
+                  if (/^[-*]\s/.test(tl)) return <p key={i} className="pl-3 text-slate-400" dangerouslySetInnerHTML={{ __html: '• ' + html.replace(/^[-*]\s/, '') }} />;
+                  return <p key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+                })}
+                <p className="text-[10px] text-amber-400/80 pt-1">⚠ Insumo interno (web/IA) — confira fontes; não divulgar como pesquisa.</p>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <Button variant="primary" className="text-xs px-4 py-1.5" onClick={runDebate} disabled={!!phase}>

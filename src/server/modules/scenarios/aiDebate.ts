@@ -73,10 +73,12 @@ const SYSTEM =
 export async function generatePersonas(
   agents: AgentSpec[],
   campaignContext: string,
+  briefing?: string,
 ): Promise<Persona[]> {
   const list = agents.map((a) => `- id "${a.id}": ${a.label} (${TYPE_PT[a.type] ?? a.type})`).join('\n');
   const user =
     `Contexto da campanha:\n${campaignContext}\n\n` +
+    (briefing ? `BRIEFING DE REALIDADE (dados atuais reais com fontes — use pra ancorar as personas):\n${briefing.slice(0, 2500)}\n\n` : '') +
     `Agentes a personificar:\n${list}\n\n` +
     `Para CADA agente, crie uma persona curta (2 frases: valores, tom, o que move o voto) e ` +
     `defina a opinião inicial sobre o candidato da campanha de -1 (oposição forte) a +1 (apoio forte), ` +
@@ -103,6 +105,7 @@ export async function runDebateTurn(
   scenario: string,
   prior: DebateTurn | null,
   turnNumber: number,
+  briefing?: string,
 ): Promise<TurnAgent[]> {
   const priorMap = new Map((prior?.agents ?? []).map((a) => [a.id, a]));
   const roster = personas.map((p) => {
@@ -115,6 +118,7 @@ export async function runDebateTurn(
 
   const user =
     `CENÁRIO em debate: ${scenario}\n\n` +
+    (briefing ? `BRIEFING DE REALIDADE (fatos atuais reais):\n${briefing.slice(0, 1800)}\n\n` : '') +
     `Turno ${turnNumber}. Agentes (com persona, opinião atual e última fala):\n${roster}\n\n` +
     `Simule este turno: cada agente faz UMA fala curta (1–2 frases, em 1ª pessoa, no seu tom) ` +
     `reagindo ao cenário e ao clima do debate, e atualiza sua opinião (-1 a +1). Âncoras mantêm o lado. ` +
