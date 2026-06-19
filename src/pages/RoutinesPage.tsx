@@ -80,6 +80,13 @@ const defaultTriggerForm = () => ({
   timezone: 'America/Sao_Paulo',
 });
 
+// Explicação curta + exemplo de uso de cada tipo de trigger (UI).
+const TRIGGER_KIND_HELP: Record<'cron' | 'webhook' | 'manual', string> = {
+  cron: 'Agendado: roda sozinho num horário fixo que se repete. Ex.: relatório de engajamento todo dia às 8h, ou resumo semanal toda segunda.',
+  webhook: 'Disparado por um sistema externo via URL. Ex.: ao fechar uma doação ou chegar um lead de um formulário, o serviço chama o webhook e a rotina roda na hora.',
+  manual: 'Só roda quando você clica em "Disparar" (▶) na lista de rotinas. Ex.: gerar um briefing sob demanda antes de uma reunião.',
+};
+
 const RoutinesPage: React.FC = () => {
   const { user } = useAuth();
   const [routines, setRoutines] = React.useState<Routine[]>([]);
@@ -495,6 +502,7 @@ const RoutinesPage: React.FC = () => {
                   <option value="webhook">Webhook</option>
                   <option value="manual">Manual</option>
                 </select>
+                <p className="text-xs text-slate-500 mt-1.5 leading-snug">{TRIGGER_KIND_HELP[triggerForm.kind]}</p>
               </div>
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Label</label>
