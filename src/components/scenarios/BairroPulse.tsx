@@ -48,16 +48,6 @@ export const BairroPulse: React.FC = () => {
 
   React.useEffect(() => { loadStatus(); }, [loadStatus]);
 
-  const connect = async () => {
-    setBusy('connect'); setError(null);
-    try {
-      const res = await authedFetch('/api/v1/social/instagram/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.detail || j.error || 'Falha ao conectar');
-      setConnected(true); setIgUsername(j.username ?? null);
-    } catch (e: any) { setError(e.message); } finally { setBusy(null); }
-  };
-
   const addWatch = async () => {
     const u = newUser.replace(/^@/, '').trim();
     if (!u) return;
@@ -110,12 +100,11 @@ export const BairroPulse: React.FC = () => {
 
         {connected === false && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-300">
-            <p className="mb-2">Conta do Instagram do candidato não conectada.</p>
-            <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={connect} disabled={busy === 'connect'}>
-              {busy === 'connect' ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Instagram className="w-3 h-3 mr-1" />}
-              Conectar Instagram
-            </Button>
-            <p className="mt-2 text-amber-400/70 text-[11px]">Precisa de uma conta IG Business/Creator + token Meta configurado no servidor.</p>
+            <p className="mb-1 flex items-center gap-1.5"><Instagram className="w-3.5 h-3.5" /> Instagram do candidato não conectado.</p>
+            <p className="text-amber-400/80 text-[11px]">
+              Conecte em <strong>Agentes IA → aba "Conexões"</strong> (conta IG Business/Creator).
+              Assim que estiver lá, o Pulso e os comentários funcionam aqui automaticamente.
+            </p>
           </div>
         )}
         {connected && (
