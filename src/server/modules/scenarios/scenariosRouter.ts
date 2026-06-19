@@ -7,6 +7,7 @@ import {
 } from './aiDebate';
 import { isChatConfigured } from '../ai/chatCompletion';
 import { isWithinAiBudget } from '../billing/billingService';
+import { ingestArtifact } from '../rag/knowledgeIngest';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 
 export function createScenariosRouter(supabase: SupabaseClient): Router {
@@ -434,7 +435,7 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
   router.post('/debate', async (req, res) => {
     const campaignId = (req as any).user?.campaignId;
     if (!campaignId) return res.status(401).json({ error: 'Unauthorized' });
-    const { label, scenario, agents, transcript, report, turns } = req.body as any;
+    const { label, scenario, agents, transcript, report, turns, metrics } = req.body as any;
     if (!scenario) return res.status(400).json({ error: 'scenario required' });
     const { data, error } = await supabase.from('scenario_debates').insert({
       campaignId, label: label ?? 'Debate', scenario,
@@ -442,6 +443,27 @@ export function createScenariosRouter(supabase: SupabaseClient): Router {
       turns: turns ?? (Array.isArray(transcript) ? transcript.length : 0),
     }).select('id').single();
     if (error) return res.status(500).json({ error: error.message });
+
+    // Indexa um RESUMO no RAG → vira memória de longo prazo consultável pelos
+    // agentes (inclui o orquestrador via retrieveContext): cenários passados
+    // enriquecem análises macro e ajudam a achar oportunidades/falhas.
+    try {
+      const pctOf = (v: number, t: number) => (t ? Math.round((v / t) * 100) : 0);
+      const m = metrics;
+      const metaLine = m
+        ? `Resultado: apoio ${pctOf(m.before?.apoio, m.total)}%→${pctOf(m.after?.apoio, m.total)}%, oposição ${pctOf(m.before?.oposicao, m.total)}%→${pctOf(m.after?.oposicao, m.total)}% (amostra ${m.total}).` +
+          (m.hoods?.length ? ` Por região: ${m.hoods.map((h: any) => `${h.label} ${h.pct}%`).join(', ')}.` : '')
+        : '';
+      const text = `Cenário simulado: ${scenario}\n${metaLine}\n\n${report || ''}`.trim();
+      await ingestArtifact(supabase, {
+        campaignId,
+        source: 'agent:scenario-debate',
+        title: `Simulação de cenário: ${(label || scenario).slice(0, 80)}`,
+        text,
+        metadata: { kind: 'scenario_debate', debateId: data?.id, hasPrimarySources: false },
+      });
+    } catch { /* best-effort */ }
+
     return res.status(201).json({ debateId: data?.id });
   });
 

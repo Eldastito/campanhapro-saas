@@ -15,6 +15,7 @@ export interface Agent {
   opinion?: number;
   stubborn?: boolean;
   weight?: number;
+  teamBoost?: number;   // -1..+1: esforço de equipe de campo no bairro (+ reforça, − reduz)
   persona?: string;
   voteIntention?: string;
 }
@@ -25,6 +26,11 @@ export interface Edge {
 }
 export interface TurnAgent { id: string; utterance: string; opinion: number; }
 export interface DebateTurn { turn: number; agents: TurnAgent[]; }
+/** Foto de uma estratégia simulada, p/ comparar lado a lado (A/B). */
+export interface ComparisonSnap {
+  id: string; label: string; apoio: number; oposicao: number; total: number;
+  hoods: Array<{ label: string; pct: number }>; at: string;
+}
 
 interface ScenarioState {
   label: string;
@@ -35,6 +41,7 @@ interface ScenarioState {
   report: string | null;
   hasPersonas: boolean;
   electorate: number;        // eleitorado estimado da região (define a amostra)
+  comparisons: ComparisonSnap[];
   setLabel: (v: string) => void;
   setScenario: (v: string) => void;
   setGraph: (nodes: Agent[], edges: Edge[]) => void;
@@ -45,6 +52,8 @@ interface ScenarioState {
   setReport: (r: string | null) => void;
   setHasPersonas: (v: boolean) => void;
   setElectorate: (n: number) => void;
+  addComparison: (c: ComparisonSnap) => void;
+  clearComparisons: () => void;
   resetDebate: () => void;
 }
 
@@ -88,6 +97,7 @@ export const useScenarioStore = create<ScenarioState>()(
       report: null,
       hasPersonas: false,
       electorate: 50000,
+      comparisons: [],
       setLabel: (label) => set({ label }),
       setScenario: (scenario) => set({ scenario }),
       setGraph: (nodes, edges) => set({ nodes, edges, transcript: [], report: null, hasPersonas: nodes.some((n) => n.persona) }),
@@ -98,6 +108,8 @@ export const useScenarioStore = create<ScenarioState>()(
       setReport: (report) => set({ report }),
       setHasPersonas: (hasPersonas) => set({ hasPersonas }),
       setElectorate: (electorate) => set({ electorate }),
+      addComparison: (c) => set((s) => ({ comparisons: [...s.comparisons, c].slice(-4) })),
+      clearComparisons: () => set({ comparisons: [] }),
       resetDebate: () => set({ transcript: [], report: null }),
     }),
     {

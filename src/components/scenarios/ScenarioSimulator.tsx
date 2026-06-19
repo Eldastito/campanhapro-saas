@@ -68,7 +68,8 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const ScenarioSimulator: React.FC = () => {
   const store = useScenarioStore();
-  const { label, scenario, nodes, edges, transcript, report, electorate } = store;
+  const { label, scenario, nodes, edges, transcript, report, electorate, comparisons } = store;
+  const segNodes = nodes.filter((n) => n.type === 'voter_group');
   const sample = sampleSize(electorate);             // nº de pontos desenhados
   const perDot = Math.max(1, Math.round(electorate / sample)); // ≈ eleitores por ponto
   const [hoods, setHoods] = React.useState<Array<{ id: string; label: string; pct: number; n: number }>>([]);
@@ -95,8 +96,13 @@ export const ScenarioSimulator: React.FC = () => {
   const bubblesRef = React.useRef<Map<string, { text: string; born: number }>>(new Map());
   const speakerRef = React.useRef<string | null>(null);
   const edgesRef = React.useRef(edges);
+  const teamBoostRef = React.useRef<Map<string, number>>(new Map());
   const abortRef = React.useRef(false);
   React.useEffect(() => { edgesRef.current = edges; }, [edges]);
+  // mapa segmento→esforço de equipe (lido no loop sem closure obsoleta)
+  React.useEffect(() => {
+    teamBoostRef.current = new Map(nodes.filter((n) => n.type === 'voter_group').map((n) => [n.id, n.teamBoost ?? 0]));
+  }, [nodes]);
 
   React.useEffect(() => {
     authedFetch('/api/v1/scenarios/graphs').then((r) => (r.ok ? r.json() : { graphs: [] })).then((j) => setSavedGraphs(j.graphs ?? [])).catch(() => {});
@@ -209,6 +215,9 @@ export const ScenarioSimulator: React.FC = () => {
             const gap = cred.opinion - c.opinion;
             if (Math.abs(gap) > 0.4) c.opinion = clampO(c.opinion + gap * 0.10);
           }
+          // ESFORÇO DE EQUIPE no bairro: + reforça (puxa pro apoio), − reduz.
+          const tb = c.segment ? (teamBoostRef.current.get(c.segment) ?? 0) : 0;
+          if (tb) c.opinion = clampO(c.opinion + (Math.sign(tb) - c.opinion) * 0.022 * Math.abs(tb));
         }
 
         // Posição do político por bairro/segmento (% de apoio = opinião > 0.15).
@@ -469,7 +478,15 @@ export const ScenarioSimulator: React.FC = () => {
         await delay(1800);
         const after = snapshotPop();
         setResult({ before: baselineRef.current ?? after, after });
+        // registra a estratégia pra comparar (A/B) e persiste (Histórico + RAG)
+        store.addComparison({
+          id: String(Date.now()),
+          label: scenario.slice(0, 40) || `Estratégia ${store.comparisons.length + 1}`,
+          apoio: after.apoio, oposicao: after.oposicao, total: after.total,
+          hoods: hoods.map((h) => ({ label: h.label, pct: h.pct })), at: new Date().toISOString(),
+        });
         await genReport(after, acc);
+        await persistDebate(after, acc);
       }
     } catch (e: any) { setError(e.message); } finally { setPhase(null); speakerRef.current = null; }
   };
@@ -492,13 +509,23 @@ export const ScenarioSimulator: React.FC = () => {
     } catch (e: any) { setError(e.message); } finally { setPhase(null); }
   };
 
+  // Persiste o debate concluído no Histórico + indexa resumo no RAG (memória de
+  // longo prazo p/ o orquestrador). Best-effort: falha não atrapalha a UX.
+  const persistDebate = async (after: Pop, tx: DebateTurn[]) => {
+    try {
+      const st = useScenarioStore.getState();
+      const metrics = { before: baselineRef.current ?? after, after, total: after.total, hoods: hoods.map((h) => ({ label: h.label, pct: h.pct })) };
+      await authedFetch('/api/v1/scenarios/debate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: st.scenario.slice(0, 60) || st.label, scenario: st.scenario, agents: st.nodes, transcript: tx, report: st.report, turns: tx.length, metrics }) });
+    } catch { /* best-effort */ }
+  };
+
   const save = async () => {
     setPhase('save'); setError(null);
     try {
+      // Salva só a ESTRUTURA do grafo (o debate já é persistido ao concluir).
       const nodesOut = nodes.map((n) => ({ ...n, opinion: currentOpinion(n.id) }));
       const g = await authedFetch('/api/v1/scenarios/graphs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes: nodesOut, edges, label }) });
       if (!g.ok) throw new Error(await apiError(g));
-      if (transcript.length) await authedFetch('/api/v1/scenarios/debate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: scenario.slice(0, 60) || label, scenario, agents: nodesOut, transcript, report, turns: transcript.length }) });
       authedFetch('/api/v1/scenarios/graphs').then((r) => r.json()).then((j) => setSavedGraphs(j.graphs ?? [])).catch(() => {});
     } catch (e: any) { setError(e.message); } finally { setPhase(null); }
   };
@@ -636,6 +663,27 @@ export const ScenarioSimulator: React.FC = () => {
           </div>
         )}
 
+        {/* Estratégia de campo: esforço de equipe por região (teste e rode de novo) */}
+        {segNodes.length > 0 && (
+          <div className="mt-3 border-t border-slate-700/60 pt-3">
+            <p className="text-[11px] font-semibold text-slate-400 mb-1.5">
+              Estratégia de campo — esforço de equipe por região <span className="font-normal text-slate-500">(+ reforça · − reduz · rode de novo pra testar)</span>
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+              {segNodes.map((n) => (
+                <div key={n.id} className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-400 w-28 truncate" title={n.label}>{n.label}</span>
+                  <input type="range" min={-1} max={1} step={0.1} value={n.teamBoost ?? 0} disabled={!!phase}
+                    onChange={(e) => store.patchNode(n.id, { teamBoost: Number(e.target.value) })} className="flex-1 accent-indigo-500" />
+                  <span className="text-[11px] font-bold w-10 text-right" style={{ color: (n.teamBoost ?? 0) > 0 ? '#34d399' : (n.teamBoost ?? 0) < 0 ? '#f87171' : '#94a3b8' }}>
+                    {(n.teamBoost ?? 0) > 0 ? '+' : ''}{Math.round((n.teamBoost ?? 0) * 100)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {error && <p className="text-xs text-red-400 bg-red-500/10 rounded px-2 py-1 mt-2">{error}</p>}
 
         {/* Editor colapsável */}
@@ -710,6 +758,53 @@ export const ScenarioSimulator: React.FC = () => {
               </div>
             </div>
             {phase === 'report' && <p className="text-xs text-slate-500 mt-3 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Gerando relatório estratégico…</p>}
+          </Card>
+        );
+      })()}
+
+      {/* COMPARAR ESTRATÉGIAS (A/B): cada simulação concluída vira uma coluna */}
+      {comparisons.length > 1 && (() => {
+        const labels = Array.from(new Set(comparisons.flatMap((c) => c.hoods.map((h) => h.label))));
+        const overall = (c: typeof comparisons[number]) => pct(c.apoio, c.total);
+        const best = Math.max(...comparisons.map(overall));
+        return (
+          <Card>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-400" /> Comparar estratégias</h3>
+              <button onClick={() => store.clearComparisons()} className="text-[11px] text-slate-500 hover:text-red-400">limpar</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs min-w-[420px]">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-700">
+                    <th className="text-left py-1.5 pr-2 font-medium">Região</th>
+                    {comparisons.map((c, i) => (
+                      <th key={c.id} className="text-right py-1.5 px-2 font-medium">
+                        <span className="text-slate-300">{c.label || `Sim ${i + 1}`}</span>
+                        <span className={`block text-[10px] ${overall(c) === best ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>geral {overall(c)}%{overall(c) === best ? ' ★' : ''}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {labels.map((lab) => {
+                    const vals = comparisons.map((c) => c.hoods.find((h) => h.label === lab)?.pct);
+                    const bestH = Math.max(...vals.filter((v): v is number => v != null));
+                    return (
+                      <tr key={lab} className="border-b border-slate-800">
+                        <td className="py-1.5 pr-2 text-slate-400 truncate max-w-[140px]" title={lab}>{lab}</td>
+                        {vals.map((v, i) => (
+                          <td key={i} className="text-right py-1.5 px-2 font-mono" style={{ color: v == null ? '#475569' : v === bestH ? '#34d399' : '#cbd5e1' }}>
+                            {v == null ? '—' : `${v}%`}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-2">Cada coluna é uma simulação concluída. Ajuste a equipe por região / os agentes e rode de novo pra comparar — verde = melhor apoio.</p>
           </Card>
         );
       })()}
