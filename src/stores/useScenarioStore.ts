@@ -42,6 +42,7 @@ interface ScenarioState {
   hasPersonas: boolean;
   electorate: number;        // eleitorado estimado da região (define a amostra)
   comparisons: ComparisonSnap[];
+  briefing: string | null;   // "Briefing de Realidade" (dados reais com fontes)
   setLabel: (v: string) => void;
   setScenario: (v: string) => void;
   setGraph: (nodes: Agent[], edges: Edge[]) => void;
@@ -54,6 +55,7 @@ interface ScenarioState {
   setElectorate: (n: number) => void;
   addComparison: (c: ComparisonSnap) => void;
   clearComparisons: () => void;
+  setBriefing: (b: string | null) => void;
   resetDebate: () => void;
 }
 
@@ -98,6 +100,7 @@ export const useScenarioStore = create<ScenarioState>()(
       hasPersonas: false,
       electorate: 50000,
       comparisons: [],
+      briefing: null,
       setLabel: (label) => set({ label }),
       setScenario: (scenario) => set({ scenario }),
       setGraph: (nodes, edges) => set({ nodes, edges, transcript: [], report: null, hasPersonas: nodes.some((n) => n.persona) }),
@@ -110,6 +113,7 @@ export const useScenarioStore = create<ScenarioState>()(
       setElectorate: (electorate) => set({ electorate }),
       addComparison: (c) => set((s) => ({ comparisons: [...s.comparisons, c].slice(-4) })),
       clearComparisons: () => set({ comparisons: [] }),
+      setBriefing: (briefing) => set({ briefing }),
       resetDebate: () => set({ transcript: [], report: null }),
     }),
     {
