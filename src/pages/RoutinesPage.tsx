@@ -95,29 +95,52 @@ const RoutinesPage: React.FC = () => {
   const [triggerForm, setTriggerForm] = React.useState(defaultTriggerForm());
   const [saving, setSaving] = React.useState(false);
   const [dispatching, setDispatching] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
-    if (!user?.campaignId) return;
+    // Sem campanha resolvida ainda: não deixa o spinner girando pra sempre.
+    if (!user?.campaignId) { setLoading(false); return; }
     setLoading(true);
+    setError(null);
     try {
       const res = await authedFetch(`/api/v1/routines/routines?campaignId=${user.campaignId}`);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(
+          json.error === 'feature_not_in_plan'
+            ? 'As Rotinas de Agentes não fazem parte do seu plano atual.'
+            : (json.error || `Erro ${res.status} ao carregar rotinas.`),
+        );
+        setRoutines([]);
+        return;
+      }
       setRoutines(json.routines ?? []);
+    } catch (err: any) {
+      // catch obrigatório: sem ele, uma falha de rede deixava a tela em loop eterno.
+      setError(err?.message || 'Falha de rede ao carregar rotinas.');
+      setRoutines([]);
     } finally {
       setLoading(false);
     }
   }, [user?.campaignId]);
 
   const loadDetail = React.useCallback(async (r: Routine) => {
+    if (!user?.campaignId) { setDetailLoading(false); return; }
     setDetailLoading(true);
     try {
       const [tRes, rRes] = await Promise.all([
-        authedFetch(`/api/v1/routines/routines/${r.id}/triggers?campaignId=${user?.campaignId}`),
-        authedFetch(`/api/v1/routines/routines/${r.id}/runs?campaignId=${user?.campaignId}`),
+        authedFetch(`/api/v1/routines/routines/${r.id}/triggers?campaignId=${user.campaignId}`),
+        authedFetch(`/api/v1/routines/routines/${r.id}/runs?campaignId=${user.campaignId}`),
       ]);
-      const [tJson, rJson] = await Promise.all([tRes.json(), rRes.json()]);
+      const [tJson, rJson] = await Promise.all([
+        tRes.json().catch(() => ({})),
+        rRes.json().catch(() => ({})),
+      ]);
       setTriggers(tJson.triggers ?? []);
       setRuns(rJson.runs ?? []);
+    } catch {
+      setTriggers([]);
+      setRuns([]);
     } finally {
       setDetailLoading(false);
     }
@@ -240,6 +263,15 @@ const RoutinesPage: React.FC = () => {
         <div className="flex justify-center py-12">
           <Loader2 className="w-6 h-6 text-slate-500 animate-spin" />
         </div>
+      ) : error ? (
+        <Card>
+          <p className="text-amber-300 text-sm text-center py-6">{error}</p>
+          <div className="flex justify-center">
+            <Button variant="secondary" className="text-xs px-3 py-1.5" onClick={load}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Tentar novamente
+            </Button>
+          </div>
+        </Card>
       ) : routines.length === 0 ? (
         <Card>
           <p className="text-slate-500 text-sm text-center py-8">
