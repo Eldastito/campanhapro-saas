@@ -11,7 +11,10 @@
  * adversário) não trocam de lado; conduzem o debate.
  */
 import { chatCompletion } from '../ai/chatCompletion';
-import { AI_MODEL_REGISTRY } from '../ai/modelRegistry';
+// NÃO forçamos modelo aqui: o chatCompletion já escolhe o modelo certo do provedor
+// ATIVO (gpt-4o no OpenAI / claude-sonnet-4-6 no Claude). Forçar um id do registro
+// (ex.: claude-opus-4-7) quebrava quando o provedor configurado era OpenAI, ou
+// quando a conta não tinha aquele modelo → 'personas_failed'.
 
 export interface AgentSpec {
   id: string;
@@ -71,7 +74,7 @@ export async function generatePersonas(
     `e a intenção de voto em uma palavra. Responda JSON: ` +
     `{"personas":[{"id":"...","persona":"...","opinion":0.0,"voteIntention":"..."}]}`;
 
-  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1400, temperature: 0.8, model: AI_MODEL_REGISTRY.scenarioReasoning });
+  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1400, temperature: 0.8 });
   const parsed = safeParse<{ personas: Array<Record<string, unknown>> }>(raw, { personas: [] });
   const byId = new Map(parsed.personas.map((p) => [String(p.id), p]));
   return agents.map((a) => {
@@ -109,7 +112,7 @@ export async function runDebateTurn(
     `Mudanças devem ser graduais e plausíveis. Responda JSON: ` +
     `{"agents":[{"id":"...","utterance":"...","opinion":0.0}]}`;
 
-  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1600, temperature: 0.85, model: AI_MODEL_REGISTRY.scenarioReasoning });
+  const raw = await chatCompletion({ system: SYSTEM, user, jsonMode: true, maxTokens: 1600, temperature: 0.85 });
   const parsed = safeParse<{ agents: Array<Record<string, unknown>> }>(raw, { agents: [] });
   const byId = new Map(parsed.agents.map((a) => [String(a.id), a]));
   return personas.map((p) => {
@@ -149,7 +152,7 @@ export async function generateReport(
     `**Resumo**, **Como a opinião migrou**, **Riscos**, **Narrativa vencedora**, **Recomendações** ` +
     `(3-5 bullets acionáveis). Seja conciso e direto.`;
 
-  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 1200, temperature: 0.6, model: AI_MODEL_REGISTRY.strategicReport });
+  return chatCompletion({ system: SYSTEM, user, jsonMode: false, maxTokens: 1200, temperature: 0.6 });
 }
 
 /** Conversa 1–1 com uma persona simulada (depois do debate). */
