@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Loader2, Search, Plus, Check, X, Building2, Landmark } from 'lucide-react';
+import { Loader2, Search, Plus, Check, X, Building2, Landmark, ShieldAlert, RefreshCw } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import { MODULES } from '../../lib/modules';
 
@@ -113,6 +113,78 @@ const ModulesTab: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      <ShadowDeniedPanel />
+    </div>
+  );
+};
+
+/**
+ * Painel de observação do enforcement (Etapa A — shadow). Lista tentativas de
+ * acesso a módulos que o usuário NÃO possui (registradas, não bloqueadas). Serve
+ * pra analisar o que QUEBRARIA antes de ligar o enforcement real (Etapa B).
+ * Reusa o feed de auditoria existente filtrando por action.
+ */
+interface DeniedLog {
+  id: string; action: string; severity: string; actor_name?: string | null;
+  resourceId?: string | null; createdAt: string; metadata?: any;
+}
+
+const ShadowDeniedPanel: React.FC = () => {
+  const [logs, setLogs] = React.useState<DeniedLog[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authedFetch('/api/v1/supreme/audit-logs?action=module.access.shadow_denied&limit=50');
+      const json = await res.json().catch(() => ({}));
+      setLogs(res.ok ? (json.logs ?? []) : []);
+    } catch {
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="mt-8 border-t border-white/10 pt-5">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <h3 className="text-sm font-black text-white flex items-center gap-2">
+          <ShieldAlert className="w-4 h-4 text-amber-400" /> Acessos fora do módulo (shadow)
+        </h3>
+        <button onClick={load} disabled={loading}
+          className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-slate-700 rounded-lg px-2.5 py-1 disabled:opacity-50">
+          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+        </button>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Tentativas registradas (não bloqueadas) de acessar um módulo sem tê-lo. Analise aqui antes de ligar o bloqueio real.
+      </p>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin text-slate-500" /></div>
+      ) : logs.length === 0 ? (
+        <p className="text-sm text-emerald-400/80 bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-3 py-3 text-center">
+          ✓ Nenhuma tentativa fora do módulo registrada. Seguro pra avançar pro enforcement.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {logs.map((l) => (
+            <div key={l.id} className="bg-amber-500/5 border border-amber-500/20 rounded-lg px-3 py-2 flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0 text-xs">
+                <span className="font-bold text-amber-300">{l.resourceId || 'módulo?'}</span>
+                <span className="text-slate-400"> — {l.actor_name || 'usuário'}</span>
+                {l.metadata?.userType && <span className="text-slate-600"> ({l.metadata.userType})</span>}
+                {l.metadata?.path && <code className="block text-[10px] text-slate-500 font-mono truncate">{l.metadata.method} {l.metadata.path}</code>}
+              </div>
+              <p className="text-[10px] text-slate-500 font-mono shrink-0">{new Date(l.createdAt).toLocaleString('pt-BR')}</p>
+            </div>
+          ))}
         </div>
       )}
     </div>
