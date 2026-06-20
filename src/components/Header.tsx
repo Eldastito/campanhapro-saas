@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { LayoutGrid } from 'lucide-react';
 import Button from './ui/Button';
 import { LogoutIcon } from './icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -76,6 +77,9 @@ const Header = ({ logoUrl }: HeaderProps) => {
                 <nav className="flex items-center gap-2">
                     {user ? (
                         <div className="flex items-center gap-4">
+                            <Link to="/app/hub" className="flex items-center gap-1.5 text-sm font-medium text-[#4ac7f0] hover:underline" title="Seus aplicativos">
+                                <LayoutGrid className="w-4 h-4" /> Aplicativos
+                            </Link>
                             <Link to="/app" className="text-sm font-medium text-[#4ac7f0] hover:underline">Painel</Link>
                             <UserMenu />
                         </div>

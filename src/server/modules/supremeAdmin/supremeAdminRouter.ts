@@ -1311,6 +1311,30 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   });
 
   // ---------- MÓDULOS POR TENANT (Control Plane — venda/controle modular) ----------
+  // Lista todos os tenants (campanhas + partidos) com seus entitlements de módulo.
+  router.get('/tenants', async (_req: Request, res: Response) => {
+    try {
+      const [campsRes, partiesRes, entsRes] = await Promise.all([
+        supabaseAdmin.from('campaigns').select('id, name'),
+        supabaseAdmin.from('parties').select('id, name'),
+        supabaseAdmin.from('tenant_module_entitlements').select('*'),
+      ]);
+      const byTenant = new Map<string, any[]>();
+      for (const e of (entsRes.data ?? [])) {
+        const arr = byTenant.get(e.tenantId) ?? [];
+        arr.push(e);
+        byTenant.set(e.tenantId, arr);
+      }
+      const tenants = [
+        ...(campsRes.data ?? []).map((c: any) => ({ id: c.id, kind: 'campaign', name: c.name || '(sem nome)', modules: byTenant.get(c.id) ?? [] })),
+        ...(partiesRes.data ?? []).map((p: any) => ({ id: p.id, kind: 'party', name: p.name || '(sem nome)', modules: byTenant.get(p.id) ?? [] })),
+      ];
+      return res.json({ tenants });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // Lista os entitlements de módulo de um tenant (campanha ou partido).
   router.get('/tenants/:tenantId/modules', async (req: Request, res: Response) => {
     try {
