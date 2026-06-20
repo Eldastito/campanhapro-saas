@@ -1397,5 +1397,74 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ---------- SESSÕES DE SUPORTE (Control Plane — acesso auditado a um tenant) ----------
+  // Abre uma sessão de suporte (acesso do operador a um cliente, com motivo + expiração).
+  router.post('/support-sessions', async (req: Request, res: Response) => {
+    try {
+      const { tenantId, tenantKind, reason, minutes } = req.body || {};
+      if (!tenantId || !['campaign', 'party'].includes(tenantKind) || !reason?.trim()) {
+        return res.status(400).json({ error: 'tenantId, tenantKind (campaign|party) e reason são obrigatórios' });
+      }
+      const mins = Math.min(Math.max(Number(minutes) || 60, 5), 480); // 5min..8h
+      const actor = (req as any).user;
+      const { data, error } = await supabaseAdmin
+        .from('support_sessions')
+        .insert({
+          operatorId: actor?.id,
+          operatorEmail: actor?.email ?? null,
+          tenantId, tenantKind, reason: reason.trim(),
+          expiresAt: new Date(Date.now() + mins * 60_000).toISOString(),
+        })
+        .select('*').single();
+      if (error) throw error;
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.support_session.open', severity: 'warn',
+        resourceType: 'support_session', resourceId: data.id,
+        metadata: { tenantId, tenantKind, minutes: mins },
+      }).catch(() => {});
+      return res.json({ session: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Encerra uma sessão de suporte ativa.
+  router.post('/support-sessions/:id/end', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('support_sessions')
+        .update({ status: 'ended', endedAt: new Date().toISOString() })
+        .eq('id', req.params.id)
+        .eq('status', 'active')
+        .select('*').maybeSingle();
+      if (error) throw error;
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.support_session.end', severity: 'info',
+        resourceType: 'support_session', resourceId: req.params.id,
+      }).catch(() => {});
+      return res.json({ ok: true, session: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Lista sessões recentes; marca como 'expired' (em memória) as ativas vencidas.
+  router.get('/support-sessions', async (_req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('support_sessions')
+        .select('*')
+        .order('startedAt', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      const now = Date.now();
+      const sessions = (data ?? []).map((s: any) =>
+        s.status === 'active' && new Date(s.expiresAt).getTime() < now ? { ...s, status: 'expired' } : s);
+      return res.json({ sessions });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
