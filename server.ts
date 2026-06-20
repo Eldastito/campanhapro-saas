@@ -299,7 +299,7 @@ async function startServer() {
     app.use('/api/v1/field-ops', requireAuth, mutationLimiter, createFieldOpsRouter(supabaseAdmin));
     app.use('/api/v1/team-gamification', requireAuth, mutationLimiter, createTeamGamificationRouter(supabaseAdmin));
     app.use('/api/v1/control-panel', requireAuth, mutationLimiter, createControlPanelRouter(supabaseAdmin));
-    app.use('/api/v1/modules', requireAuth, createModulesRouter());
+    app.use('/api/v1/modules', requireAuth, createModulesRouter(supabaseAdmin));
     app.use('/api/v1/toolbox', requireAuth, mutationLimiter, createToolboxRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, createPartyRouter(supabaseAdmin));

@@ -91,6 +91,11 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
         return res.status(500).json({ error: 'party_insert_failed', detail: partyErr.message });
       }
 
+      // Control Plane: entitlement do módulo 'partido' pro novo tenant (não-fatal).
+      await supabase.from('tenant_module_entitlements').upsert({
+        tenantId: party.id, tenantKind: 'party', moduleKey: 'partido', source: 'onboarding',
+      }, { onConflict: 'tenantId,moduleKey' }).then(() => {}, () => {});
+
       await audit(supabase, {
         ...actorFromRequest(req),
         action: 'onboarding.bootstrap_party',
@@ -188,6 +193,11 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
     } catch (err: any) {
       console.warn('[onboarding] campaign_configs pending falhou (não-fatal):', err.message);
     }
+
+    // Control Plane: entitlement do módulo 'campanha' pro novo tenant (não-fatal).
+    await supabase.from('tenant_module_entitlements').upsert({
+      tenantId: campaignId, tenantKind: 'campaign', moduleKey: 'campanha', source: 'onboarding',
+    }, { onConflict: 'tenantId,moduleKey' }).then(() => {}, () => {});
 
     // 4. Audit
     await audit(supabase, {
