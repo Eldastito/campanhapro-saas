@@ -233,6 +233,9 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
         user_metadata: { name: nm },
       }).catch((e) => console.warn('[team] updateUser pwd falhou:', e?.message));
       await supabase.from('users').update({ name: nm, type: role, role: 'active', assignedLeaderId: leaderLink }).eq('id', existing.id);
+      await supabase.from('tenant_memberships').upsert({
+        tenantId: campaignId, tenantKind: 'campaign', userId: existing.id, role, source: 'team_invite',
+      }, { onConflict: 'tenantId,userId' }).then(() => {}, () => {});
       await audit(supabase, {
         ...actorFromRequest(req),
         action: 'team.member.reactivate',
@@ -266,6 +269,9 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
               plan: 'Básico', role: 'active', campaignId, isSupremeAdmin: false,
               assignedLeaderId: leaderLink,
             }, { onConflict: 'id' });
+            await supabase.from('tenant_memberships').upsert({
+              tenantId: campaignId, tenantKind: 'campaign', userId: found.id, role, source: 'team_invite',
+            }, { onConflict: 'tenantId,userId' }).then(() => {}, () => {});
             return res.status(200).json({ ok: true, userId: found.id, reused: true });
           }
         } catch (e: any) {
@@ -294,6 +300,11 @@ export function createTeamInvitesRouter(supabase: SupabaseClient): Router {
       await supabase.auth.admin.deleteUser(created.user.id).catch(() => {});
       return res.status(500).json({ error: 'profile_insert_failed', detail: profErr.message });
     }
+
+    // Control Plane: vincula o novo membro ao tenant (campanha) — não-fatal.
+    await supabase.from('tenant_memberships').upsert({
+      tenantId: campaignId, tenantKind: 'campaign', userId: created.user.id, role, source: 'team_invite',
+    }, { onConflict: 'tenantId,userId' }).then(() => {}, () => {});
 
     await audit(supabase, {
       ...actorFromRequest(req),

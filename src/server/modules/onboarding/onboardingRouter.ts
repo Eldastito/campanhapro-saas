@@ -91,10 +91,13 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
         return res.status(500).json({ error: 'party_insert_failed', detail: partyErr.message });
       }
 
-      // Control Plane: entitlement do módulo 'partido' pro novo tenant (não-fatal).
+      // Control Plane: entitlement do módulo 'partido' + membership do presidente (não-fatais).
       await supabase.from('tenant_module_entitlements').upsert({
         tenantId: party.id, tenantKind: 'party', moduleKey: 'partido', source: 'onboarding',
       }, { onConflict: 'tenantId,moduleKey' }).then(() => {}, () => {});
+      await supabase.from('tenant_memberships').upsert({
+        tenantId: party.id, tenantKind: 'party', userId, role: 'owner', source: 'onboarding',
+      }, { onConflict: 'tenantId,userId' }).then(() => {}, () => {});
 
       await audit(supabase, {
         ...actorFromRequest(req),
@@ -194,10 +197,13 @@ export function createOnboardingRouter(supabase: SupabaseClient): Router {
       console.warn('[onboarding] campaign_configs pending falhou (não-fatal):', err.message);
     }
 
-    // Control Plane: entitlement do módulo 'campanha' pro novo tenant (não-fatal).
+    // Control Plane: entitlement 'campanha' + membership do criador (não-fatais).
     await supabase.from('tenant_module_entitlements').upsert({
       tenantId: campaignId, tenantKind: 'campaign', moduleKey: 'campanha', source: 'onboarding',
     }, { onConflict: 'tenantId,moduleKey' }).then(() => {}, () => {});
+    await supabase.from('tenant_memberships').upsert({
+      tenantId: campaignId, tenantKind: 'campaign', userId, role: 'owner', source: 'onboarding',
+    }, { onConflict: 'tenantId,userId' }).then(() => {}, () => {});
 
     // 4. Audit
     await audit(supabase, {
