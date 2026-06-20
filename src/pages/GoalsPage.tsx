@@ -120,7 +120,7 @@ const GoalsPage: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<'goals' | 'projects'>('goals');
 
   const load = React.useCallback(async () => {
-    if (!user?.campaignId) return;
+    if (!user?.campaignId) { setLoading(false); return; }
     setLoading(true);
     try {
       const [gRes, pRes] = await Promise.all([

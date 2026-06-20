@@ -1,11 +1,15 @@
 /**
  * Client-side service for Gemini API using backend proxy.
  */
+import { authedFetch } from '../lib/authedFetch';
+
 export const generateContent = async (prompt: string, campaignId?: string, userId?: string): Promise<string> => {
     try {
-        const response = await fetch('/api/gemini/chat', {
+        // authedFetch anexa o Bearer da sessão. Sem isso, /api/gemini/chat (requireAuth)
+        // respondia 401 e a função retornava "" — gerador de mensagens e dicas de
+        // campanha ficavam quebrados.
+        const response = await authedFetch('/api/gemini/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt, campaignId, userId }),
         });
         

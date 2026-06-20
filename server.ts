@@ -795,6 +795,29 @@ async function startServer() {
     }
   });
 
+  // --- Parecer executivo (ReportGenerator) ---
+  // Faltava: o frontend chamava /api/agents/report (404) → parecer caía no fallback.
+  app.post('/api/agents/report', requireAuth, async (req, res) => {
+    try {
+      const { campaignDataPrompt } = req.body;
+      const campaignId = tenantCampaignId(req);
+      const userId = req.user?.id;
+      if (!campaignId) return res.status(401).json({ error: 'campaignId ausente na sessão' });
+
+      const aiResponse = await callAgent(supabaseAdmin, 'advisor', String(campaignDataPrompt || ''), {
+        campaignId, userId,
+        systemInstruction: 'Você é um consultor político sênior. Gere um PARECER EXECUTIVO conciso (em português do Brasil, markdown), com: 1) leitura do momento da campanha, 2) 3 prioridades da semana, 3) riscos a vigiar. Baseie-se SÓ nos dados fornecidos; não invente números.',
+      });
+      res.json({ report: aiResponse.text || '' });
+    } catch (error: any) {
+      if (error instanceof BudgetExceededError) {
+        return res.status(429).json({ error: error.message, code: 'BUDGET_EXCEEDED' });
+      }
+      console.error('[Report] Erro:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // --- Pipeline Automática (Analisar Agora) ---
   app.post('/api/agents/pipeline', requireAuth, async (req, res) => {
     try {
