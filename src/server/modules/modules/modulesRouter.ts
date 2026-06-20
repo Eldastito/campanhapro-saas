@@ -11,7 +11,7 @@
  */
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { MODULES, deriveUserModules } from '../../../lib/modules';
+import { MODULES, deriveUserModules, PLAN_FEATURE_TO_MODULE } from '../../../lib/modules';
 
 export function createModulesRouter(supabase: SupabaseClient): Router {
   const router = Router();
@@ -78,7 +78,38 @@ export function createModulesRouter(supabase: SupabaseClient): Router {
       } catch { /* tabela indisponível → fica só a derivação (shadow-safe) */ }
     }
 
-    const active = [...new Set([...derived, ...granted])];
+    // Add-ons embutidos no plano: se a assinatura ativa do tenant inclui uma
+    // feature mapeada (ex.: `scenarios` no Total), o módulo correspondente
+    // (`cenarios`) entra em `active` sem precisar de entitlement explícito.
+    // Garante que quem já PAGA pelo plano não veja o módulo como "à venda".
+    const campaignTenantIds = [...tenantMap.values()]
+      .filter((t) => t.kind === 'campaign' && (!requestedTenantId || t.id === requestedTenantId))
+      .map((t) => t.id);
+    const planGranted: string[] = [];
+    if (campaignTenantIds.length) {
+      try {
+        const { data: subs } = await supabase
+          .from('subscriptions')
+          .select('"planId"')
+          .in('campaignId', campaignTenantIds)
+          .in('status', ['active', 'trialing', 'past_due']);
+        const planIds = [...new Set((subs ?? []).map((s: any) => s.planId).filter(Boolean))];
+        if (planIds.length) {
+          const { data: plans } = await supabase
+            .from('plans')
+            .select('id, features')
+            .in('id', planIds);
+          for (const p of (plans ?? [])) {
+            for (const f of (p.features ?? [])) {
+              const moduleKey = PLAN_FEATURE_TO_MODULE[f];
+              if (moduleKey) planGranted.push(moduleKey);
+            }
+          }
+        }
+      } catch { /* tabelas indisponíveis → fica só a derivação + granted */ }
+    }
+
+    const active = [...new Set([...derived, ...granted, ...planGranted])];
     const available = MODULES.filter((m) => m.sellable && !active.includes(m.key)).map((m) => m.key);
 
     // Enriquece tenants com nome legível (campanhas/partidos) pro switcher do Hub.

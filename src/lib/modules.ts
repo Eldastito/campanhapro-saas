@@ -50,7 +50,38 @@ export const MODULES: ModuleDef[] = [
     appRoute: '/app',
     sellable: false,
   },
+  // Add-ons: já incluídos no plano Total (feature `scenarios`/`intelligence` no
+  // `plans.features`). Quem tem o plano ganha o módulo automaticamente em
+  // `active` via mapeamento no modulesRouter — sem cobrar duas vezes. Quem NÃO
+  // tem fica em `available` (cross-sell) e pode contratar avulso via
+  // `tenant_module_entitlements`.
+  {
+    key: 'cenarios',
+    name: 'Cenários',
+    description: 'Simulações Monte Carlo da campanha: cenários eleitorais, projeção de meta e plano B.',
+    icon: 'LineChart',
+    appRoute: '/app/scenarios',
+    salesRoute: '/produtos/cenarios',
+    sellable: true,
+  },
+  {
+    key: 'inteligencia',
+    name: 'Inteligência',
+    description: 'Mapeamento estratégico, adversários, sentimento e leitura tática do território.',
+    icon: 'Brain',
+    appRoute: '/app/intelligence',
+    salesRoute: '/produtos/inteligencia',
+    sellable: true,
+  },
 ];
+
+// Mapeia uma feature do plano (plans.features) para o módulo que ela libera.
+// Mantém os planos como fonte primária: quem assina Total NÃO precisa de
+// entitlement explícito pra usar Cenários/Inteligência — o plano já paga.
+export const PLAN_FEATURE_TO_MODULE: Record<string, string> = {
+  scenarios: 'cenarios',
+  intelligence: 'inteligencia',
+};
 
 export const moduleByKey = (key: string): ModuleDef | undefined => MODULES.find((m) => m.key === key);
 
