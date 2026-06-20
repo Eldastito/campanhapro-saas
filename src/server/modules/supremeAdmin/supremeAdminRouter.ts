@@ -1310,5 +1310,68 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ---------- MÓDULOS POR TENANT (Control Plane — venda/controle modular) ----------
+  // Lista os entitlements de módulo de um tenant (campanha ou partido).
+  router.get('/tenants/:tenantId/modules', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('tenant_module_entitlements')
+        .select('*')
+        .eq('tenantId', req.params.tenantId)
+        .order('createdAt', { ascending: true });
+      if (error) throw error;
+      return res.json({ entitlements: data ?? [] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Concede (ou reativa) um módulo a um tenant.
+  router.post('/tenants/:tenantId/modules', async (req: Request, res: Response) => {
+    try {
+      const { moduleKey, tenantKind } = req.body || {};
+      if (!moduleKey || !['campaign', 'party'].includes(tenantKind)) {
+        return res.status(400).json({ error: 'moduleKey e tenantKind (campaign|party) obrigatórios' });
+      }
+      const { data, error } = await supabaseAdmin
+        .from('tenant_module_entitlements')
+        .upsert({
+          tenantId: req.params.tenantId, tenantKind, moduleKey,
+          status: 'active', source: 'manual_admin', updatedAt: new Date().toISOString(),
+        }, { onConflict: 'tenantId,moduleKey' })
+        .select('*').single();
+      if (error) throw error;
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.module.grant', severity: 'warn',
+        resourceType: 'tenant_module_entitlement', resourceId: req.params.tenantId,
+        metadata: { moduleKey, tenantKind },
+      }).catch(() => {});
+      return res.json({ entitlement: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Revoga (suspende) um módulo de um tenant. Não apaga — vira status='revoked'.
+  router.delete('/tenants/:tenantId/modules/:moduleKey', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('tenant_module_entitlements')
+        .update({ status: 'revoked', updatedAt: new Date().toISOString() })
+        .eq('tenantId', req.params.tenantId)
+        .eq('moduleKey', req.params.moduleKey)
+        .select('*').maybeSingle();
+      if (error) throw error;
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.module.revoke', severity: 'warn',
+        resourceType: 'tenant_module_entitlement', resourceId: req.params.tenantId,
+        metadata: { moduleKey: req.params.moduleKey },
+      }).catch(() => {});
+      return res.json({ ok: true, entitlement: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
