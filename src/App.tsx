@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { useProfilePermissions } from './contexts/PermissionsContext';
 import CampaignWebApp from './CampaignWebApp';
@@ -15,6 +15,7 @@ import CallCenterPage from './pages/CallCenterPage';
 import SupremeAdminPage from './pages/SupremeAdminPage';
 import BlockedPage from './pages/BlockedPage';
 import LoadingScreen from './components/ui/LoadingScreen';
+const HubPage = React.lazy(() => import('./pages/HubPage'));
 
 /**
  * Componente principal autenticado da plataforma Campanha Pró.
@@ -23,6 +24,7 @@ import LoadingScreen from './components/ui/LoadingScreen';
 const App: React.FC = () => {
     const { user, isInitializing, userType } = useAuth();
     const { config, isLoading: permsLoading } = useProfilePermissions();
+    const location = useLocation();
 
     if (isInitializing) {
         return <LoadingScreen />;
@@ -30,6 +32,16 @@ const App: React.FC = () => {
 
     // Se não houver usuário, as rotas (routes.tsx) já redirecionam para o login.
     if (!user) return null;
+
+    // Hub Central (Fatia 1, aditivo): ponto de entrada extra em /app/hub que lista
+    // os apps do usuário. Não altera nenhum fluxo existente.
+    if (location.pathname === '/app/hub') {
+        return (
+            <React.Suspense fallback={<LoadingScreen />}>
+                <HubPage />
+            </React.Suspense>
+        );
+    }
 
     // Prioridade máxima: Gestor da Plataforma (Supreme Admin) — nunca é barrado.
     if (user?.isSupremeAdmin) {
