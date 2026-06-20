@@ -15,7 +15,7 @@ import { deriveUserModules } from '../../lib/modules';
 import { audit, actorFromRequest } from '../modules/observability/auditLogger';
 
 export function moduleAccessAudit(supabase: SupabaseClient, moduleKey: string) {
-  return async (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       const u = (req as any).user;
       if (!u?.id || u.isSupremeAdmin) return next(); // supremo passa sempre
