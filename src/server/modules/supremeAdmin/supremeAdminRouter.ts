@@ -23,6 +23,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPlanConfig } from '../../../utils/planUtils';
 import { Plan } from '../../../types/user';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { MODULES } from '../../../lib/modules';
 import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 import { runLifecycleSweep } from '../billing/subscriptionLifecycle';
@@ -1392,6 +1393,52 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         metadata: { moduleKey: req.params.moduleKey },
       }).catch(() => {});
       return res.json({ ok: true, entitlement: data });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /module-stats ───────────────────────────────────────────────
+  // Métricas de negócio da camada modular: por módulo, quantos tenants têm
+  // entitlement ativo + % de penetração. NÃO toca em planos/features — lê só
+  // tenant_module_entitlements. Aditivo, somente leitura.
+  router.get('/module-stats', async (_req: Request, res: Response) => {
+    try {
+      const [entRes, campsRes, partiesRes] = await Promise.all([
+        supabaseAdmin.from('tenant_module_entitlements').select('"moduleKey", status'),
+        supabaseAdmin.from('campaigns').select('id'),
+        supabaseAdmin.from('parties').select('id'),
+      ]);
+      const totalTenants = (campsRes.data?.length ?? 0) + (partiesRes.data?.length ?? 0);
+      const counts = new Map<string, number>();
+      for (const e of (entRes.data ?? [])) {
+        if (e.status === 'active') counts.set(e.moduleKey, (counts.get(e.moduleKey) ?? 0) + 1);
+      }
+      const stats = MODULES.map((m) => ({
+        key: m.key, name: m.name, sellable: m.sellable,
+        activeTenants: counts.get(m.key) ?? 0,
+        penetration: totalTenants ? Math.round(((counts.get(m.key) ?? 0) / totalTenants) * 100) : 0,
+      }));
+      return res.json({ totalTenants, stats });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /tenants/:tenantId/module-history ───────────────────────────
+  // Timeline de grant/revoke de um tenant (histórico comercial). Lê audit_logs
+  // já gravado pelos endpoints de grant/revoke. Somente leitura.
+  router.get('/tenants/:tenantId/module-history', async (req: Request, res: Response) => {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('audit_logs')
+        .select('action, metadata, "createdAt", "actorId"')
+        .eq('resourceId', req.params.tenantId)
+        .like('action', 'supreme.module.%')
+        .order('createdAt', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return res.json({ history: data ?? [] });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

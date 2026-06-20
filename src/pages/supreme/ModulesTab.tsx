@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Loader2, Search, Plus, Check, X, Building2, Landmark, ShieldAlert, RefreshCw } from 'lucide-react';
+import { Loader2, Search, Plus, Check, X, Building2, Landmark, ShieldAlert, RefreshCw, BarChart3, History } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 import { MODULES } from '../../lib/modules';
 
@@ -19,6 +19,7 @@ const ModulesTab: React.FC = () => {
   const [q, setQ] = React.useState('');
   const [busy, setBusy] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
+  const [historyFor, setHistoryFor] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     try {
@@ -75,6 +76,8 @@ const ModulesTab: React.FC = () => {
 
       {err && <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">{err}</div>}
 
+      <ModuleStatsPanel />
+
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-slate-500" /></div>
       ) : (
@@ -84,32 +87,40 @@ const ModulesTab: React.FC = () => {
             const activeKeys = new Set(t.modules.filter((m) => m.status === 'active').map((m) => m.moduleKey));
             const KindIcon = t.kind === 'party' ? Landmark : Building2;
             return (
-              <div key={`${t.kind}-${t.id}`} className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 rounded-lg bg-slate-700/50 flex items-center justify-center shrink-0"><KindIcon className="w-4 h-4 text-slate-300" /></div>
-                  <div className="min-w-0">
-                    <p className="font-bold text-white text-sm truncate">{t.name}</p>
-                    <p className="text-[10px] text-slate-500 font-mono">{t.kind} · {t.id.substring(0, 12)}…</p>
+              <div key={`${t.kind}-${t.id}`} className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-slate-700/50 flex items-center justify-center shrink-0"><KindIcon className="w-4 h-4 text-slate-300" /></div>
+                    <div className="min-w-0">
+                      <p className="font-bold text-white text-sm truncate">{t.name}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{t.kind} · {t.id.substring(0, 12)}…</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {SELLABLE.map((m) => {
+                      const active = activeKeys.has(m.key);
+                      const isBusy = busy === `${t.id}:${m.key}`;
+                      return (
+                        <button key={m.key} disabled={isBusy} onClick={() => toggle(t, m.key, active)}
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50 ${
+                            active
+                              ? 'bg-emerald-500/15 text-emerald-300 hover:bg-red-500/15 hover:text-red-300 border border-emerald-500/30'
+                              : 'bg-slate-700/40 text-slate-400 hover:bg-indigo-500/15 hover:text-indigo-300 border border-slate-600/50'
+                          }`}>
+                          {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : active ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                          {m.name}
+                          {active && <X className="w-3 h-3 opacity-0 group-hover:opacity-100" />}
+                        </button>
+                      );
+                    })}
+                    <button onClick={() => setHistoryFor(historyFor === t.id ? null : t.id)}
+                      title="Histórico de concessões"
+                      className={`inline-flex items-center gap-1 text-xs rounded-lg px-2.5 py-1.5 border transition-colors ${historyFor === t.id ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' : 'text-slate-400 border-slate-600/50 hover:text-white'}`}>
+                      <History className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {SELLABLE.map((m) => {
-                    const active = activeKeys.has(m.key);
-                    const isBusy = busy === `${t.id}:${m.key}`;
-                    return (
-                      <button key={m.key} disabled={isBusy} onClick={() => toggle(t, m.key, active)}
-                        className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50 ${
-                          active
-                            ? 'bg-emerald-500/15 text-emerald-300 hover:bg-red-500/15 hover:text-red-300 border border-emerald-500/30'
-                            : 'bg-slate-700/40 text-slate-400 hover:bg-indigo-500/15 hover:text-indigo-300 border border-slate-600/50'
-                        }`}>
-                        {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : active ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                        {m.name}
-                        {active && <X className="w-3 h-3 opacity-0 group-hover:opacity-100" />}
-                      </button>
-                    );
-                  })}
-                </div>
+                {historyFor === t.id && <TenantHistory tenantId={t.id} />}
               </div>
             );
           })}
@@ -117,6 +128,97 @@ const ModulesTab: React.FC = () => {
       )}
 
       <ShadowDeniedPanel />
+    </div>
+  );
+};
+
+/**
+ * ModuleStatsPanel — métricas de negócio da camada modular (penetração por
+ * módulo). Lê só /module-stats (entitlements); NÃO toca em planos/features.
+ */
+interface ModuleStat { key: string; name: string; sellable: boolean; activeTenants: number; penetration: number }
+
+const ModuleStatsPanel: React.FC = () => {
+  const [stats, setStats] = React.useState<ModuleStat[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const res = await authedFetch('/api/v1/supreme/module-stats');
+        const json = await res.json().catch(() => ({}));
+        if (res.ok) { setStats(json.stats ?? []); setTotal(json.totalTenants ?? 0); }
+      } finally { setLoading(false); }
+    })();
+  }, []);
+
+  if (loading) return null;
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+      <h3 className="text-xs font-black text-white flex items-center gap-2 mb-3">
+        <BarChart3 className="w-4 h-4 text-indigo-400" /> Penetração por módulo
+        <span className="text-[10px] font-normal text-slate-500">({total} organizações no total)</span>
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {stats.map((s) => (
+          <div key={s.key} className="bg-slate-800/50 rounded-lg p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-bold text-white">{s.name}</span>
+              <span className="text-xs text-indigo-300 font-mono">{s.penetration}%</span>
+            </div>
+            <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-500" style={{ width: `${s.penetration}%` }} />
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1">{s.activeTenants} {s.activeTenants === 1 ? 'organização' : 'organizações'}{!s.sellable && ' · interno'}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * TenantHistory — timeline de grant/revoke de um tenant (histórico comercial).
+ * Lê /tenants/:id/module-history (audit_logs). Somente leitura.
+ */
+interface HistoryRow { action: string; metadata?: any; createdAt: string }
+
+const TenantHistory: React.FC<{ tenantId: string }> = ({ tenantId }) => {
+  const [rows, setRows] = React.useState<HistoryRow[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const res = await authedFetch(`/api/v1/supreme/tenants/${tenantId}/module-history`);
+        const json = await res.json().catch(() => ({}));
+        setRows(res.ok ? (json.history ?? []) : []);
+      } finally { setLoading(false); }
+    })();
+  }, [tenantId]);
+
+  if (loading) return <div className="mt-3 pt-3 border-t border-white/10 flex justify-center"><Loader2 className="w-4 h-4 animate-spin text-slate-500" /></div>;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-white/10">
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-slate-500">Sem histórico de concessões para esta organização.</p>
+      ) : (
+        <ul className="space-y-1">
+          {rows.map((r, i) => {
+            const granted = r.action === 'supreme.module.grant';
+            return (
+              <li key={i} className="text-[11px] flex items-center gap-2">
+                <span className={granted ? 'text-emerald-400' : 'text-red-400'}>{granted ? '+ concedeu' : '− revogou'}</span>
+                <span className="font-bold text-slate-200">{r.metadata?.moduleKey ?? '?'}</span>
+                <span className="text-slate-600 font-mono ml-auto">{new Date(r.createdAt).toLocaleString('pt-BR')}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 };
