@@ -10,9 +10,8 @@ import { authedFetch } from '../../lib/authedFetch';
  * cortesia × preço. "Cortesia" mantém o acesso sem cobrança (ex.: validação do
  * app) e é marcada só aqui, invisível pro presidente.
  *
- * IMPORTANTE: "Repasses a candidatos" (recebido/alocado) são transferências
- * INTERNAS do partido pros candidatos — NÃO são a cobrança do plano. Ficam numa
- * coluna separada e claramente rotulada pra não confundir com faturamento.
+ * Os repasses internos do partido aos candidatos (party_candidates) NÃO são
+ * exibidos aqui de propósito — não são cobrança do plano e poluíam a visão.
  */
 interface Party {
   id: string;
@@ -23,8 +22,6 @@ interface Party {
   presidentName: string | null;
   presidentEmail: string | null;
   candidatesCount: number;
-  valorRecebido: number;
-  valorAlocado: number;
   courtesy: boolean;
   billingStatus: string | null;
   courtesyNote: string | null;
@@ -140,17 +137,16 @@ const PartiesTab: React.FC = () => {
                 <th className="text-left px-4 py-2">Partido / Presidente</th>
                 <th className="text-left px-4 py-2">Plano Partido</th>
                 <th className="text-right px-4 py-2">Cands</th>
-                <th className="text-right px-4 py-2">Repasses a candidatos (interno)</th>
                 <th className="text-left px-4 py-2">Status</th>
                 <th className="text-right px-4 py-2">Cortesia</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={6} className="text-center text-slate-500 py-6 text-xs">Carregando…</td></tr>
+                <tr><td colSpan={5} className="text-center text-slate-500 py-6 text-xs">Carregando…</td></tr>
               )}
               {!loading && parties.length === 0 && (
-                <tr><td colSpan={6} className="text-center text-slate-500 py-6 text-xs">Nenhum partido cadastrado ainda.</td></tr>
+                <tr><td colSpan={5} className="text-center text-slate-500 py-6 text-xs">Nenhum partido cadastrado ainda.</td></tr>
               )}
               {parties.map((p) => (
                 <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.02]">
@@ -167,10 +163,6 @@ const PartiesTab: React.FC = () => {
                     )}
                   </td>
                   <td className="px-4 py-2.5 text-right text-slate-300">{p.candidatesCount}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <span className="text-slate-400">{fmtBRL(p.valorRecebido)}</span>
-                    <span className="block text-[10px] text-slate-600">alocado {fmtBRL(p.valorAlocado)}</span>
-                  </td>
                   <td className="px-4 py-2.5">
                     <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full ${p.status === 'active' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-700 text-slate-400'}`}>{p.status || '—'}</span>
                     {p.courtesy && p.courtesyNote && <span className="block text-[10px] text-violet-300/70 mt-1">{p.courtesyNote}</span>}
@@ -187,7 +179,7 @@ const PartiesTab: React.FC = () => {
           </table>
         </div>
         <p className="text-[10px] text-slate-600 px-4 py-2 border-t border-white/5">
-          Preço do Plano Partido vem de <code>module_prices</code>. "Repasses a candidatos" são transferências internas do partido (não é cobrança do plano). Cortesia mantém o acesso sem cobrança — invisível pro presidente.
+          Preço do Plano Partido vem de <code>module_prices</code>. Cortesia mantém o acesso sem cobrança — invisível pro presidente.
         </p>
       </Card>
     </div>

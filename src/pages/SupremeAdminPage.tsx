@@ -744,9 +744,11 @@ const SupremeAdminPage: React.FC = () => {
                                     className="bg-slate-900 border border-white/10 rounded-lg px-4 py-2 text-sm outline-none text-slate-200"
                                 >
                                     <option value="all">🌐 Toda a plataforma (visão global)</option>
-                                    {campaigns.map((c) => (
+                                    {/* Só campanhas reais: presidentes de partido (sem campaignId,
+                                        ex.: Ronald) não são campanha e não entram no filtro. */}
+                                    {campaigns.filter((c) => c.campaignId).map((c) => (
                                         <option key={c.campaignId} value={c.campaignId || ''}>
-                                            {c.name} {c.campaignId ? `(${c.campaignId.substring(0, 8)})` : ''}
+                                            {c.name} ({c.campaignId!.substring(0, 8)})
                                         </option>
                                     ))}
                                 </select>

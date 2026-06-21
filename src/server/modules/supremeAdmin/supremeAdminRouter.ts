@@ -1455,18 +1455,17 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       }
 
       const out = await Promise.all(list.map(async (p: any) => {
-        const [{ count: candidates }, { data: sums }] = await Promise.all([
-          supabaseAdmin.from('party_candidates').select('id', { count: 'exact', head: true }).eq('partyId', p.id),
-          supabaseAdmin.from('party_candidates').select('"valorRecebido", "valorAlocado"').eq('partyId', p.id),
-        ]);
-        const valorRecebido = (sums || []).reduce((s: number, r: any) => s + Number(r.valorRecebido || 0), 0);
-        const valorAlocado = (sums || []).reduce((s: number, r: any) => s + Number(r.valorAlocado || 0), 0);
+        // Só a CONTAGEM de candidatos. Os valores de repasse interno
+        // (valorRecebido/valorAlocado) não são expostos ao Supreme — não são
+        // cobrança do plano e poluíam a visão financeira.
+        const { count: candidates } = await supabaseAdmin
+          .from('party_candidates').select('id', { count: 'exact', head: true }).eq('partyId', p.id);
         const u: any = userMap.get(p.presidentId);
         const sub: any = subMap.get(p.id);
         return {
           id: p.id, name: p.name, status: p.status, billingNote: p.billingNote, createdAt: p.createdAt,
           presidentName: u?.name ?? null, presidentEmail: u?.email ?? null,
-          candidatesCount: candidates || 0, valorRecebido, valorAlocado,
+          candidatesCount: candidates || 0,
           courtesy: !!sub?.metadata?.courtesy,
           billingStatus: sub?.status ?? null,
           courtesyNote: sub?.metadata?.note ?? null,
