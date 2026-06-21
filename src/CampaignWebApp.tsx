@@ -43,9 +43,10 @@ const MeetingsPage = React.lazy(() => import('./pages/MeetingsPage'));
 const ContentStudioPage = React.lazy(() => import('./pages/ContentStudioPage'));
 const ShortLinksPage = React.lazy(() => import('./pages/ShortLinksPage'));
 const LegalShieldPage = React.lazy(() => import('./pages/LegalShieldPage'));
+const ComprovantesPage = React.lazy(() => import('./pages/ComprovantesPage'));
 
 // Import Icons for Tabs
-import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays, Sparkles, Link2, ShieldAlert } from 'lucide-react';
+import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays, Sparkles, Link2, ShieldAlert, Camera } from 'lucide-react';
 import { useActiveModules } from './hooks/useActiveModules';
 import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
@@ -73,7 +74,10 @@ const AdminApp: React.FC = () => {
         const isManager = userType === 'Admin' || userType === 'Coordenador';
         const addonTabs: string[] = [];
         if (isManager && activeModules.includes('legal_shield')) addonTabs.push('Blindagem');
-        const withAddons = (list: string[]) => [...new Set([...list, ...addonTabs])];
+        // 'Comprovantes' é universal: todo perfil que trabalha na campanha pode
+        // enviar comprovante na hora (a fila de revisão dentro da página é que é
+        // restrita a gestor). Por isso entra pra todos, independente de plano.
+        const withAddons = (list: string[]) => [...new Set([...list, 'Comprovantes', ...addonTabs])];
 
         // 1. Permissões básicas do perfil
         let allowedTabs = permissions[userType] || ['Dashboard'];
@@ -147,6 +151,7 @@ const AdminApp: React.FC = () => {
         'Estúdio': <Sparkles className="h-5 w-5" />,
         'Links Curtos': <Link2 className="h-5 w-5" />,
         'Blindagem': <ShieldAlert className="h-5 w-5" />,
+        'Comprovantes': <Camera className="h-5 w-5" />,
     };
 
     // Componentes mapeados para as abas (deve seguir a ordem lógica do ALL_TABS para o componente Tabs indexar corretamente)
@@ -181,6 +186,7 @@ const AdminApp: React.FC = () => {
         'Estúdio': <ContentStudioPage />,
         'Links Curtos': <ShortLinksPage />,
         'Blindagem': <LegalShieldPage />,
+        'Comprovantes': <ComprovantesPage />,
     };
 
     if (isLoading) {
