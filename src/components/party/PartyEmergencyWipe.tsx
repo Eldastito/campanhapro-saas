@@ -81,13 +81,15 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
     setError(null);
     setBusy(true);
     try {
-      // 1. Reautenticação NO CLIENTE: por SENHA (cliente efêmero) ou por BIOMETRIA
-      //    (passkey já verificado acima). A senha nunca vai pro nosso backend.
+      // 1. Reautenticação por SENHA (cliente efêmero) ou BIOMETRIA. A senha nunca
+      //    vai pro nosso backend — mas o access_token recém-emitido vai, pra o
+      //    servidor PROVAR a reautenticação fresca (M2). Sem ele, o backend recusa.
+      let reauthToken: string | undefined;
       if (password) {
         const email = user?.email;
         if (!email) { setError('Sessão sem e-mail. Faça login de novo.'); setBusy(false); return; }
         const reauth = createReauthClient();
-        const { error: authErr } = await reauth.auth.signInWithPassword({ email, password });
+        const { data: reauthData, error: authErr } = await reauth.auth.signInWithPassword({ email, password });
         // NÃO chamar signOut() aqui: o signOut padrão é GLOBAL e revoga TODAS as
         // sessões do usuário no servidor — inclusive a principal → "token inválido".
         // O cliente efêmero não persiste, então não há o que limpar.
@@ -96,16 +98,17 @@ const PartyEmergencyWipe: React.FC<{ partyName: string; hasData: boolean; onWipe
           setBusy(false);
           return;
         }
+        reauthToken = reauthData?.session?.access_token;
       } else if (!passkeyVerified) {
         setError('Confirme sua identidade: senha ou biometria.');
         setBusy(false);
         return;
       }
 
-      // 2. Chama o wipe (backend revalida role + ownership + frase)
+      // 2. Chama o wipe (backend revalida role + ownership + frase + reauthToken)
       const r = await authedFetch('/api/v1/party/emergency-wipe', {
         method: 'POST',
-        body: JSON.stringify({ confirmationText: CONFIRM_PHRASE }),
+        body: JSON.stringify({ confirmationText: CONFIRM_PHRASE, reauthToken }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {

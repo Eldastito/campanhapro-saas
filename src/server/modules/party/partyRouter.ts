@@ -89,6 +89,22 @@ const SIGNED_TTL = 60 * 60; // 1h
 const MAX_COMMITTEE_PHOTOS = 4;     // fachada · interior · placa/material · equipe
 const PHOTO_QUOTA_PER_CANDIDATE = 80; // ~6,5 MB/candidato → teto ~1 GB por partido (130)
 
+// M1: nunca devolve error.message cru do PostgREST ao cliente (pode vazar
+// detalhe interno do schema ou PII em violação de constraint). Loga no
+// servidor, responde genérico.
+function dbFail(res: Response, error: any) {
+  console.error('[party] db error:', error?.message || error);
+  return res.status(500).json({ error: 'erro_interno' });
+}
+
+// C1: gate de papel do Centro de Comando. Só presidente de partido (ou supremo).
+// É o ponto de estrangulamento: sem partido provisionado, todos os outros
+// endpoints já barram via partyOf(). Mantido explícito como defesa em camadas.
+function isPresident(req: Request): boolean {
+  const u = (req as any).user;
+  return u?.userType === 'Presidente de Partido' || !!u?.isSupremeAdmin;
+}
+
 export function createPartyRouter(supabase: SupabaseClient): Router {
   const router = Router();
 
@@ -126,6 +142,23 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
   async function partyOf(userId: string) {
     const { data } = await supabase.from('parties').select('*').eq('presidentId', userId).maybeSingle();
     return data as any | null;
+  }
+
+  // M2: reautenticação verificada NO SERVIDOR para ações destrutivas. O cliente
+  // refaz o signInWithPassword num cliente efêmero e manda o access_token novo
+  // (a senha nunca trafega pro backend — LGPD). Aqui provamos: token válido +
+  // mesmo usuário + emitido há ≤10 min. O `iat` recente é o que distingue uma
+  // reautenticação fresca do JWT ambiente da sessão (que um atacante com a
+  // sessão sequestrada já teria). Sem isso, a "reautenticação" era só no cliente.
+  async function verifyFreshReauth(token: string, expectedUserId: string): Promise<boolean> {
+    if (!token || token.split('.').length !== 3) return false;
+    try {
+      const { data, error } = await (supabase as any).auth.getUser(token);
+      if (error || data?.user?.id !== expectedUserId) return false;
+      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8'));
+      const ageSec = Date.now() / 1000 - (Number(payload.iat) || 0);
+      return ageSec >= 0 && ageSec <= 600; // 10 min
+    } catch { return false; }
   }
 
   // Partido do presidente logado + candidatos (com metas computadas que "acendem
@@ -208,15 +241,19 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
   });
 
   // Provisiona o partido do presidente (idempotente).
+  // C1: gate de papel. O caminho legítimo de virar presidente é o onboarding
+  // (/bootstrap define type='Presidente de Partido'). Sem este gate, qualquer
+  // usuário autenticado criava um partido aqui e se auto-promovia ao produto pago.
   router.post('/provision', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!isPresident(req)) return res.status(403).json({ error: 'apenas_presidente' });
     const existing = await partyOf(userId);
     if (existing) return res.json({ party: existing, created: false });
     const name = String((req.body?.name || 'Meu Partido')).slice(0, 120);
     const { data, error } = await supabase.from('parties')
       .insert({ name, presidentId: userId }).select('*').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     return res.json({ party: data, created: true });
   });
 
@@ -232,7 +269,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (numero !== undefined) patch.numero = String(numero ?? '').replace(/\D/g, '').slice(0, 5) || null;
     const { data, error } = await supabase.from('parties')
       .update(patch).eq('id', party.id).eq('presidentId', userId).select('*').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     const { billingNote, ...safe } = data as any;
     return res.json({ party: safe });
   });
@@ -255,7 +292,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       status: 'pending',
       inviteToken: newToken(),
     }).select('*').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     return res.json({ candidate: data });
   });
 
@@ -306,7 +343,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     }
     if (!toInsert.length) return res.json({ created: 0, duplicates, invalid });
     const { data, error } = await supabase.from('party_candidates').insert(toInsert).select('id');
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     return res.json({ created: (data || []).length, duplicates, invalid });
   });
 
@@ -438,7 +475,7 @@ REGRAS:
     if (estado !== undefined) patch.estado = normalizeUF(estado);
     if (phone !== undefined) patch.phone = phone?.toString().trim() || null;
     const { data, error } = await supabase.from('party_candidates').update(patch).eq('id', req.params.id).select('*').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     return res.json({ candidate: data });
   });
 
@@ -447,19 +484,29 @@ REGRAS:
   router.delete('/candidates/:id', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (!(await candidateOfPresident(userId, req.params.id))) return res.status(404).json({ error: 'not_found' });
-    const { data: cand } = await supabase.from('party_candidates').select('userId, campaignId').eq('id', req.params.id).maybeSingle();
+    const party = await candidateOfPresident(userId, req.params.id);
+    if (!party) return res.status(404).json({ error: 'not_found' });
+    const { data: cand } = await supabase.from('party_candidates').select('userId, campaignId, displayName').eq('id', req.params.id).maybeSingle();
     const id = req.params.id;
     await supabase.from('party_checkins').delete().eq('candidateId', id);
     await supabase.from('party_committees').delete().eq('candidateId', id);
     await supabase.from('party_repasses').delete().eq('candidateId', id);
     await supabase.from('party_valve_log').delete().eq('candidateId', id);
     const { error } = await supabase.from('party_candidates').delete().eq('id', id);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     // candidato ativo: limpa conta + campanha
     const uid = (cand as any)?.userId; const cid = (cand as any)?.campaignId;
     if (uid) { try { await (supabase as any).auth.admin.deleteUser(uid); } catch { /* */ } }
     if (cid) { await supabase.from('campaigns').delete().eq('id', cid).then(() => {}, () => {}); }
+    // A2: delete destrutivo (apaga conta+campanha do candidato) tem que deixar
+    // trilha — espelha o que o emergency-wipe já faz. Best-effort, não bloqueia.
+    await supabase.from('party_wipe_audit').insert({
+      partyId: (party as any).id, executedBy: userId,
+      deletedSummary: { candidateId: id, displayName: (cand as any)?.displayName ?? null, hadAccount: !!uid },
+      scope: 'candidate_delete', status: 'success',
+      ip: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req as any).ip || null,
+      userAgent: (req.headers['user-agent'] as string)?.slice(0, 300) || null,
+    }).then(() => {}, () => {});
     return res.json({ ok: true });
   });
 
@@ -492,7 +539,7 @@ REGRAS:
       data: /^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : null,
       descricao: descricao?.trim() || null, itens: cleanItens, createdBy: userId,
     }).select('*').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     // recalcula caches: total recebido e total alocado (soma dos itens de todos os repasses)
     const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', req.params.id);
     const totalRecebido = (all || []).reduce((s: number, r: any) => s + Number(r.valor || 0), 0);
@@ -591,7 +638,7 @@ REGRAS:
       .from('party_candidates')
       .select('id, displayName, cargo, regiao, status, "valorRecebido", "valorAlocado", "repasseStatus", "valveNote"')
       .eq('partyId', (party as any).id);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     if (!candidates || candidates.length === 0) {
       return res.json({ party: party.name, alerts: [], note: 'Sem candidatos pra analisar.' });
     }
@@ -876,7 +923,7 @@ Saída JSON estrito (sem markdown):
       photos: finalPaths, photo: finalPaths[0] || null, // photo = capa (compat)
       updatedAt: new Date().toISOString(),
     }, { onConflict: 'candidateId' }).select('*').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     broadcastTelao(cand.partyId);
     const signed = await Promise.all(finalPaths.map((p) => signPhoto(p)));
     return res.json({ committee: { ...data, photos: signed.filter(Boolean), photo: signed[0] || null } });
@@ -905,7 +952,7 @@ Saída JSON estrito (sem markdown):
       photo: photoPath,
       nota: nota ? String(nota).slice(0, 300) : null,
     }).select('id, "createdAt"').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     broadcastTelao(cand.partyId);
     return res.json({ checkin: data });
   });
@@ -971,7 +1018,7 @@ Saída JSON estrito (sem markdown):
       photo: photoPath,
       nota: nota ? String(nota).slice(0, 300) : null,
     }).select('id, tipo, "createdAt"').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     broadcastTelao(cand.partyId);
     return res.json({ checkin: data });
   });
@@ -1014,7 +1061,7 @@ Saída JSON estrito (sem markdown):
     if (data !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(data)) patch.data = data;
 
     const { error } = await supabase.from('party_repasses').update(patch).eq('id', req.params.id);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     await recalcCandidateTotals(found.repasse.candidateId);
     broadcastTelao(found.party.id);
     return res.json({ ok: true });
@@ -1027,7 +1074,7 @@ Saída JSON estrito (sem markdown):
     const found = await repasseOfPresident(userId, req.params.id);
     if (!found) return res.status(404).json({ error: 'not_found' });
     const { error } = await supabase.from('party_repasses').delete().eq('id', req.params.id);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     await recalcCandidateTotals(found.repasse.candidateId);
     broadcastTelao(found.party.id);
     return res.json({ ok: true });
@@ -1053,7 +1100,7 @@ Saída JSON estrito (sem markdown):
       proximaData: prox, dataFim: /^\d{4}-\d{2}-\d{2}$/.test(dataFim || '') ? dataFim : null,
       ativo: true, createdBy: userId,
     }).select('*').single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     return res.json({ recurring: data });
   });
 
@@ -1084,7 +1131,7 @@ Saída JSON estrito (sem markdown):
     if ((req.body || {}).valor !== undefined) { const v = Number((req.body as any).valor); if (v > 0) patch.valor = v; }
     const { error } = await supabase.from('party_recurring_repasses')
       .update(patch).eq('id', req.params.id).eq('partyId', party.id);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) return dbFail(res, error);
     return res.json({ ok: true });
   });
 
@@ -1213,39 +1260,66 @@ Saída JSON estrito (sem markdown):
     }
     const d = body.data || {};
     const cap = (a: any) => (Array.isArray(a) ? a.slice(0, 5000) : []);
+    // A1: whitelist de colunas por tabela. O backup é arquivo do cliente — sem
+    // isso o spread (`...c`) deixava forjar colunas (createdBy, userId, timestamps).
+    // Aqui só passam colunas conhecidas; partyId e createdBy são sempre forçados.
+    const pick = (obj: any, keys: string[]) => {
+      const out: any = {};
+      for (const k of keys) if (obj && obj[k] !== undefined) out[k] = obj[k];
+      return out;
+    };
+    const now = new Date().toISOString();
     const restored = { candidatos: 0, repasses: 0, recorrentes: 0, comites: 0, checkins: 0, valvula: 0 };
 
     try {
       // Candidatos — remapeia pro partido atual, restaura como pendente (sem conta).
       const candidatos = cap(d.candidatos).map((c: any) => ({
-        ...c, partyId: party.id, status: 'pending', userId: null, campaignId: null,
-        inviteToken: newToken(), updatedAt: new Date().toISOString(),
+        ...pick(c, ['id', 'displayName', 'cargo', 'regiao', 'estado', 'phone',
+          'valorRecebido', 'valorAlocado', 'repasseStatus', 'valveNote', 'metadata', 'createdAt']),
+        partyId: party.id, status: 'pending', userId: null, campaignId: null,
+        inviteToken: newToken(), updatedAt: now,
       }));
       if (candidatos.length) {
         const { data } = await supabase.from('party_candidates').upsert(candidatos, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.candidatos = (data || []).length;
       }
-      const repasses = cap(d.repasses).map((r: any) => ({ ...r, partyId: party.id }));
+      const repasses = cap(d.repasses).map((r: any) => ({
+        ...pick(r, ['id', 'candidateId', 'valor', 'data', 'destino', 'descricao', 'itens', 'createdAt']),
+        partyId: party.id, createdBy: userId,
+      }));
       if (repasses.length) {
         const { data } = await supabase.from('party_repasses').upsert(repasses, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.repasses = (data || []).length;
       }
-      const recorrentes = cap(d.repassesRecorrentes).map((r: any) => ({ ...r, partyId: party.id }));
+      const recorrentes = cap(d.repassesRecorrentes).map((r: any) => ({
+        ...pick(r, ['id', 'candidateId', 'valor', 'descricao', 'frequencia', 'proximaData',
+          'dataFim', 'ativo', 'pausadoPelaValvula', 'lastRunAt', 'totalLancado', 'createdAt']),
+        partyId: party.id, createdBy: userId,
+      }));
       if (recorrentes.length) {
         const { data } = await supabase.from('party_recurring_repasses').upsert(recorrentes, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.recorrentes = (data || []).length;
       }
-      const comites = cap(d.comites);
+      const comites = cap(d.comites).map((c: any) => ({
+        ...pick(c, ['id', 'candidateId', 'address', 'lat', 'lng', 'photo', 'photos', 'geoSource', 'createdAt', 'updatedAt']),
+        partyId: party.id,
+      }));
       if (comites.length) {
         const { data } = await supabase.from('party_committees').upsert(comites, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.comites = (data || []).length;
       }
-      const checkins = cap(d.checkins);
+      const checkins = cap(d.checkins).map((c: any) => ({
+        ...pick(c, ['id', 'candidateId', 'userId', 'tipo', 'lat', 'lng', 'photo', 'nota', 'createdAt']),
+        partyId: party.id,
+      }));
       if (checkins.length) {
         const { data } = await supabase.from('party_checkins').upsert(checkins, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.checkins = (data || []).length;
       }
-      const valvula = cap(d.valvulaLog);
+      const valvula = cap(d.valvulaLog).map((v: any) => ({
+        ...pick(v, ['id', 'candidateId', 'decision', 'note', 'createdAt']),
+        partyId: party.id, createdBy: userId,
+      }));
       if (valvula.length) {
         const { data } = await supabase.from('party_valve_log').upsert(valvula, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.valvula = (data || []).length;
@@ -1596,6 +1670,15 @@ JSON:`;
     const confirmationText = String((req.body || {}).confirmationText || '').trim();
     if (confirmationText !== 'APAGAR TUDO') {
       return res.status(400).json({ error: 'confirmacao_invalida', detail: 'Digite exatamente APAGAR TUDO.' });
+    }
+
+    // M2: reautenticação agora é checada no servidor (antes era 100% no cliente).
+    // O frontend manda o access_token recém-emitido pela reconfirmação de senha.
+    // Obs.: a trilha de step-up por passkey (flag VITE_PASSKEY_STEP_UP, hoje OFF)
+    // não emite esse token; quando for ligada, validar a asserção via /passkeys.
+    const reauthToken = String((req.body || {}).reauthToken || '');
+    if (!(await verifyFreshReauth(reauthToken, userId))) {
+      return res.status(401).json({ error: 'reauth_necessaria', detail: 'Reautenticação expirada ou inválida. Confirme a senha novamente.' });
     }
 
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req as any).ip || null;
