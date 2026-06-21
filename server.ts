@@ -66,6 +66,7 @@ import { createTeamMembersRouter } from './src/server/modules/team/teamMembersRo
 import { createSettingsRouter } from './src/server/modules/settings/settingsRouter';
 import { createContractsRouter } from './src/server/modules/contracts/contractsRouter';
 import { createContractsClientRouter } from './src/server/modules/contracts/contractsClientRouter';
+import { createReceiptsRouter } from './src/server/modules/receipts/receiptsRouter';
 import { createLegalBaseRouter } from './src/server/modules/rag/legalBaseRouter';
 import { createLegalShieldRouter } from './src/server/modules/rag/legalShieldRouter';
 import { requireModule } from './src/server/middleware/requireModule';
@@ -320,6 +321,8 @@ async function startServer() {
     app.use('/api/v1/modules', requireAuth, createModulesRouter(supabaseAdmin));
     app.use('/api/v1/toolbox', requireAuth, mutationLimiter, createToolboxRouter(supabaseAdmin));
     app.use('/api/v1/incomes', requireAuth, mutationLimiter, createIncomesRouter(supabaseAdmin));
+    // Fila de comprovantes (qualquer membro envia; OCR pré-preenche; gestor aprova).
+    app.use('/api/v1/receipts', requireAuth, mutationLimiter, createReceiptsRouter(supabaseAdmin));
     app.use('/api/v1/team-members', requireAuth, mutationLimiter, createTeamMembersRouter(supabaseAdmin));
     app.use('/api/v1/settings', requireAuth, mutationLimiter, createSettingsRouter(supabaseAdmin));
     // Contratos (read-only) da própria campanha — exibidos no Faturamento do cliente.
