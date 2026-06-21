@@ -113,7 +113,7 @@ const HelpPage = () => {
 
         <AccordionItem title="Equipes: Análise de Desempenho (Plano Total)">
             <div className="space-y-4 text-slate-300">
-                <p className="italic">Exclusiva para o <strong>Plano Campanha Total</strong>, a aba <strong>Equipes</strong> é o seu centro de comando para analisar e comparar a performance dos seus times de campo.</p>
+                <p className="italic">Exclusiva para o <strong>Plano Total</strong>, a aba <strong>Equipes</strong> é o seu centro de comando para analisar e comparar a performance dos seus times de campo.</p>
                 <HelpTopic icon={<UsersGroupIcon className="w-5 h-5"/>} title="Tabela Comparativa">
                     Veja todas as suas equipes, lado a lado, com dados sobre número de apoiadores, total de visitas, votos totais e média de votos. Clique no título de qualquer coluna (ex: "Total de Votos") para ordenar e identificar os melhores resultados.
                 </HelpTopic>
