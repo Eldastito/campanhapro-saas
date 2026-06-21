@@ -39,6 +39,7 @@
     "html2canvas": "^1.4.1",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.446.0",
+    "pdf-parse": "^1.1.1",
     "react-router-dom": "^7.14.1",
     "recharts": "^3.8.1",
     "tailwind-merge": "^2.5.2",
