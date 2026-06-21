@@ -473,6 +473,30 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   });
 
   // ── GET /financial ──────────────────────────────────────────────────
+  // Receita recorrente de módulos vendáveis (add-ons + Plano Partido), em centavos.
+  // Cortesia tem amountCents=0, então NÃO entra — conta só o que de fato fatura.
+  // Faz parte da receita bruta da empresa → entra na base do Simples e no P&L.
+  async function sumActiveModuleMrrCents(): Promise<number> {
+    const { data } = await supabaseAdmin
+      .from('module_subscriptions').select('"amountCents"').eq('status', 'active');
+    let cents = 0;
+    for (const m of (data as any[]) ?? []) cents += Math.max(0, Number(m.amountCents) || 0);
+    return cents;
+  }
+
+  // Folha ANUAL (×12) para o Fator R: custos mensais de salários/pessoal, USD→BRL.
+  async function computeFolha12Reais(usdBrl: number): Promise<number> {
+    const { data } = await supabaseAdmin
+      .from('platform_costs').select('"amountCents", currency, category')
+      .eq('active', true).eq('recurrence', 'monthly')
+      .in('category', ['salarios', 'pessoal']);
+    let mensal = 0;
+    for (const c of (data as any[]) ?? []) {
+      mensal += (Number(c.amountCents) || 0) / 100 * (c.currency === 'USD' ? usdBrl : 1);
+    }
+    return mensal * 12;
+  }
+
   // SaaS financial dashboard: MRR/ARR, subscriptions by status, per-plan
   // distribution, overdue (past_due) campaigns, confirmed revenue, AI cost.
   router.get('/financial', async (_req: Request, res: Response) => {
@@ -480,7 +504,27 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       const cfg = await loadTaxSettings();
       const { data, error } = await supabaseAdmin.rpc('supreme_financial_metrics', { p_usd_brl: cfg.usdBrlRate });
       if (error) return res.status(500).json({ error: 'financial_failed', detail: error.message });
-      return res.json({ financial: data });
+
+      // A RPC só conta planos de campanha. Soma a receita de módulos/partidos
+      // e desconta a DAS estimada do lucro (antes vinha "lucro antes de impostos").
+      const fin: any = data || {};
+      const moduleCents = await sumActiveModuleMrrCents();
+      if (fin.profitLoss) {
+        fin.mrrCents = (fin.mrrCents ?? 0) + moduleCents;
+        fin.arrCents = fin.mrrCents * 12;
+        const pl = fin.profitLoss;
+        pl.receitaCents = (pl.receitaCents ?? 0) + moduleCents;
+        pl.lucroLiquidoCents = (pl.lucroLiquidoCents ?? 0) + moduleCents; // receita de módulo ≈ margem pura
+        const receitaReais = pl.receitaCents / 100;
+        const folha12 = await computeFolha12Reais(cfg.usdBrlRate);
+        const tax = calcSimplesNacional({
+          rbt12: receitaReais * 12, receitaMes: receitaReais, folha12, anexoOverride: cfg.anexoOverride,
+        });
+        pl.dasMesCents = tax.dasMesCents;
+        pl.lucroAposImpostosCents = pl.lucroLiquidoCents - tax.dasMesCents;
+        pl.margemPct = pl.receitaCents > 0 ? Math.round((pl.lucroAposImpostosCents / pl.receitaCents) * 1000) / 10 : 0;
+      }
+      return res.json({ financial: fin });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'financial_failed' });
     }
@@ -751,7 +795,8 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       const cfg = await loadTaxSettings();
       const usdBrl = cfg.usdBrlRate;
 
-      // MRR (assinaturas ativas pagas) em reais
+      // Receita bruta = MRR de planos (assinaturas ativas pagas) + receita
+      // recorrente de módulos/partidos. Tudo entra na base do Simples (RBT12).
       const { data: subs } = await supabaseAdmin
         .from('subscriptions')
         .select('planId, status, plans!inner(monthlyCents)')
@@ -761,23 +806,15 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         const cents = s.plans?.monthlyCents ?? 0;
         if (cents > 0) mrrReais += cents / 100;
       }
+      mrrReais += (await sumActiveModuleMrrCents()) / 100; // módulos + Plano Partido (cortesia=R$0)
 
-      // Folha mensal: custos de salários/pessoal (converte USD→BRL se houver)
-      const { data: costs } = await supabaseAdmin
-        .from('platform_costs')
-        .select('amountCents, currency, category, recurrence, active')
-        .eq('active', true).eq('recurrence', 'monthly')
-        .in('category', ['salarios', 'pessoal']);
-      let folhaMensalReais = 0;
-      for (const c of (costs as any[]) ?? []) {
-        const reais = (c.amountCents ?? 0) / 100 * (c.currency === 'USD' ? usdBrl : 1);
-        folhaMensalReais += reais;
-      }
+      // Folha anual (Fator R): custos de salários/pessoal, USD→BRL.
+      const folha12 = await computeFolha12Reais(usdBrl);
 
       const result = calcSimplesNacional({
         rbt12: mrrReais * 12,
         receitaMes: mrrReais,
-        folha12: folhaMensalReais * 12,
+        folha12,
         anexoOverride: cfg.anexoOverride,
       });
 
