@@ -96,13 +96,30 @@ export const AGENT_REGISTRY: Record<string, AgentCapability> = {
     produces: ['eventos de agenda'],
     handoffTo: [],
   },
+  accountant: {
+    id: 'accountant', label: 'Contábil',
+    mission: 'Audita arrecadação e gastos da campanha contra as regras do TSE/SPCE; aponta fonte vedada, doação acima do limite, gasto sem comprovante e divergências antes da prestação de contas.',
+    // RAG jurídico é injetado no contexto pelo pipeline (complianceReview), não via tool.
+    tools: ['flag_fraudulent_data', 'search_campaign_memory'],
+    consumes: ['transações/receitas/despesas', 'limites do plano', 'regras TSE vigentes'],
+    produces: ['achados contábeis', 'risco financeiro', 'pendências de comprovação'],
+    handoffTo: ['legal'],
+  },
+  legal: {
+    id: 'legal', label: 'Jurídico',
+    mission: 'Recebe os achados do Contábil, avalia o risco jurídico-eleitoral à luz da norma/jurisprudência e monta tese de defesa com precedente favorável (sem orientar infração).',
+    tools: ['search_campaign_memory'],
+    consumes: ['achados contábeis', 'resoluções TSE/TRE', 'jurisprudência oficial'],
+    produces: ['parecer jurídico', 'score de risco', 'teses de defesa com precedente'],
+    handoffTo: [],
+  },
   manager: {
     id: 'manager', label: 'Orquestrador',
     mission: 'Decompõe o objetivo, roteia ao agente certo, avalia o resultado e decide o próximo passo até concluir.',
     tools: ['get_competitive_intel', 'get_conversion_funnel', 'analyze_territorial_gap', 'get_team_activity', 'search_campaign_memory', 'publish_war_room_insight'],
     consumes: ['objetivo do usuário', 'resultados parciais dos agentes'],
     produces: ['plano de execução', 'resultado consolidado'],
-    handoffTo: ['strategist', 'growth', 'social', 'field', 'creative', 'crm', 'fraud', 'backup', 'secretary'],
+    handoffTo: ['strategist', 'growth', 'social', 'field', 'creative', 'crm', 'fraud', 'backup', 'secretary', 'accountant', 'legal'],
   },
 };
 
