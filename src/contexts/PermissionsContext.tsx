@@ -78,8 +78,6 @@ export const PLAN_CONFIGS = {
     }
 };
 
-const VIP_EMAILS = ['examepad@gmail.com', 'eldastito@gmail.com', 'examepad@teste.com'];
-
 export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { user } = useAuth();
     const [permissions, setPermissions] = React.useState<ProfilePermissions | null>(null);
@@ -87,17 +85,11 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [isLoading, setIsLoading] = React.useState(true);
 
     React.useEffect(() => {
-        const isVIP = VIP_EMAILS.includes(user?.email || '');
-
+        // Sem acesso por e-mail hardcoded: quem não tem campanha não recebe config
+        // (vai pro onboarding). Permissões/plano vêm do banco como qualquer conta.
         if (!user?.campaignId) {
-            // VIP sem campaign_id ainda recebe acesso total
-            if (isVIP) {
-                setPermissions(DEFAULT_PERMISSIONS);
-                setConfig({ planTier: 'completo', features: Object.keys(PLAN_CONFIGS.completo.features) } as any);
-            } else {
-                setPermissions(DEFAULT_PERMISSIONS);
-                setConfig(null);
-            }
+            setPermissions(DEFAULT_PERMISSIONS);
+            setConfig(null);
             setIsLoading(false);
             return;
         }
@@ -110,32 +102,15 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     .eq('id', user.campaignId)
                     .maybeSingle();
                 
-                // Para usuários VIP, garantimos acesso total mesmo se a tabela estiver vazia
-                const isVIP = VIP_EMAILS.includes(user.email || '');
-                
-                if (error && !isVIP) {
+                // Governança: acesso vem do campaign_configs do tenant — sem
+                // override por e-mail VIP. Plano/limites são a verdade do banco.
+                if (error) {
                     console.error("Erro ao carregar campaign_configs:", error);
                     setPermissions(DEFAULT_PERMISSIONS);
                     setConfig(null);
-                } else if (data || isVIP) {
-                    const raw: any = data || { id: user.campaignId };
-                    let configData = { ...raw, customFields: raw.customFields ?? {} } as CampaignConfig;
-
-                    // VIP Override: Acesso total automático
-                    if (isVIP) {
-                        configData = {
-                            ...configData,
-                            planTier: 'completo',
-                            features: [
-                                'dashboard', 'ai_agents', 'calculator', 'visits', 'engagement',
-                                'resources', 'team', 'financial', 'training', 'tools',
-                                'permissions', 'settings', 'help', 'election_day',
-                                'analytics', 'crm'
-                            ],
-                            profilePermissions: DEFAULT_PERMISSIONS
-                        };
-                    }
-
+                } else if (data) {
+                    const raw: any = data;
+                    const configData = { ...raw, customFields: raw.customFields ?? {} } as CampaignConfig;
                     setConfig(configData);
                     setPermissions(configData.profilePermissions || DEFAULT_PERMISSIONS);
                 } else {

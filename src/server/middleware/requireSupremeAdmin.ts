@@ -6,19 +6,16 @@ import type { Request, Response, NextFunction, RequestHandler } from 'express';
  * tenant suspensions. Returns 403 for everyone else, including campaign-level
  * Admins.
  *
- * Relies on authMiddleware having already populated req.user.isSupremeAdmin.
+ * Relies on authMiddleware having already populated req.user.isSupremeAdmin
+ * (lido de users.isSupremeAdmin). Governança: supreme admin é decidido SÓ pela
+ * flag no banco — sem override por e-mail/env.
  */
 export function requireSupremeAdmin(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = (req as any).user;
     if (!user?.id) return res.status(401).json({ error: 'Unauthorized' });
 
-    // Allow either flag-based or email-based supreme admin (matches AuthContext logic).
-    const supreme = process.env.SUPREME_ADMIN_EMAIL;
-    const isByEmail = !!supreme && user.email === supreme;
-    const isByFlag = !!user.isSupremeAdmin;
-
-    if (!isByEmail && !isByFlag) {
+    if (!user.isSupremeAdmin) {
       return res.status(403).json({ error: 'supreme_admin_required' });
     }
     next();
