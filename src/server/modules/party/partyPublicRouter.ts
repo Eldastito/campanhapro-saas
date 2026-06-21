@@ -23,6 +23,11 @@ const jitter = (id: string, salt: number) => {
   return ((h % 1000) / 1000 - 0.5) * 0.03; // ±0.015°
 };
 
+// A3: janela de validade do convite. Token é single-use (vira 'active' ao
+// cadastrar), mas sem isso um link vazado e nunca usado valia pra sempre. Ampla
+// por padrão (cobre o pré-eleição); ajustável por env, 0 = sem expiração.
+const INVITE_TTL_DAYS = Number(process.env.PARTY_INVITE_TTL_DAYS || 90);
+
 export function createPartyPublicRouter(supabase: SupabaseClient): Router {
   const router = Router();
 
@@ -165,12 +170,38 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
       return res.status(409).json({ error: 'ja_cadastrado' });
     }
 
+    // A3: expiração do convite (defesa em profundidade).
+    const createdMs = new Date((cand as any).createdAt || 0).getTime();
+    if (INVITE_TTL_DAYS > 0 && createdMs > 0 && Date.now() - createdMs > INVITE_TTL_DAYS * 86_400_000) {
+      return res.status(410).json({ error: 'convite_expirado', detail: 'Este convite expirou. Peça um novo link ao presidente.' });
+    }
+
+    // A3: claim atômico — sem isso, dois cliques simultâneos passavam a checagem
+    // acima e criavam DOIS usuários + campanhas (um órfão). Só uma requisição
+    // consegue mover pending→registering; as demais batem em 409.
+    // Aceita reclaim de um 'registering' obsoleto (>5min) — recupera de um
+    // cadastro que travou no meio (crash) sem deixar o convite preso pra sempre.
+    const staleTs = new Date(Date.now() - 5 * 60_000).toISOString();
+    const { data: claimed } = await supabase.from('party_candidates')
+      .update({ status: 'registering', updatedAt: new Date().toISOString() })
+      .eq('id', (cand as any).id)
+      .or(`status.eq.pending,and(status.eq.registering,updatedAt.lt.${staleTs})`)
+      .select('id').single();
+    if (!claimed) {
+      return res.status(409).json({ error: 'cadastro_em_andamento', detail: 'Este convite já está sendo usado ou foi concluído.' });
+    }
+    // Libera o claim se algo falhar no meio — senão o convite fica preso fora de 'pending'.
+    const releaseClaim = () => supabase.from('party_candidates')
+      .update({ status: 'pending', updatedAt: new Date().toISOString() })
+      .eq('id', (cand as any).id).then(() => {}, () => {});
+
     const mail = String(email).trim().toLowerCase();
     // 1) cria o usuário de autenticação (service role)
     const { data: created, error: authErr } = await (supabase as any).auth.admin.createUser({
       email: mail, password: String(password), email_confirm: true,
     });
     if (authErr || !created?.user?.id) {
+      await releaseClaim();
       return res.status(400).json({ error: 'falha_criar_usuario', detail: authErr?.message });
     }
     const uid = created.user.id;
@@ -187,7 +218,8 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     }).select('id').single();
     if (campErr || !camp?.id) {
       await (supabase as any).auth.admin.deleteUser(uid).catch(() => {});
-      return res.status(500).json({ error: 'falha_campanha', detail: campErr?.message });
+      await releaseClaim();
+      return res.status(500).json({ error: 'falha_campanha' });
     }
     const campaignId = (camp as any).id;
 
@@ -199,7 +231,8 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     if (uErr) {
       await (supabase as any).auth.admin.deleteUser(uid).catch(() => {}); // rollback best-effort
       await supabase.from('campaigns').delete().eq('id', campaignId).then(() => {}, () => {});
-      return res.status(500).json({ error: 'falha_perfil', detail: uErr.message });
+      await releaseClaim();
+      return res.status(500).json({ error: 'falha_perfil' });
     }
 
     // 3) ativa o candidato no partido
