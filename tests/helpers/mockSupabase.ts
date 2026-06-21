@@ -26,7 +26,7 @@ interface QueryState {
   upsertRows?: Row[];
   upsertOnConflict?: string;
   upsertIgnoreDup?: boolean;
-  mode: 'select' | 'insert' | 'update' | 'upsert';
+  mode: 'select' | 'insert' | 'update' | 'upsert' | 'delete';
 }
 
 function applyFilters(rows: Row[], filters: QueryState['filters']): Row[] {
@@ -66,6 +66,11 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       store.set(table, updatedRows);
       const returned = updatedRows.filter((_r, i) => matching.includes(rows[i]));
       return { data: returned, error: null };
+    }
+    if (state.mode === 'delete') {
+      const matching = applyFilters(rows, state.filters);
+      store.set(table, rows.filter(r => !matching.includes(r)));
+      return { data: matching, error: null };
     }
     if (state.mode === 'upsert' && state.upsertRows) {
       const updated = [...rows];
@@ -122,6 +127,7 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       state.updatePayload = payload;
       return chain;
     },
+    delete: () => { state.mode = 'delete'; return chain; },
     upsert: (rows: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) => {
       state.mode = 'upsert';
       state.upsertRows = Array.isArray(rows) ? rows : [rows];

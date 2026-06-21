@@ -60,6 +60,7 @@ import { createFieldOpsRouter } from './src/server/modules/fieldOps/fieldOpsRout
 import { createTeamGamificationRouter } from './src/server/modules/teamGamification/teamGamificationRouter';
 import { createControlPanelRouter } from './src/server/modules/controlPanel/controlPanelRouter';
 import { createToolboxRouter } from './src/server/modules/toolbox/toolboxRouter';
+import { createIncomesRouter } from './src/server/modules/financial/incomesRouter';
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
@@ -309,6 +310,7 @@ async function startServer() {
     app.get('/api/v1/modules/pricing', createModulePricingHandler(supabaseAdmin));
     app.use('/api/v1/modules', requireAuth, createModulesRouter(supabaseAdmin));
     app.use('/api/v1/toolbox', requireAuth, mutationLimiter, createToolboxRouter(supabaseAdmin));
+    app.use('/api/v1/incomes', requireAuth, mutationLimiter, createIncomesRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, moduleAccessAudit(supabaseAdmin, 'partido'), createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));
