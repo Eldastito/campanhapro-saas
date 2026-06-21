@@ -20,7 +20,9 @@ import { ENCRYPTED_FIELDS } from '../../lib/encryptedFields';
 const FIELDS = ENCRYPTED_FIELDS.incomes; // ['documentoDoador']
 
 // Colunas que o cliente pode gravar (whitelist — não confiar no corpo cru).
-const WRITABLE = ['data', 'origem', 'doador', 'documentoDoador', 'descricao', 'valor', 'tipoDocumento'] as const;
+const WRITABLE = ['data', 'origem', 'doador', 'documentoDoador', 'descricao', 'valor', 'tipoDocumento',
+  // Prestação de contas (TSE/SPCE)
+  'especie', 'fonteRecurso', 'contaReceptora', 'reciboEleitoral'] as const;
 
 function isAdmin(req: Request): boolean {
   const t = (req as any).user?.userType;

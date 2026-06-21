@@ -65,6 +65,7 @@ import { createIncomesRouter } from './src/server/modules/financial/incomesRoute
 import { createTeamMembersRouter } from './src/server/modules/team/teamMembersRouter';
 import { createSettingsRouter } from './src/server/modules/settings/settingsRouter';
 import { createContractsRouter } from './src/server/modules/contracts/contractsRouter';
+import { createContractsClientRouter } from './src/server/modules/contracts/contractsClientRouter';
 import { createLegalBaseRouter } from './src/server/modules/rag/legalBaseRouter';
 import { createLegalShieldRouter } from './src/server/modules/rag/legalShieldRouter';
 import { requireModule } from './src/server/middleware/requireModule';
@@ -321,6 +322,8 @@ async function startServer() {
     app.use('/api/v1/incomes', requireAuth, mutationLimiter, createIncomesRouter(supabaseAdmin));
     app.use('/api/v1/team-members', requireAuth, mutationLimiter, createTeamMembersRouter(supabaseAdmin));
     app.use('/api/v1/settings', requireAuth, mutationLimiter, createSettingsRouter(supabaseAdmin));
+    // Contratos (read-only) da própria campanha — exibidos no Faturamento do cliente.
+    app.use('/api/v1/contracts', requireAuth, createContractsClientRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, moduleAccessAudit(supabaseAdmin, 'partido'), createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));

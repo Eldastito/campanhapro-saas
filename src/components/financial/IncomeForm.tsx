@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Income, IncomeSource } from '../../types/financial';
+import { Income, IncomeSource, IncomeEspecie, IncomeFonteRecurso, IncomeContaReceptora } from '../../types/financial';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
 
@@ -10,6 +10,9 @@ interface IncomeFormProps {
 
 const incomeSources: IncomeSource[] = ['Doação Pessoal', 'Recursos Próprios', 'Partido', 'Venda de Material', 'Outra'];
 const documentTypes: Income['tipoDocumento'][] = ['Recibo', 'Transferência', 'Depósito', 'Outro'];
+const especies: IncomeEspecie[] = ['Financeira', 'Estimável em bens/serviços'];
+const fontesRecurso: IncomeFonteRecurso[] = ['Recursos próprios do candidato', 'Doação de pessoa física', 'Doação de outro candidato/partido', 'Fundo Partidário', 'Fundo Especial (FEFC)', 'Financiamento coletivo (internet)', 'Comercialização de bens/eventos', 'Rendimentos de aplicação financeira', 'Outros recursos'];
+const contasReceptoras: IncomeContaReceptora[] = ['Doações', 'Fundo Partidário', 'Fundo Especial (FEFC)', 'Outros Recursos'];
 
 const IncomeForm: React.FC<IncomeFormProps> = ({ onSave, onCancel }) => {
     const [formData, setFormData] = React.useState({
@@ -19,7 +22,12 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ onSave, onCancel }) => {
         documentoDoador: '',
         descricao: '',
         valor: '',
-        tipoDocumento: 'Recibo' as Income['tipoDocumento']
+        tipoDocumento: 'Recibo' as Income['tipoDocumento'],
+        // Prestação de contas (TSE/SPCE)
+        especie: 'Financeira' as IncomeEspecie,
+        fonteRecurso: 'Doação de pessoa física' as IncomeFonteRecurso,
+        contaReceptora: 'Doações' as IncomeContaReceptora,
+        reciboEleitoral: '',
     });
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -69,6 +77,34 @@ const IncomeForm: React.FC<IncomeFormProps> = ({ onSave, onCancel }) => {
                 </div>
                 <Input label="Descrição" name="descricao" value={formData.descricao} onChange={handleChange} required placeholder="Ex: Doação para material gráfico" />
             </div>
+
+            {/* Prestação de contas (TSE/SPCE) — campos exigidos no SPCE */}
+            <fieldset className="border border-slate-700 rounded-lg p-4 space-y-4">
+                <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-indigo-300">Prestação de contas (TSE)</legend>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="especie" className="block text-sm font-medium text-slate-300 mb-1">Espécie do recurso</label>
+                        <select id="especie" name="especie" value={formData.especie} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3">
+                            {especies.map(e => <option key={e} value={e}>{e}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label htmlFor="fonteRecurso" className="block text-sm font-medium text-slate-300 mb-1">Fonte do recurso</label>
+                        <select id="fonteRecurso" name="fonteRecurso" value={formData.fonteRecurso} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3">
+                            {fontesRecurso.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="contaReceptora" className="block text-sm font-medium text-slate-300 mb-1">Conta receptora</label>
+                        <select id="contaReceptora" name="contaReceptora" value={formData.contaReceptora} onChange={handleChange} className="w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3">
+                            {contasReceptoras.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                    </div>
+                    <Input label="Nº do recibo eleitoral" name="reciboEleitoral" value={formData.reciboEleitoral} onChange={handleChange} placeholder="Ex: 0001/2026" />
+                </div>
+            </fieldset>
 
             <div className="flex justify-end gap-3 pt-4">
                 <Button type="button" variant="secondary" onClick={onCancel}>Cancelar</Button>
