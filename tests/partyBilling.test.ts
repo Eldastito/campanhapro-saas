@@ -103,6 +103,34 @@ describe('supreme party-billing', () => {
     assert.equal(ronald.billing.courtesy, true);
   });
 
+  test('GET /parties traz presidente, preço do plano, cortesia e repasses', async () => {
+    const supabase = createMockSupabase({
+      module_prices: [{ moduleKey: 'partido', monthlyCents: 300000, active: true }],
+      parties: [{ id: 'party-1', name: 'Partido A', presidentId: 'u1', status: 'active', createdAt: '2026-06-01' }],
+      users: [{ id: 'u1', email: 'ronald@x.com', name: 'Ronald Azaro' }],
+      party_candidates: [
+        { id: 'c1', partyId: 'party-1', valorRecebido: 1000, valorAlocado: 400 },
+        { id: 'c2', partyId: 'party-1', valorRecebido: 500, valorAlocado: 100 },
+      ],
+      // Ronald marcado como cortesia
+      module_subscriptions: [{
+        id: 's1', tenantId: 'party-1', tenantKind: 'party', moduleKey: 'partido',
+        status: 'active', paymentProvider: 'comp', amountCents: 0, metadata: { courtesy: true, note: 'Validação' },
+      }],
+    });
+    const res = await req(buildApp(supabase), 'GET', '/api/v1/supreme/parties');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.planMonthlyCents, 300000);
+    const p = res.body.parties[0];
+    assert.equal(p.presidentName, 'Ronald Azaro');
+    assert.equal(p.presidentEmail, 'ronald@x.com');
+    assert.equal(p.candidatesCount, 2);
+    assert.equal(p.valorRecebido, 1500); // repasses internos (não é cobrança)
+    assert.equal(p.valorAlocado, 500);
+    assert.equal(p.courtesy, true);
+    assert.equal(p.courtesyNote, 'Validação');
+  });
+
   test('remover cortesia cancela a linha comp', async () => {
     const supabase = seed();
     await req(buildApp(supabase), 'POST', '/api/v1/supreme/party-billing/party-1/courtesy', { courtesy: true });
