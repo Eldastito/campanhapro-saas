@@ -19,6 +19,8 @@ interface QueryState {
   selectCols: string;
   isCount: boolean;
   limitN?: number;
+  rangeFrom?: number;
+  rangeTo?: number;
   orderKey?: string;
   orderAsc?: boolean;
   insertRows?: Row[];
@@ -98,6 +100,7 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
         return (av > bv ? 1 : -1) * (state.orderAsc ? 1 : -1);
       });
     }
+    if (state.rangeFrom !== undefined) out = out.slice(state.rangeFrom, (state.rangeTo ?? out.length) + 1);
     if (state.limitN) out = out.slice(0, state.limitN);
     if (state.isCount) return { count: out.length, error: null };
     return { data: out, error: null };
@@ -167,6 +170,7 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       state.orderKey = key; state.orderAsc = opts?.ascending ?? true; return chain;
     },
     limit: (n: number) => { state.limitN = n; return chain; },
+    range: (from: number, to: number) => { state.rangeFrom = from; state.rangeTo = to; return chain; },
     single: async () => { const r = await exec(); return { data: r.data?.[0] ?? null, error: r.data?.length ? null : { message: 'no_rows' } }; },
     maybeSingle: async () => { const r = await exec(); return { data: r.data?.[0] ?? null, error: null }; },
     ...thenable(exec),

@@ -28,6 +28,7 @@ import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 import { runLifecycleSweep } from '../billing/subscriptionLifecycle';
 import { calcSimplesNacional } from './taxCalculator';
+import { encryptMigrateAll } from '../../lib/encryptMigration';
 
 // ── Form Builder (F5) ──────────────────────────────────────────────────
 // Alvos (entidades) que aceitam campos personalizáveis por campanha.
@@ -184,6 +185,25 @@ function parsePlan(raw: unknown): Plan | null {
 
 export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
+
+  // Cifra dados sensíveis legados (CPF/RG/título/banco/PIX/doc.doador/CPF-CNPJ
+  // do candidato) em TODAS as campanhas, de uma vez. Idempotente — pode rodar de
+  // novo sem dano. Requer FIELD_ENCRYPTION_KEY no ambiente.
+  router.post('/encrypt-migrate-all', async (req: Request, res: Response) => {
+    try {
+      const summary = await encryptMigrateAll(supabaseAdmin);
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'security.encrypt_migrate_all',
+        resourceType: 'campaign', resourceId: 'all',
+        severity: 'warn', metadata: summary,
+      });
+      return res.json({ ok: true, summary });
+    } catch (err: any) {
+      console.error('[supreme] encrypt-migrate-all:', err);
+      return res.status(500).json({ error: err?.message || 'migration_failed' });
+    }
+  });
 
   // Lê a config fiscal (singleton). Fallback seguro se a linha não existir.
   async function loadTaxSettings() {
