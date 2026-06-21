@@ -13,7 +13,16 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 const iconOf = (name: string) => ICONS[name] ?? LayoutGrid;
 
 interface TenantInfo { id: string; kind: 'campaign' | 'party'; role: string; name: string | null }
-interface MeResponse { active: string[]; available: string[]; catalog: ModuleDef[]; tenants: TenantInfo[] }
+interface MeResponse {
+  active: string[];
+  available: string[];
+  catalog: ModuleDef[];
+  tenants: TenantInfo[];
+  pricing?: Record<string, { monthlyCents: number }>;
+}
+
+const formatBRL = (cents: number) =>
+  (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const labelOf = (t: TenantInfo) => t.name || `${t.kind === 'party' ? 'Partido' : 'Campanha'} ${t.id.substring(0, 8)}…`;
 
@@ -114,6 +123,7 @@ const HubPage: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {available.map((m) => {
                     const Icon = iconOf(m.icon);
+                    const price = data?.pricing?.[m.key]?.monthlyCents;
                     return (
                       <div key={m.key} className="bg-slate-800/50 border border-dashed border-slate-700 rounded-2xl p-5">
                         <div className="w-11 h-11 rounded-xl bg-slate-700/40 flex items-center justify-center mb-3">
@@ -121,8 +131,11 @@ const HubPage: React.FC = () => {
                         </div>
                         <h3 className="font-semibold text-slate-300 flex items-center gap-1.5">{m.name} <Lock className="w-3 h-3 text-slate-500" /></h3>
                         <p className="text-xs text-slate-500 mt-1 leading-snug">{m.description}</p>
+                        {price != null && (
+                          <p className="text-xs text-emerald-400 font-semibold mt-3">{formatBRL(price)}<span className="text-slate-500 font-normal">/mês</span></p>
+                        )}
                         {m.salesRoute && (
-                          <a href={m.salesRoute} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 mt-3">Conhecer <ArrowRight className="w-3.5 h-3.5" /></a>
+                          <a href={m.salesRoute} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 mt-2">Conhecer <ArrowRight className="w-3.5 h-3.5" /></a>
                         )}
                       </div>
                     );

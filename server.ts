@@ -55,7 +55,7 @@ import { createFraudGuardsRouter } from './src/server/modules/fraudGuards/fraudG
 import { createSocialRouter } from './src/server/modules/social/socialRouter';
 import { createWhatsappRoutingRouter } from './src/server/modules/whatsappRouting/whatsappRoutingRouter';
 import { createCalculatorRouter } from './src/server/modules/calculator/calculatorRouter';
-import { createModulesRouter } from './src/server/modules/modules/modulesRouter';
+import { createModulesRouter, createModulePricingHandler } from './src/server/modules/modules/modulesRouter';
 import { createFieldOpsRouter } from './src/server/modules/fieldOps/fieldOpsRouter';
 import { createTeamGamificationRouter } from './src/server/modules/teamGamification/teamGamificationRouter';
 import { createControlPanelRouter } from './src/server/modules/controlPanel/controlPanelRouter';
@@ -300,6 +300,9 @@ async function startServer() {
     app.use('/api/v1/field-ops', requireAuth, mutationLimiter, createFieldOpsRouter(supabaseAdmin));
     app.use('/api/v1/team-gamification', requireAuth, mutationLimiter, createTeamGamificationRouter(supabaseAdmin));
     app.use('/api/v1/control-panel', requireAuth, mutationLimiter, createControlPanelRouter(supabaseAdmin));
+    // Pricing público (sem auth): páginas comerciais /produtos/:slug. Registrado
+    // ANTES do app.use autenticado pra Express casar a rota específica primeiro.
+    app.get('/api/v1/modules/pricing', createModulePricingHandler(supabaseAdmin));
     app.use('/api/v1/modules', requireAuth, createModulesRouter(supabaseAdmin));
     app.use('/api/v1/toolbox', requireAuth, mutationLimiter, createToolboxRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));

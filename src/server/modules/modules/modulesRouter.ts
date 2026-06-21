@@ -112,6 +112,20 @@ export function createModulesRouter(supabase: SupabaseClient): Router {
     const active = [...new Set([...derived, ...granted, ...planGranted])];
     const available = MODULES.filter((m) => m.sellable && !active.includes(m.key)).map((m) => m.key);
 
+    // Preço de venda avulsa (add-on) só pros módulos em `available`. O Hub usa
+    // esse mapa no card de cross-sell. Não vaza preço dos que já estão ativos.
+    const pricing: Record<string, { monthlyCents: number }> = {};
+    if (available.length) {
+      try {
+        const { data } = await supabase
+          .from('module_prices')
+          .select('"moduleKey","monthlyCents"')
+          .in('moduleKey', available)
+          .eq('active', true);
+        for (const r of (data ?? [])) pricing[r.moduleKey] = { monthlyCents: r.monthlyCents };
+      } catch { /* tabela indisponível → Hub mostra card sem preço */ }
+    }
+
     // Enriquece tenants com nome legível (campanhas/partidos) pro switcher do Hub.
     // Lookup em batch — não falha o endpoint se uma das tabelas estiver indisponível.
     const tenantsArr = [...tenantMap.values()];
@@ -133,11 +147,29 @@ export function createModulesRouter(supabase: SupabaseClient): Router {
     const tenantsEnriched = tenantsArr.map((t) => ({ ...t, name: nameById.get(t.id) ?? null }));
 
     return res.json({
-      active, available, catalog: MODULES,
+      active, available, catalog: MODULES, pricing,
       tenants: tenantsEnriched,
       activeTenantId: requestedTenantId && tenantMap.has(requestedTenantId) ? requestedTenantId : null,
     });
   });
 
   return router;
+}
+
+// Handler público (sem auth) usado pelas páginas comerciais /produtos/:slug pra
+// mostrar preço sem login. Montado direto no server.ts antes do requireAuth.
+export function createModulePricingHandler(supabase: SupabaseClient) {
+  return async (_req: Request, res: Response) => {
+    try {
+      const { data } = await supabase
+        .from('module_prices')
+        .select('"moduleKey","monthlyCents"')
+        .eq('active', true);
+      const out: Record<string, { monthlyCents: number }> = {};
+      for (const r of (data ?? [])) out[r.moduleKey] = { monthlyCents: r.monthlyCents };
+      return res.json(out);
+    } catch {
+      return res.json({});
+    }
+  };
 }
