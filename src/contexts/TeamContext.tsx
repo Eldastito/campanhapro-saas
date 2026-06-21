@@ -30,24 +30,18 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
         if (!user?.campaignId) return;
 
         const fetchData = async () => {
-            let teamQuery = supabase
-                .from('team_members')
-                .select('*')
-                .eq('campaignId', user.campaignId);
-
-            if (user.type === 'Líder') {
-                teamQuery = teamQuery.eq('assignedLeaderId', user.uid);
-            } else if (user.type !== 'Admin' && user.type !== 'Candidato') {
-                teamQuery = teamQuery.eq('email', user.email);
-            }
-
-            const { data: teamData, error: teamError } = await teamQuery;
-
-            if (teamError) {
+            // Membros vêm pelo backend: campos sensíveis (CPF/RG/banco/PIX) são
+            // decifrados lá (a chave não existe no browser) e o escopo por papel
+            // foi replicado no servidor. Realtime abaixo só dispara este refetch.
+            try {
+                const resp = await authedFetch('/api/v1/team-members');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const json = await resp.json();
+                setTeamMembers((json.members ?? []) as TeamMember[]);
+            } catch (teamError) {
                 console.error("[TeamContext] Erro ao buscar membros:", teamError);
                 handleSupabaseError(teamError, OperationType.GET, 'team_members');
             }
-            else setTeamMembers(teamData as TeamMember[]);
 
             const { data: locData, error: locError } = await supabase
                 .from('locations')
@@ -118,25 +112,40 @@ export const TeamProvider = ({ children }: { children?: React.ReactNode }) => {
                 .eq('email', memberWithoutPassword.email);
         }
 
-        const { data: createdRow, error } = await supabase.from('team_members').insert(sanitizeData({
-            ...memberWithoutPassword,
-            ...(linkedUserId ? { userId: linkedUserId } : {}),
-            campaignId: user.campaignId,
-            addedBy: user.uid,
-            assignedLeaderId,
-        })).select('*').single();
-        if (error) { await handleSupabaseError(error, OperationType.CREATE, 'team_members'); return; }
-        if (createdRow) setTeamMembers(prev => [...prev.filter(m => m.id !== (createdRow as any).id), createdRow as TeamMember]);
+        // Backend cifra CPF/RG/banco/PIX antes de gravar (campaignId/addedBy são
+        // resolvidos lá pelo JWT). assignedLeaderId vai junto.
+        try {
+            const resp = await authedFetch('/api/v1/team-members', {
+                method: 'POST',
+                body: JSON.stringify(sanitizeData({
+                    ...memberWithoutPassword,
+                    ...(linkedUserId ? { userId: linkedUserId } : {}),
+                    assignedLeaderId,
+                })),
+            });
+            const json = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+            const createdRow = json?.member as TeamMember | undefined;
+            if (createdRow) setTeamMembers(prev => [...prev.filter(m => m.id !== (createdRow as any).id), createdRow]);
+        } catch (error) {
+            await handleSupabaseError(error, OperationType.CREATE, 'team_members');
+        }
     };
 
     const updateTeamMember = async (updatedMember: TeamMember) => {
+        const { id, password, ...data } = updatedMember as any;
         try {
-            const { id, password, ...data } = updatedMember as any;
-            const { error } = await supabase.from('team_members').update(sanitizeData(data)).eq('id', id);
-            if (error) throw error;
-            setTeamMembers(prev => prev.map(m => (m.id === id ? { ...m, ...data } as TeamMember : m)));
+            // Backend cifra os campos sensíveis antes do update (escopado à campanha).
+            const resp = await authedFetch(`/api/v1/team-members/${id}`, {
+                method: 'PATCH',
+                body: JSON.stringify(sanitizeData(data)),
+            });
+            const json = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+            const saved = (json?.member ?? { ...updatedMember }) as TeamMember;
+            setTeamMembers(prev => prev.map(m => (m.id === id ? saved : m)));
         } catch (error) {
-            handleSupabaseError(error, OperationType.UPDATE, `team_members/${updatedMember.id}`);
+            handleSupabaseError(error, OperationType.UPDATE, `team_members/${id}`);
         }
     };
 
