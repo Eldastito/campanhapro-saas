@@ -75,9 +75,11 @@ export const MODULES: ModuleDef[] = [
     salesRoute: '/produtos/inteligencia',
     sellable: true,
   },
-  // Add-on avulso puro: NÃO está em nenhum plano (sem entrada em
-  // PLAN_FEATURE_TO_MODULE). Só fica ativo via tenant_module_entitlements
-  // (compra avulsa). A aba "Blindagem" e o backend gateiam por esse módulo.
+  // Incluído no plano Total via feature `compliance` (mapeada abaixo em
+  // PLAN_FEATURE_TO_MODULE) — quem assina o Total ganha a Blindagem sem add-on.
+  // Quem está em plano inferior compra avulso via tenant_module_entitlements e
+  // vê o card em `available` (cross-sell). A aba "Blindagem" e o backend
+  // gateiam por esse módulo.
   {
     key: 'legal_shield',
     name: 'Blindagem Jurídica',
@@ -96,6 +98,9 @@ export const MODULES: ModuleDef[] = [
 export const PLAN_FEATURE_TO_MODULE: Record<string, string> = {
   scenarios: 'cenarios',
   intelligence: 'inteligencia',
+  // `compliance` é exclusiva do plano Total — libera a Blindagem Jurídica
+  // (copiloto contábil/jurídico TSE) sem cobrar add-on para quem já assina.
+  compliance: 'legal_shield',
 };
 
 export const moduleByKey = (key: string): ModuleDef | undefined => MODULES.find((m) => m.key === key);
