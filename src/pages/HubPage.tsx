@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Megaphone, Landmark, Headphones, LineChart, Brain, ArrowRight, Lock, Loader2, Plus, Building2, ChevronDown } from 'lucide-react';
+import { LayoutGrid, Megaphone, Landmark, Headphones, LineChart, Brain, ArrowRight, ArrowLeft, Lock, Loader2, Plus, Building2, ChevronDown } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import type { ModuleDef } from '../lib/modules';
@@ -82,6 +82,12 @@ const HubPage: React.FC = () => {
       <SmokeyBackground color="#1d4ed8" backdropBlurAmount="sm" className="absolute inset-0" />
       <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 py-10">
         <div className="flex items-center gap-3 mb-8">
+          {window.history.length > 1 && (
+            <button onClick={() => navigate(-1)} aria-label="Voltar"
+              className="shrink-0 w-9 h-9 rounded-lg bg-slate-800/50 hover:bg-slate-800/80 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-colors">
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
           <img src={LOGO_MONO_BASE64} alt="CampanhaPro" className="h-9 w-9" />
           <div className="flex-1">
             <h1 className="text-2xl font-bold flex items-center gap-2"><LayoutGrid className="w-5 h-5 text-indigo-400" /> Seus aplicativos</h1>
@@ -97,7 +103,7 @@ const HubPage: React.FC = () => {
         ) : (
           <>
             {active.length === 0 && (
-              <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 text-center text-slate-400">
+              <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-6 text-center text-slate-400">
                 Nenhum aplicativo ativo nesta organização. Fale com o administrador.
               </div>
             )}
@@ -107,7 +113,7 @@ const HubPage: React.FC = () => {
                 const Icon = iconOf(m.icon);
                 return (
                   <button key={m.key} onClick={() => navigate(m.appRoute)}
-                    className="text-left bg-slate-800 hover:bg-slate-700/70 border border-slate-700 hover:border-indigo-500/50 rounded-2xl p-5 transition-colors group">
+                    className="text-left bg-slate-800/50 hover:bg-slate-800/70 backdrop-blur-sm border border-slate-700 hover:border-indigo-500/50 rounded-2xl p-5 transition-colors group">
                     <div className="w-11 h-11 rounded-xl bg-indigo-500/15 flex items-center justify-center mb-3">
                       <Icon className="w-5 h-5 text-indigo-300" />
                     </div>
@@ -127,7 +133,7 @@ const HubPage: React.FC = () => {
                     const Icon = iconOf(m.icon);
                     const price = data?.pricing?.[m.key]?.monthlyCents;
                     return (
-                      <div key={m.key} className="bg-slate-800/50 border border-dashed border-slate-700 rounded-2xl p-5">
+                      <div key={m.key} className="bg-slate-800/50 backdrop-blur-sm border border-dashed border-slate-700 rounded-2xl p-5">
                         <div className="w-11 h-11 rounded-xl bg-slate-700/40 flex items-center justify-center mb-3">
                           <Icon className="w-5 h-5 text-slate-400" />
                         </div>
