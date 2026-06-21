@@ -42,9 +42,11 @@ const RoutinesPage = React.lazy(() => import('./pages/RoutinesPage'));
 const MeetingsPage = React.lazy(() => import('./pages/MeetingsPage'));
 const ContentStudioPage = React.lazy(() => import('./pages/ContentStudioPage'));
 const ShortLinksPage = React.lazy(() => import('./pages/ShortLinksPage'));
+const LegalShieldPage = React.lazy(() => import('./pages/LegalShieldPage'));
 
 // Import Icons for Tabs
-import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays, Sparkles, Link2 } from 'lucide-react';
+import { Bot, ShieldCheck, Brain, Cpu, Inbox, FlaskConical, CreditCard, Target, RefreshCw, CalendarDays, Sparkles, Link2, ShieldAlert } from 'lucide-react';
+import { useActiveModules } from './hooks/useActiveModules';
 import {
     BarChartIcon, CalculatorIcon, ClipboardListIcon, SparklesIcon,
     UsersGroupIcon, CurrencyDollarIcon, AcademicCapIcon, CogIcon,
@@ -55,13 +57,23 @@ const AdminApp: React.FC = () => {
     const { headerLogo } = useSettings();
     const { userType } = useAuth();
     const { permissions, config, isLoading } = useProfilePermissions();
+    // Add-ons avulsos (ex.: Blindagem) ativam por entitlement, não por plano —
+    // fonte autoritativa é /api/v1/modules/me (.active).
+    const { active: activeModules } = useActiveModules();
 
     // Filtro de abas por perfil e funcionalidades habilitadas
     const tabs = React.useMemo(() => {
         if (!permissions || !userType) return [];
-        
+
         // 'Candidato de Partido' opera como coordenador na plataforma cortesia.
         const isAdmin = userType === 'Admin' || userType === 'Coordenador' || userType === 'Candidato de Partido';
+
+        // Abas de add-on avulso: independem do tier; dependem do módulo ativo
+        // (entitlement) + perfil de gestão (dados sensíveis).
+        const isManager = userType === 'Admin' || userType === 'Coordenador';
+        const addonTabs: string[] = [];
+        if (isManager && activeModules.includes('legal_shield')) addonTabs.push('Blindagem');
+        const withAddons = (list: string[]) => [...new Set([...list, ...addonTabs])];
 
         // 1. Permissões básicas do perfil
         let allowedTabs = permissions[userType] || ['Dashboard'];
@@ -90,8 +102,8 @@ const AdminApp: React.FC = () => {
 
         // Total (planTier 'completo') ou sem config (VIP/dev) → libera tudo.
         if (!config?.features || config.planTier === 'completo') {
-            if (isAdmin) return FULL_ADMIN;
-            return allowedTabs.length > 0 ? allowedTabs : ['Dashboard'];
+            if (isAdmin) return withAddons(FULL_ADMIN);
+            return withAddons(allowedTabs.length > 0 ? allowedTabs : ['Dashboard']);
         }
 
         // Essencial / Estratégico ('limitado') → gateia TODOS (inclusive Admin) pelos módulos do plano.
@@ -101,8 +113,8 @@ const AdminApp: React.FC = () => {
         });
         allowedTabs = (isAdmin ? FULL_ADMIN : allowedTabs).filter(tab => enabledTabs.includes(tab));
 
-        return allowedTabs.length > 0 ? allowedTabs : ['Dashboard'];
-    }, [userType, permissions, config]);
+        return withAddons(allowedTabs.length > 0 ? allowedTabs : ['Dashboard']);
+    }, [userType, permissions, config, activeModules]);
 
     const iconMap = {
         Dashboard: <BarChartIcon className="h-5 w-5" />,
@@ -134,6 +146,7 @@ const AdminApp: React.FC = () => {
         'Reuniões': <CalendarDays className="h-5 w-5" />,
         'Estúdio': <Sparkles className="h-5 w-5" />,
         'Links Curtos': <Link2 className="h-5 w-5" />,
+        'Blindagem': <ShieldAlert className="h-5 w-5" />,
     };
 
     // Componentes mapeados para as abas (deve seguir a ordem lógica do ALL_TABS para o componente Tabs indexar corretamente)
@@ -167,6 +180,7 @@ const AdminApp: React.FC = () => {
         'Reuniões': <MeetingsPage />,
         'Estúdio': <ContentStudioPage />,
         'Links Curtos': <ShortLinksPage />,
+        'Blindagem': <LegalShieldPage />,
     };
 
     if (isLoading) {

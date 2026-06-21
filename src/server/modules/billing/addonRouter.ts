@@ -17,7 +17,7 @@ import { getPaymentGateway } from './paymentGateway';
 import { audit, actorFromRequest } from '../observability/auditLogger';
 import { MODULES, moduleByKey } from '../../../lib/modules';
 
-const ADDON_KEYS = new Set(MODULES.filter((m) => m.sellable && (m.key === 'cenarios' || m.key === 'inteligencia')).map((m) => m.key));
+const ADDON_KEYS = new Set(MODULES.filter((m) => m.sellable && (m.key === 'cenarios' || m.key === 'inteligencia' || m.key === 'legal_shield')).map((m) => m.key));
 
 export function createAddonRouter(supabase: SupabaseClient): Router {
   const router = Router();
