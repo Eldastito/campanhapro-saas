@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import Card from '../ui/Card';
 import Button from '../ui/Button';
 import { authedFetch } from '../../lib/authedFetch';
-import { FileText, Plus, Trash2, Save, ArrowLeft, X } from 'lucide-react';
+import { FileText, Plus, Trash2, Save, ArrowLeft, X, PenLine, Download } from 'lucide-react';
+import SignaturePad from './SignaturePad';
+import { generateContractPdf } from '../../lib/contractPdf';
 
 /**
  * Aba "Contratos" do Supreme Control — contratos de prestação de serviço /
@@ -16,15 +18,17 @@ import { FileText, Plus, Trash2, Save, ArrowLeft, X } from 'lucide-react';
 interface Party { razaoSocial?: string; cnpj?: string; endereco?: string; cidade?: string; estado?: string; cep?: string; representante?: string; email?: string; telefone?: string; }
 interface Person { nome?: string; papel?: string; cpf?: string; email?: string; }
 interface Clause { titulo?: string; texto?: string; }
+interface Signature { nome?: string; papel?: string; imageDataUrl?: string; signedAt?: string; }
 interface ContractFields { objeto?: string; valor?: string; vigenciaInicio?: string; vigenciaFim?: string; foro?: string; observacoes?: string; }
 interface Contract {
   id?: string; title: string; status?: string;
   provider: Party; client: Party; people: Person[]; clauses: Clause[]; fields: ContractFields;
+  signatures: Signature[];
   createdAt?: string; updatedAt?: string;
 }
 
 const emptyContract: Contract = {
-  title: '', status: 'draft', provider: {}, client: {}, people: [], clauses: [], fields: {},
+  title: '', status: 'draft', provider: {}, client: {}, people: [], clauses: [], fields: {}, signatures: [],
 };
 
 const PARTY_FIELDS: { key: keyof Party; label: string }[] = [
@@ -61,6 +65,8 @@ const ContractsTab: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Contract | null>(null);
   const [saving, setSaving] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const [signSaving, setSignSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -78,8 +84,23 @@ const ContractsTab: React.FC = () => {
     const r = await authedFetch(`/api/v1/supreme/contracts/${id}`);
     if (r.ok) {
       const c = (await r.json()).contract;
-      setEditing({ ...emptyContract, ...c, provider: c.provider || {}, client: c.client || {}, people: c.people || [], clauses: c.clauses || [], fields: c.fields || {} });
+      setEditing({ ...emptyContract, ...c, provider: c.provider || {}, client: c.client || {}, people: c.people || [], clauses: c.clauses || [], fields: c.fields || {}, signatures: c.signatures || [] });
     }
+  };
+
+  const handleSign = async (imageDataUrl: string, meta: { nome: string; papel: string }) => {
+    if (!editing?.id) return;
+    setSignSaving(true); setError(null);
+    try {
+      const r = await authedFetch(`/api/v1/supreme/contracts/${editing.id}/sign`, {
+        method: 'POST', body: JSON.stringify({ nome: meta.nome, papel: meta.papel, imageDataUrl }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || `HTTP ${r.status}`);
+      const c = (await r.json()).contract;
+      setEditing((e) => e && ({ ...e, signatures: c.signatures || [], status: c.status }));
+      setSigning(false);
+    } catch (e: any) { setError(e.message || 'Falha ao salvar assinatura.'); }
+    finally { setSignSaving(false); }
   };
 
   const save = async () => {
@@ -126,12 +147,16 @@ const ContractsTab: React.FC = () => {
   // ===================== EDITOR =====================
   if (editing) {
     return (
+      <>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button onClick={() => setEditing(null)} className="text-sm text-slate-400 hover:text-white flex items-center gap-1.5">
             <ArrowLeft className="w-4 h-4" /> Voltar
           </button>
           <div className="flex items-center gap-2">
+            <Button onClick={() => generateContractPdf(editing)} className="bg-slate-700 hover:bg-slate-600 flex items-center gap-2">
+              <Download className="w-4 h-4" /> Gerar PDF
+            </Button>
             <Button onClick={save} disabled={saving} className="bg-emerald-600 hover:bg-emerald-500 flex items-center gap-2">
               <Save className="w-4 h-4" /> {saving ? 'Salvando…' : 'Salvar contrato'}
             </Button>
@@ -214,8 +239,33 @@ const ContractsTab: React.FC = () => {
           ))}
         </Card>
 
-        <p className="text-[10px] text-slate-600">Geração de PDF e coleta de assinatura na tela serão adicionadas na próxima etapa.</p>
+        {/* Assinaturas */}
+        <Card className="bg-slate-900 border-white/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-black uppercase tracking-widest text-emerald-400">Assinaturas</h4>
+            {editing.id ? (
+              <Button onClick={() => setSigning(true)} className="h-8 text-xs flex items-center gap-1.5"><PenLine className="w-3.5 h-3.5" /> Coletar assinatura</Button>
+            ) : (
+              <span className="text-[11px] text-slate-500">Salve o contrato para coletar assinaturas.</span>
+            )}
+          </div>
+          {editing.signatures.length === 0 && <p className="text-xs text-slate-500">Nenhuma assinatura coletada.</p>}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {editing.signatures.map((s, i) => (
+              <div key={i} className="bg-slate-950 border border-white/5 rounded-lg p-2">
+                {s.imageDataUrl && <img src={s.imageDataUrl} alt="assinatura" className="h-16 bg-white rounded" />}
+                <p className="text-[11px] text-slate-300 mt-1">{s.nome || 'Assinante'}{s.papel ? ` — ${s.papel}` : ''}</p>
+                <p className="text-[10px] text-slate-600">{s.signedAt ? new Date(s.signedAt).toLocaleString('pt-BR') : ''}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <p className="text-[10px] text-slate-600">A assinatura desenhada na tela é embutida no PDF (assinatura eletrônica simples, Lei 14.063). Para validade plena, considere certificado ICP-Brasil/gov.br.</p>
       </div>
+
+      {signing && <SignaturePad onSave={handleSign} onCancel={() => setSigning(false)} saving={signSaving} />}
+      </>
     );
   }
 

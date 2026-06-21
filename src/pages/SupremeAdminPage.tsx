@@ -189,7 +189,11 @@ const SupremeAdminPage: React.FC = () => {
             if (usersError) throw usersError;
             
             setGlobalUsers(allUsers as AuthenticatedUser[]);
-            setCampaigns((allUsers as AuthenticatedUser[]).filter(u => u.type === 'Admin'));
+            // Só campanhas reais. Presidente de partido é type='Admin' mas SEM
+            // campaignId (ele é gerido na aba Partidos, não aqui) — incluí-lo
+            // gerava linha com CID vazio e tentativa de aplicar plano de campanha
+            // num partido. Quem não tem campaignId não é campanha.
+            setCampaigns((allUsers as AuthenticatedUser[]).filter(u => u.type === 'Admin' && u.campaignId));
 
             // 2. Fetch Configs
             const { data: configsData, error: configsError } = await supabase.from('campaign_configs').select('*');

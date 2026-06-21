@@ -73,6 +73,24 @@ describe('contractsRouter', () => {
     assert.equal(missing.status, 404);
   });
 
+  test('POST :id/sign anexa assinatura e marca como signed', async () => {
+    const supabase = createMockSupabase({ contracts: [{ id: 'c1', title: 'A', status: 'draft', signatures: [] }] });
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    const r = await req(buildApp(supabase), 'POST', '/api/v1/supreme/contracts/c1/sign', { nome: 'Ronald', papel: 'Contratante', imageDataUrl: png });
+    assert.equal(r.status, 200);
+    const stored = (supabase as any)._store.get('contracts')[0];
+    assert.equal(stored.status, 'signed');
+    assert.equal(stored.signatures.length, 1);
+    assert.equal(stored.signatures[0].nome, 'Ronald');
+    assert.equal(stored.signatures[0].imageDataUrl, png);
+  });
+
+  test('POST :id/sign rejeita imagem inválida', async () => {
+    const supabase = createMockSupabase({ contracts: [{ id: 'c1', title: 'A', signatures: [] }] });
+    const r = await req(buildApp(supabase), 'POST', '/api/v1/supreme/contracts/c1/sign', { imageDataUrl: 'not-an-image' });
+    assert.equal(r.status, 400);
+  });
+
   test('PUT edita e DELETE remove', async () => {
     const supabase = createMockSupabase({ contracts: [{ id: 'c1', title: 'A', status: 'draft' }] });
     const upd = await req(buildApp(supabase), 'PUT', '/api/v1/supreme/contracts/c1', { status: 'final' });
