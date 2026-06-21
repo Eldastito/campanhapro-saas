@@ -125,8 +125,8 @@ describe('supreme party-billing', () => {
     assert.equal(p.presidentName, 'Ronald Azaro');
     assert.equal(p.presidentEmail, 'ronald@x.com');
     assert.equal(p.candidatesCount, 2);
-    assert.equal(p.valorRecebido, 1500); // repasses internos (não é cobrança)
-    assert.equal(p.valorAlocado, 500);
+    assert.equal(p.valorRecebido, undefined); // repasses NÃO são mais expostos
+    assert.equal(p.valorAlocado, undefined);
     assert.equal(p.courtesy, true);
     assert.equal(p.courtesyNote, 'Validação');
   });
