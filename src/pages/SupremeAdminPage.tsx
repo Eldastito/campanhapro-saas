@@ -18,7 +18,6 @@ import PartiesTab from '../components/supreme/PartiesTab';
 import ModulesTab from './supreme/ModulesTab';
 import SupportSessionsTab from './supreme/SupportSessionsTab';
 import TseKeysPanel from '../components/supreme/TseKeysPanel';
-import PartyBillingPanel from '../components/billing/PartyBillingPanel';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -121,6 +120,7 @@ const SupremeAdminPage: React.FC = () => {
     const [campaigns, setCampaigns] = useState<AuthenticatedUser[]>([]);
     const [campaignConfigs, setCampaignConfigs] = useState<Record<string, CampaignConfig>>({});
     const [plans, setPlans] = useState<any[]>([]);
+    const [partidoPriceCents, setPartidoPriceCents] = useState<number>(300000);
     
     // Global Users Data
     const [globalUsers, setGlobalUsers] = useState<AuthenticatedUser[]>([]);
@@ -464,6 +464,7 @@ const SupremeAdminPage: React.FC = () => {
         if (activeTab === 'audit' && auditLogs.length === 0) fetchAudit();
         if (activeTab === 'platform' && plans.length === 0) {
             supremeFetch('/plans').then(r => setPlans(r?.plans || [])).catch(e => console.warn('[Supreme] plans fetch:', e));
+            supremeFetch('/party-billing').then(r => setPartidoPriceCents(r?.price?.monthlyCents ?? 300000)).catch(() => {});
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab]);
@@ -1041,7 +1042,8 @@ const SupremeAdminPage: React.FC = () => {
                                             return (
                                                 <tr key={c.id} className="hover:bg-white/5 transition-colors group">
                                                     <td className="px-6 py-5">
-                                                        <p className="font-black text-white text-sm tracking-tight">{c.name}</p>
+                                                        <p className="font-black text-white text-sm tracking-tight">{c.name || c.email}</p>
+                                                        <p className="text-[10px] text-slate-400">{c.email}</p>
                                                         <p className="text-[10px] text-slate-500 font-mono italic">CID: {c.campaignId?.substring(0, 12)}...</p>
                                                     </td>
                                                     <td className="px-6 py-5">
@@ -1798,9 +1800,6 @@ const SupremeAdminPage: React.FC = () => {
                                 )}
                             </Card>
 
-                            {/* Plano do app Partido — produto próprio, cobrança recorrente + cortesia */}
-                            <PartyBillingPanel />
-
                             {/* Atalho para o Form Builder (a antiga seção estática virou a aba Formulários) */}
                             <Card className="bg-slate-900 border-white/5 p-6 space-y-3">
                                 <div className="flex items-center gap-3 border-b border-white/5 pb-4">
@@ -1856,8 +1855,26 @@ const SupremeAdminPage: React.FC = () => {
                                             </div>
                                         </div>
                                     ))}
+
+                                    {/* Plano do App Partido — produto próprio (module_prices), separado dos planos de campanha */}
+                                    <div className="p-4 bg-slate-950 rounded-xl border border-violet-500/20 flex flex-col">
+                                        <div className="flex items-baseline justify-between">
+                                            <p className="text-sm font-black text-white">Plano Partido</p>
+                                            <p className="text-[10px] text-violet-300/70 font-mono">app Partido</p>
+                                        </div>
+                                        <p className="text-2xl font-black text-violet-300 mt-1">
+                                            R$ {((partidoPriceCents ?? 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                                            <span className="text-[10px] text-slate-500 font-medium">/mês</span>
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-1">Assinatura do presidente do partido. Cobrança e cortesia na aba <strong className="text-violet-300">Partidos</strong>.</p>
+                                        <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-white/5">
+                                            {['Painel do Presidente', 'Candidatos', 'Repasses', 'Comprovação', 'Telão'].map((f) => (
+                                                <span key={f} className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20">{f}</span>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
-                                <p className="text-[10px] text-slate-600">Preços e módulos vêm da tabela <code>plans</code> (fonte de verdade do faturamento). Cada plano superior inclui os módulos dos inferiores.</p>
+                                <p className="text-[10px] text-slate-600">Preços e módulos vêm da tabela <code>plans</code> (fonte de verdade do faturamento). Cada plano superior inclui os módulos dos inferiores. O <strong className="text-violet-300">Plano Partido</strong> é produto próprio (<code>module_prices</code>), gerido na aba Partidos.</p>
                             </Card>
 
                             <TseKeysPanel />

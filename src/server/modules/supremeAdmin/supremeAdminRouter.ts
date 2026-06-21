@@ -1417,32 +1417,68 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   });
 
   // ---------- PARTIDOS (visão financeira do Supreme — só você enxerga) ----------
-  // Lista todos os partidos com plano, billingNote (valor combinado fora do Asaas),
-  // contagem de candidatos e somas de valorRecebido/valorAlocado. Front renderiza
-  // como tabela + receita mensal estimada.
+  // Lista os partidos com: presidente (nome/e-mail), preço do Plano Partido
+  // (fonte de verdade = module_prices('partido')), status de cobrança/cortesia
+  // (module_subscriptions), nº de candidatos e somas de repasses internos
+  // (party_candidates.valorRecebido/valorAlocado — NÃO é cobrança do plano).
   router.get('/parties', async (_req: Request, res: Response) => {
     try {
       const { data: parties, error } = await supabaseAdmin
         .from('parties')
-        .select('id, name, plan, status, "billingNote", "createdAt"')
+        .select('id, name, plan, status, "billingNote", "presidentId", "createdAt"')
         .order('createdAt', { ascending: false });
       if (error) throw error;
+      const list = (parties || []) as any[];
 
-      const out = await Promise.all((parties || []).map(async (p: any) => {
+      // Preço base do Plano Partido (fallback R$3.000 se a seed não foi aplicada).
+      const { data: priceRow } = await supabaseAdmin
+        .from('module_prices').select('"monthlyCents"').eq('moduleKey', 'partido').maybeSingle();
+      const planMonthlyCents = priceRow?.monthlyCents ?? 300000;
+
+      // Presidentes (nome/e-mail) e assinaturas de módulo (cortesia/status).
+      const presidentIds = [...new Set(list.map((p) => p.presidentId).filter(Boolean))];
+      const partyIds = list.map((p) => p.id);
+      const [usersRes, subsRes] = await Promise.all([
+        presidentIds.length
+          ? supabaseAdmin.from('users').select('id, name, email').in('id', presidentIds)
+          : Promise.resolve({ data: [] as any[] }),
+        partyIds.length
+          ? supabaseAdmin.from('module_subscriptions').select('*')
+              .eq('tenantKind', 'party').eq('moduleKey', 'partido').in('tenantId', partyIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const userMap = new Map((usersRes.data ?? []).map((u: any) => [u.id, u]));
+      const subMap = new Map<string, any>();
+      for (const s of (subsRes.data ?? []) as any[]) {
+        const cur = subMap.get(s.tenantId);
+        if (!cur || (cur.status === 'canceled' && s.status !== 'canceled')) subMap.set(s.tenantId, s);
+      }
+
+      const out = await Promise.all(list.map(async (p: any) => {
         const [{ count: candidates }, { data: sums }] = await Promise.all([
           supabaseAdmin.from('party_candidates').select('id', { count: 'exact', head: true }).eq('partyId', p.id),
           supabaseAdmin.from('party_candidates').select('"valorRecebido", "valorAlocado"').eq('partyId', p.id),
         ]);
         const valorRecebido = (sums || []).reduce((s: number, r: any) => s + Number(r.valorRecebido || 0), 0);
         const valorAlocado = (sums || []).reduce((s: number, r: any) => s + Number(r.valorAlocado || 0), 0);
-        return { ...p, candidatesCount: candidates || 0, valorRecebido, valorAlocado };
+        const u: any = userMap.get(p.presidentId);
+        const sub: any = subMap.get(p.id);
+        return {
+          id: p.id, name: p.name, status: p.status, billingNote: p.billingNote, createdAt: p.createdAt,
+          presidentName: u?.name ?? null, presidentEmail: u?.email ?? null,
+          candidatesCount: candidates || 0, valorRecebido, valorAlocado,
+          courtesy: !!sub?.metadata?.courtesy,
+          billingStatus: sub?.status ?? null,
+          courtesyNote: sub?.metadata?.note ?? null,
+        };
       }));
-      return res.json({ parties: out });
+      return res.json({ planMonthlyCents, parties: out });
     } catch (err: any) {
       console.error('[supreme] list parties:', err);
       return res.status(500).json({ error: err.message });
     }
   });
+
 
   // Edita a billingNote (texto livre — ex.: "Plano Partido — R$ 2.500/mês,
   // 10ª parcela pendente"). Único campo editável daqui — mudanças estruturais
