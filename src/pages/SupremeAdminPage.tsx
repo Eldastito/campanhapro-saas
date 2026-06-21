@@ -1399,13 +1399,15 @@ const SupremeAdminPage: React.FC = () => {
                             {/* ===== DEMONSTRATIVO DE RESULTADO (P&L) ===== */}
                             <div>
                                 <h3 className="text-lg font-black text-white mb-1 uppercase">Demonstrativo de Resultado (P&L)</h3>
-                                <p className="text-xs text-slate-500 uppercase tracking-widest font-mono mb-4">Receita − Custos = Lucro Líquido (mensal)</p>
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                <p className="text-xs text-slate-500 uppercase tracking-widest font-mono mb-4">Receita − Custos − Imposto = Lucro após impostos (mensal)</p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                                     {[
                                         { label: 'Receita (MRR)', val: `R$ ${((financial?.profitLoss?.receitaCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-emerald-400' },
                                         { label: 'Custos Fixos', val: `R$ ${((financial?.profitLoss?.custosFixosCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-rose-400' },
                                         { label: 'Custo IA (var.)', val: `R$ ${((financial?.profitLoss?.custoIaVariavelCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-amber-400' },
-                                        { label: 'Lucro Líquido', val: `R$ ${((financial?.profitLoss?.lucroLiquidoCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: (financial?.profitLoss?.lucroLiquidoCents ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+                                        { label: 'Lucro antes imp.', val: `R$ ${((financial?.profitLoss?.lucroLiquidoCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: (financial?.profitLoss?.lucroLiquidoCents ?? 0) >= 0 ? 'text-slate-300' : 'text-rose-400' },
+                                        { label: 'Imposto (DAS)', val: `R$ ${((financial?.profitLoss?.dasMesCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-orange-400' },
+                                        { label: 'Lucro após imp.', val: `R$ ${((financial?.profitLoss?.lucroAposImpostosCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: (financial?.profitLoss?.lucroAposImpostosCents ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400' },
                                         { label: 'Margem', val: `${financial?.profitLoss?.margemPct ?? 0}%`, color: 'text-sky-400' },
                                     ].map((s, i) => (
                                         <Card key={i} className="bg-slate-900/50 border-white/5 p-4">
@@ -1414,7 +1416,7 @@ const SupremeAdminPage: React.FC = () => {
                                         </Card>
                                     ))}
                                 </div>
-                                <p className="text-[10px] text-slate-600 mt-2">Custo IA convertido a US$ 1 = R$ {financial?.usdBrlRate ?? '5.40'} (consumo dos últimos 30 dias).</p>
+                                <p className="text-[10px] text-slate-600 mt-2">Custo IA convertido a US$ 1 = R$ {financial?.usdBrlRate ?? '5.40'} (consumo dos últimos 30 dias). Imposto (DAS) é estimativa do Simples Nacional sobre a receita total (planos + módulos/partidos); a guia oficial é emitida pelo contador.</p>
                             </div>
 
                             {/* ===== KPIs DE SAÚDE DO NEGÓCIO (CAC/LTV/ROI/Equilíbrio) ===== */}
