@@ -84,7 +84,8 @@ export const MODULES: ModuleDef[] = [
     description: 'Copiloto contábil + jurídico: audita arrecadação/gastos vs TSE, gera parecer de risco e tese de defesa com base na jurisprudência.',
     icon: 'ShieldAlert',
     appRoute: '/app',
-    salesRoute: '/produtos/legal-shield',
+    // slug == key (ProductPage indexa COPY/moduleByKey pelo slug da URL).
+    salesRoute: '/produtos/legal_shield',
     sellable: true,
   },
 ];

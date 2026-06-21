@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
-import { LineChart, Brain, CheckCircle, ArrowRight, Sparkles } from 'lucide-react';
+import { LineChart, Brain, CheckCircle, ArrowRight, Sparkles, ShieldAlert } from 'lucide-react';
 import { moduleByKey } from '../lib/modules';
 import { useAuth } from '../contexts/AuthContext';
 import { authedFetch } from '../lib/authedFetch';
@@ -44,6 +44,19 @@ const COPY: Record<string, ProductCopy> = {
     icon: Brain,
     accent: 'from-violet-400 to-fuchsia-500',
     requires: 'Requer plano Essencial ou superior. A leitura tática cruza dados de visitas e CRM.',
+  },
+  legal_shield: {
+    pitch: 'Copiloto contábil + jurídico que blinda a campanha ANTES da prestação de contas. Audita arrecadação e gastos contra as regras do TSE, aponta o risco e monta a tese de defesa.',
+    bullets: [
+      'Auditoria de receitas e despesas contra as regras do TSE/SPCE',
+      'Detecção de fonte vedada, doação acima do limite e gasto sem comprovação',
+      'Parecer com score de risco (baixo → crítico) por transação',
+      'Tese de defesa com precedente favorável da jurisprudência oficial',
+      'Base de regras atualizável (Resoluções TSE/TRE, manuais SPCE)',
+    ],
+    icon: ShieldAlert,
+    accent: 'from-indigo-400 to-blue-600',
+    requires: 'Requer plano pago ativo. É um copiloto de apoio — não substitui o responsável técnico (contador/advogado).',
   },
 };
 
