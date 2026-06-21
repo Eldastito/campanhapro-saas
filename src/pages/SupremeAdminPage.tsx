@@ -18,6 +18,7 @@ import PartiesTab from '../components/supreme/PartiesTab';
 import ModulesTab from './supreme/ModulesTab';
 import SupportSessionsTab from './supreme/SupportSessionsTab';
 import TseKeysPanel from '../components/supreme/TseKeysPanel';
+import PartyBillingPanel from '../components/billing/PartyBillingPanel';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
     Settings, Plus, Search, Lock, Unlock,
@@ -1796,6 +1797,9 @@ const SupremeAdminPage: React.FC = () => {
                                     </div>
                                 )}
                             </Card>
+
+                            {/* Plano do app Partido — produto próprio, cobrança recorrente + cortesia */}
+                            <PartyBillingPanel />
 
                             {/* Atalho para o Form Builder (a antiga seção estática virou a aba Formulários) */}
                             <Card className="bg-slate-900 border-white/5 p-6 space-y-3">

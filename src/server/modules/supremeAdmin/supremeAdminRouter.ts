@@ -205,6 +205,139 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
     }
   });
 
+  // ── Plano do app Partido (produto próprio, tenant = partido) ──────────────
+  // Preço base em module_prices('partido') + cobrança por partido em
+  // module_subscriptions(tenantKind='party'). "Cortesia" = acesso mantido sem
+  // cobrança (controle financeiro interno; invisível pro usuário). NÃO bloqueia
+  // acesso — enforcement é etapa futura.
+  const PARTIDO_KEY = 'partido';
+  const PARTIDO_DEFAULT_CENTS = 300000;
+  const LIVE = ['pending_payment', 'active', 'past_due'];
+
+  router.get('/party-billing', async (_req: Request, res: Response) => {
+    try {
+      const { data: priceRow } = await supabaseAdmin
+        .from('module_prices').select('"moduleKey","monthlyCents",active')
+        .eq('moduleKey', PARTIDO_KEY).maybeSingle();
+
+      const { data: parties } = await supabaseAdmin
+        .from('parties').select('id, name, "presidentId", "createdAt"')
+        .order('createdAt', { ascending: false }).limit(1000);
+      const list = (parties ?? []) as any[];
+
+      const presidentIds = [...new Set(list.map((p) => p.presidentId).filter(Boolean))];
+      const usersRes = presidentIds.length
+        ? await supabaseAdmin.from('users').select('id, email, name').in('id', presidentIds)
+        : { data: [] as any[] };
+      const userMap = new Map((usersRes.data ?? []).map((u: any) => [u.id, u]));
+
+      const partyIds = list.map((p) => p.id);
+      const subsRes = partyIds.length
+        ? await supabaseAdmin.from('module_subscriptions').select('*')
+            .eq('tenantKind', 'party').eq('moduleKey', PARTIDO_KEY).in('tenantId', partyIds)
+        : { data: [] as any[] };
+      // Prioriza assinatura viva por partido (ignora canceladas se houver viva).
+      const subMap = new Map<string, any>();
+      for (const s of (subsRes.data ?? []) as any[]) {
+        const cur = subMap.get(s.tenantId);
+        if (!cur || (cur.status === 'canceled' && s.status !== 'canceled')) subMap.set(s.tenantId, s);
+      }
+
+      const parties_out = list.map((p) => {
+        const u: any = userMap.get(p.presidentId);
+        const s: any = subMap.get(p.id);
+        return {
+          partyId: p.id, name: p.name,
+          presidentEmail: u?.email ?? null, presidentName: u?.name ?? null,
+          billing: s ? {
+            status: s.status, amountCents: s.amountCents,
+            courtesy: !!s.metadata?.courtesy, note: s.metadata?.note ?? null,
+            provider: s.paymentProvider,
+          } : null,
+        };
+      });
+
+      return res.json({
+        price: {
+          moduleKey: PARTIDO_KEY,
+          monthlyCents: priceRow?.monthlyCents ?? PARTIDO_DEFAULT_CENTS,
+          configured: !!priceRow,
+        },
+        parties: parties_out,
+      });
+    } catch (err: any) {
+      console.error('[supreme] party-billing GET:', err);
+      return res.status(500).json({ error: err?.message || 'party_billing_failed' });
+    }
+  });
+
+  router.put('/party-billing/price', async (req: Request, res: Response) => {
+    const cents = Number(req.body?.monthlyCents);
+    if (!Number.isInteger(cents) || cents < 0 || cents > 100_000_000) {
+      return res.status(400).json({ error: 'invalid_amount' });
+    }
+    const { error } = await supabaseAdmin.from('module_prices').upsert(
+      { moduleKey: PARTIDO_KEY, monthlyCents: cents, active: true, updatedAt: new Date().toISOString() },
+      { onConflict: 'moduleKey' },
+    );
+    if (error) return res.status(500).json({ error: error.message });
+    await audit(supabaseAdmin, {
+      ...actorFromRequest(req), action: 'supreme.party.price_set',
+      resourceType: 'module_price', resourceId: PARTIDO_KEY,
+      severity: 'info', metadata: { monthlyCents: cents },
+    }).catch(() => {});
+    return res.json({ ok: true, monthlyCents: cents });
+  });
+
+  router.post('/party-billing/:partyId/courtesy', async (req: Request, res: Response) => {
+    const partyId = String(req.params.partyId);
+    const courtesy = req.body?.courtesy !== false; // default: marcar cortesia
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 280) : null;
+    const now = new Date().toISOString();
+    try {
+      // Garante a linha de preço (FK module_subscriptions.moduleKey → module_prices).
+      await supabaseAdmin.from('module_prices').upsert(
+        { moduleKey: PARTIDO_KEY, monthlyCents: PARTIDO_DEFAULT_CENTS, active: true },
+        { onConflict: 'moduleKey', ignoreDuplicates: true },
+      );
+
+      const { data: existing } = await supabaseAdmin.from('module_subscriptions')
+        .select('id, metadata').eq('tenantId', partyId).eq('tenantKind', 'party')
+        .eq('moduleKey', PARTIDO_KEY).in('status', LIVE).maybeSingle();
+
+      if (courtesy) {
+        const meta = { ...((existing?.metadata as any) || {}), courtesy: true, note };
+        if (existing) {
+          await supabaseAdmin.from('module_subscriptions').update({
+            status: 'active', paymentProvider: 'comp', amountCents: 0, metadata: meta, updatedAt: now,
+          }).eq('id', existing.id);
+        } else {
+          await supabaseAdmin.from('module_subscriptions').insert({
+            tenantId: partyId, tenantKind: 'party', moduleKey: PARTIDO_KEY,
+            status: 'active', amountCents: 0, paymentProvider: 'comp', metadata: meta,
+          });
+        }
+      } else if (existing) {
+        // Remover cortesia: cancela a linha comp (acesso não muda — sem enforcement).
+        await supabaseAdmin.from('module_subscriptions').update({
+          status: 'canceled',
+          metadata: { ...((existing.metadata as any) || {}), courtesy: false },
+          updatedAt: now,
+        }).eq('id', existing.id);
+      }
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.party.courtesy_set',
+        resourceType: 'party', resourceId: partyId,
+        severity: 'info', metadata: { courtesy, note },
+      }).catch(() => {});
+      return res.json({ ok: true, courtesy });
+    } catch (err: any) {
+      console.error('[supreme] party courtesy:', err);
+      return res.status(500).json({ error: err?.message || 'courtesy_failed' });
+    }
+  });
+
   // Lê a config fiscal (singleton). Fallback seguro se a linha não existir.
   async function loadTaxSettings() {
     const { data } = await supabaseAdmin
