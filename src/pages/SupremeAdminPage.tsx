@@ -17,6 +17,7 @@ import BusinessKpis from '../components/supreme/BusinessKpis';
 import PartiesTab from '../components/supreme/PartiesTab';
 import ModulesTab from './supreme/ModulesTab';
 import SupportSessionsTab from './supreme/SupportSessionsTab';
+import ContractsTab from '../components/supreme/ContractsTab';
 import TseKeysPanel from '../components/supreme/TseKeysPanel';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
@@ -88,7 +89,7 @@ async function supremeFetch(path: string, init?: RequestInit): Promise<any> {
 const SupremeAdminPage: React.FC = () => {
     const { user, logout, sendPasswordReset } = useAuth();
     // Aba ativa persistida na URL (?tab=) → sobrevive a refresh e é compartilhável.
-    const VALID_TABS = ['overview', 'campaigns', 'users', 'platform', 'financial', 'parties', 'modulos', 'suporte', 'audit', 'forms'] as const;
+    const VALID_TABS = ['overview', 'campaigns', 'users', 'platform', 'financial', 'parties', 'modulos', 'suporte', 'audit', 'forms', 'contratos'] as const;
     type SupremeTab = typeof VALID_TABS[number];
     const [activeTab, setActiveTab] = useState<SupremeTab>(() => {
         try {
@@ -120,6 +121,7 @@ const SupremeAdminPage: React.FC = () => {
     const [campaigns, setCampaigns] = useState<AuthenticatedUser[]>([]);
     const [campaignConfigs, setCampaignConfigs] = useState<Record<string, CampaignConfig>>({});
     const [plans, setPlans] = useState<any[]>([]);
+    const [partidoPriceCents, setPartidoPriceCents] = useState<number>(300000);
     
     // Global Users Data
     const [globalUsers, setGlobalUsers] = useState<AuthenticatedUser[]>([]);
@@ -133,6 +135,9 @@ const SupremeAdminPage: React.FC = () => {
     // Financial metrics (F3)
     const [financial, setFinancial] = useState<any | null>(null);
     const [runningLifecycle, setRunningLifecycle] = useState(false);
+    // Criptografia de campos sensíveis legados (CPF/RG/banco/PIX/etc.) em lote.
+    const [migratingEnc, setMigratingEnc] = useState(false);
+    const [encResult, setEncResult] = useState<any | null>(null);
     const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amount: '', currency: 'BRL' });
     const [taxes, setTaxes] = useState<any | null>(null);
     const [taxConfig, setTaxConfig] = useState<any>({ regime: 'simples', anexoOverride: 'auto', cnae: '', usdBrlRate: 5.40 });
@@ -184,7 +189,11 @@ const SupremeAdminPage: React.FC = () => {
             if (usersError) throw usersError;
             
             setGlobalUsers(allUsers as AuthenticatedUser[]);
-            setCampaigns((allUsers as AuthenticatedUser[]).filter(u => u.type === 'Admin'));
+            // Só campanhas reais. Presidente de partido é type='Admin' mas SEM
+            // campaignId (ele é gerido na aba Partidos, não aqui) — incluí-lo
+            // gerava linha com CID vazio e tentativa de aplicar plano de campanha
+            // num partido. Quem não tem campaignId não é campanha.
+            setCampaigns((allUsers as AuthenticatedUser[]).filter(u => u.type === 'Admin' && u.campaignId));
 
             // 2. Fetch Configs
             const { data: configsData, error: configsError } = await supabase.from('campaign_configs').select('*');
@@ -460,6 +469,7 @@ const SupremeAdminPage: React.FC = () => {
         if (activeTab === 'audit' && auditLogs.length === 0) fetchAudit();
         if (activeTab === 'platform' && plans.length === 0) {
             supremeFetch('/plans').then(r => setPlans(r?.plans || [])).catch(e => console.warn('[Supreme] plans fetch:', e));
+            supremeFetch('/party-billing').then(r => setPartidoPriceCents(r?.price?.monthlyCents ?? 300000)).catch(() => {});
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab]);
@@ -570,6 +580,20 @@ const SupremeAdminPage: React.FC = () => {
         }
     };
 
+    const handleEncryptMigrateAll = async () => {
+        if (!confirm('Cifrar dados sensíveis legados (CPF, RG, título, banco, PIX, doc. do doador, CPF/CNPJ do candidato) em TODAS as campanhas?\n\nÉ seguro rodar mais de uma vez (idempotente). Requer FIELD_ENCRYPTION_KEY configurada no servidor.')) return;
+        setMigratingEnc(true);
+        setEncResult(null);
+        try {
+            const r = await supremeFetch('/encrypt-migrate-all', { method: 'POST' });
+            setEncResult(r?.summary ?? {});
+        } catch (e: any) {
+            alert(`Erro na migração: ${e.message || 'desconhecido'}`);
+        } finally {
+            setMigratingEnc(false);
+        }
+    };
+
     const handleResetPassword = async (email: string) => {
         try {
             await sendPasswordReset(email);
@@ -671,6 +695,12 @@ const SupremeAdminPage: React.FC = () => {
                             🧩 Módulos
                         </button>
                         <button
+                            onClick={() => setActiveTab('contratos')}
+                            className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'contratos' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            📄 Contratos
+                        </button>
+                        <button
                             onClick={() => setActiveTab('suporte')}
                             className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'suporte' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
                         >
@@ -725,9 +755,11 @@ const SupremeAdminPage: React.FC = () => {
                                     className="bg-slate-900 border border-white/10 rounded-lg px-4 py-2 text-sm outline-none text-slate-200"
                                 >
                                     <option value="all">🌐 Toda a plataforma (visão global)</option>
-                                    {campaigns.map((c) => (
+                                    {/* Só campanhas reais: presidentes de partido (sem campaignId,
+                                        ex.: Ronald) não são campanha e não entram no filtro. */}
+                                    {campaigns.filter((c) => c.campaignId).map((c) => (
                                         <option key={c.campaignId} value={c.campaignId || ''}>
-                                            {c.name} {c.campaignId ? `(${c.campaignId.substring(0, 8)})` : ''}
+                                            {c.name} ({c.campaignId!.substring(0, 8)})
                                         </option>
                                     ))}
                                 </select>
@@ -1023,7 +1055,8 @@ const SupremeAdminPage: React.FC = () => {
                                             return (
                                                 <tr key={c.id} className="hover:bg-white/5 transition-colors group">
                                                     <td className="px-6 py-5">
-                                                        <p className="font-black text-white text-sm tracking-tight">{c.name}</p>
+                                                        <p className="font-black text-white text-sm tracking-tight">{c.name || c.email}</p>
+                                                        <p className="text-[10px] text-slate-400">{c.email}</p>
                                                         <p className="text-[10px] text-slate-500 font-mono italic">CID: {c.campaignId?.substring(0, 12)}...</p>
                                                     </td>
                                                     <td className="px-6 py-5">
@@ -1377,13 +1410,15 @@ const SupremeAdminPage: React.FC = () => {
                             {/* ===== DEMONSTRATIVO DE RESULTADO (P&L) ===== */}
                             <div>
                                 <h3 className="text-lg font-black text-white mb-1 uppercase">Demonstrativo de Resultado (P&L)</h3>
-                                <p className="text-xs text-slate-500 uppercase tracking-widest font-mono mb-4">Receita − Custos = Lucro Líquido (mensal)</p>
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                <p className="text-xs text-slate-500 uppercase tracking-widest font-mono mb-4">Receita − Custos − Imposto = Lucro após impostos (mensal)</p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
                                     {[
                                         { label: 'Receita (MRR)', val: `R$ ${((financial?.profitLoss?.receitaCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-emerald-400' },
                                         { label: 'Custos Fixos', val: `R$ ${((financial?.profitLoss?.custosFixosCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-rose-400' },
                                         { label: 'Custo IA (var.)', val: `R$ ${((financial?.profitLoss?.custoIaVariavelCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-amber-400' },
-                                        { label: 'Lucro Líquido', val: `R$ ${((financial?.profitLoss?.lucroLiquidoCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: (financial?.profitLoss?.lucroLiquidoCents ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+                                        { label: 'Lucro antes imp.', val: `R$ ${((financial?.profitLoss?.lucroLiquidoCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: (financial?.profitLoss?.lucroLiquidoCents ?? 0) >= 0 ? 'text-slate-300' : 'text-rose-400' },
+                                        { label: 'Imposto (DAS)', val: `R$ ${((financial?.profitLoss?.dasMesCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: 'text-orange-400' },
+                                        { label: 'Lucro após imp.', val: `R$ ${((financial?.profitLoss?.lucroAposImpostosCents ?? 0)/100).toLocaleString('pt-BR', {minimumFractionDigits:2})}`, color: (financial?.profitLoss?.lucroAposImpostosCents ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400' },
                                         { label: 'Margem', val: `${financial?.profitLoss?.margemPct ?? 0}%`, color: 'text-sky-400' },
                                     ].map((s, i) => (
                                         <Card key={i} className="bg-slate-900/50 border-white/5 p-4">
@@ -1392,7 +1427,7 @@ const SupremeAdminPage: React.FC = () => {
                                         </Card>
                                     ))}
                                 </div>
-                                <p className="text-[10px] text-slate-600 mt-2">Custo IA convertido a US$ 1 = R$ {financial?.usdBrlRate ?? '5.40'} (consumo dos últimos 30 dias).</p>
+                                <p className="text-[10px] text-slate-600 mt-2">Custo IA convertido a US$ 1 = R$ {financial?.usdBrlRate ?? '5.40'} (consumo dos últimos 30 dias). Imposto (DAS) é estimativa do Simples Nacional sobre a receita total (planos + módulos/partidos); a guia oficial é emitida pelo contador.</p>
                             </div>
 
                             {/* ===== KPIs DE SAÚDE DO NEGÓCIO (CAC/LTV/ROI/Equilíbrio) ===== */}
@@ -1652,6 +1687,8 @@ const SupremeAdminPage: React.FC = () => {
 
                     {activeTab === 'modulos' && <ModulesTab />}
 
+                    {activeTab === 'contratos' && <ContractsTab />}
+
                     {activeTab === 'suporte' && <SupportSessionsTab />}
 
                     {activeTab === 'audit' && (
@@ -1751,6 +1788,35 @@ const SupremeAdminPage: React.FC = () => {
                             animate={{ opacity: 1 }}
                             className="space-y-8"
                         >
+                            {/* Segurança — criptografia de campos sensíveis em repouso */}
+                            <Card className="bg-slate-900 border-white/5 p-6 space-y-3">
+                                <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                                    <Lock className="w-6 h-6 text-emerald-400" />
+                                    <h3 className="font-bold text-white uppercase tracking-widest text-sm">Criptografia de Dados Sensíveis</h3>
+                                </div>
+                                <p className="text-xs text-slate-400 leading-relaxed">
+                                    Cifra em repouso (AES-256-GCM) os campos legados em texto puro de <strong className="text-slate-200">todas as campanhas</strong>: CPF, RG, título de eleitor, dados bancários/PIX, documento do doador e CPF/CNPJ do candidato. Dados novos já entram cifrados automaticamente — isto é só para os antigos. É <strong className="text-emerald-300">idempotente</strong> (pode rodar de novo sem dano).
+                                </p>
+                                <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                                    Requer <code className="font-mono">FIELD_ENCRYPTION_KEY</code> configurada no servidor.
+                                </p>
+                                <Button onClick={handleEncryptMigrateAll} disabled={migratingEnc} className="bg-emerald-600 hover:bg-emerald-500 flex items-center gap-2 h-9 text-xs">
+                                    <Lock className={`w-4 h-4 ${migratingEnc ? 'animate-pulse' : ''}`} />
+                                    {migratingEnc ? 'Cifrando…' : 'Cifrar dados legados (todas as campanhas)'}
+                                </Button>
+                                {encResult && (
+                                    <div className="mt-2 p-3 bg-slate-950 rounded-lg border border-emerald-500/20 text-[11px] text-slate-300 space-y-1">
+                                        <p className="text-emerald-400 font-bold">Concluído ✓</p>
+                                        {['incomes', 'team_members', 'settings'].map((t) => (
+                                            <p key={t}>
+                                                <span className="text-slate-500 font-mono">{t}:</span>{' '}
+                                                {encResult[t]?.migrated ?? 0} cifrados de {encResult[t]?.scanned ?? 0} verificados
+                                            </p>
+                                        ))}
+                                    </div>
+                                )}
+                            </Card>
+
                             {/* Atalho para o Form Builder (a antiga seção estática virou a aba Formulários) */}
                             <Card className="bg-slate-900 border-white/5 p-6 space-y-3">
                                 <div className="flex items-center gap-3 border-b border-white/5 pb-4">
@@ -1806,8 +1872,26 @@ const SupremeAdminPage: React.FC = () => {
                                             </div>
                                         </div>
                                     ))}
+
+                                    {/* Plano do App Partido — produto próprio (module_prices), separado dos planos de campanha */}
+                                    <div className="p-4 bg-slate-950 rounded-xl border border-violet-500/20 flex flex-col">
+                                        <div className="flex items-baseline justify-between">
+                                            <p className="text-sm font-black text-white">Plano Partido</p>
+                                            <p className="text-[10px] text-violet-300/70 font-mono">app Partido</p>
+                                        </div>
+                                        <p className="text-2xl font-black text-violet-300 mt-1">
+                                            R$ {((partidoPriceCents ?? 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                                            <span className="text-[10px] text-slate-500 font-medium">/mês</span>
+                                        </p>
+                                        <p className="text-[10px] text-slate-500 mt-1">Assinatura do presidente do partido. Cobrança e cortesia na aba <strong className="text-violet-300">Partidos</strong>.</p>
+                                        <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-white/5">
+                                            {['Painel do Presidente', 'Candidatos', 'Repasses', 'Comprovação', 'Telão'].map((f) => (
+                                                <span key={f} className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20">{f}</span>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
-                                <p className="text-[10px] text-slate-600">Preços e módulos vêm da tabela <code>plans</code> (fonte de verdade do faturamento). Cada plano superior inclui os módulos dos inferiores.</p>
+                                <p className="text-[10px] text-slate-600">Preços e módulos vêm da tabela <code>plans</code> (fonte de verdade do faturamento). Cada plano superior inclui os módulos dos inferiores. O <strong className="text-violet-300">Plano Partido</strong> é produto próprio (<code>module_prices</code>), gerido na aba Partidos.</p>
                             </Card>
 
                             <TseKeysPanel />

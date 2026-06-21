@@ -19,6 +19,8 @@ interface QueryState {
   selectCols: string;
   isCount: boolean;
   limitN?: number;
+  rangeFrom?: number;
+  rangeTo?: number;
   orderKey?: string;
   orderAsc?: boolean;
   insertRows?: Row[];
@@ -26,7 +28,7 @@ interface QueryState {
   upsertRows?: Row[];
   upsertOnConflict?: string;
   upsertIgnoreDup?: boolean;
-  mode: 'select' | 'insert' | 'update' | 'upsert';
+  mode: 'select' | 'insert' | 'update' | 'upsert' | 'delete';
 }
 
 function applyFilters(rows: Row[], filters: QueryState['filters']): Row[] {
@@ -67,6 +69,11 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       const returned = updatedRows.filter((_r, i) => matching.includes(rows[i]));
       return { data: returned, error: null };
     }
+    if (state.mode === 'delete') {
+      const matching = applyFilters(rows, state.filters);
+      store.set(table, rows.filter(r => !matching.includes(r)));
+      return { data: matching, error: null };
+    }
     if (state.mode === 'upsert' && state.upsertRows) {
       const updated = [...rows];
       for (const row of state.upsertRows) {
@@ -93,6 +100,7 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
         return (av > bv ? 1 : -1) * (state.orderAsc ? 1 : -1);
       });
     }
+    if (state.rangeFrom !== undefined) out = out.slice(state.rangeFrom, (state.rangeTo ?? out.length) + 1);
     if (state.limitN) out = out.slice(0, state.limitN);
     if (state.isCount) return { count: out.length, error: null };
     return { data: out, error: null };
@@ -122,6 +130,7 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       state.updatePayload = payload;
       return chain;
     },
+    delete: () => { state.mode = 'delete'; return chain; },
     upsert: (rows: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) => {
       state.mode = 'upsert';
       state.upsertRows = Array.isArray(rows) ? rows : [rows];
@@ -161,6 +170,7 @@ function buildQuery(table: string, store: Map<string, Row[]>): any {
       state.orderKey = key; state.orderAsc = opts?.ascending ?? true; return chain;
     },
     limit: (n: number) => { state.limitN = n; return chain; },
+    range: (from: number, to: number) => { state.rangeFrom = from; state.rangeTo = to; return chain; },
     single: async () => { const r = await exec(); return { data: r.data?.[0] ?? null, error: r.data?.length ? null : { message: 'no_rows' } }; },
     maybeSingle: async () => { const r = await exec(); return { data: r.data?.[0] ?? null, error: null }; },
     ...thenable(exec),

@@ -28,6 +28,7 @@ import { callAgent, BudgetExceededError } from '../../../lib/aiCallAgent';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
 import { runLifecycleSweep } from '../billing/subscriptionLifecycle';
 import { calcSimplesNacional } from './taxCalculator';
+import { encryptMigrateAll } from '../../lib/encryptMigration';
 
 // ── Form Builder (F5) ──────────────────────────────────────────────────
 // Alvos (entidades) que aceitam campos personalizáveis por campanha.
@@ -185,6 +186,158 @@ function parsePlan(raw: unknown): Plan | null {
 export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   const router = Router();
 
+  // Cifra dados sensíveis legados (CPF/RG/título/banco/PIX/doc.doador/CPF-CNPJ
+  // do candidato) em TODAS as campanhas, de uma vez. Idempotente — pode rodar de
+  // novo sem dano. Requer FIELD_ENCRYPTION_KEY no ambiente.
+  router.post('/encrypt-migrate-all', async (req: Request, res: Response) => {
+    try {
+      const summary = await encryptMigrateAll(supabaseAdmin);
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req),
+        action: 'security.encrypt_migrate_all',
+        resourceType: 'campaign', resourceId: 'all',
+        severity: 'warn', metadata: summary,
+      });
+      return res.json({ ok: true, summary });
+    } catch (err: any) {
+      console.error('[supreme] encrypt-migrate-all:', err);
+      return res.status(500).json({ error: err?.message || 'migration_failed' });
+    }
+  });
+
+  // ── Plano do app Partido (produto próprio, tenant = partido) ──────────────
+  // Preço base em module_prices('partido') + cobrança por partido em
+  // module_subscriptions(tenantKind='party'). "Cortesia" = acesso mantido sem
+  // cobrança (controle financeiro interno; invisível pro usuário). NÃO bloqueia
+  // acesso — enforcement é etapa futura.
+  const PARTIDO_KEY = 'partido';
+  const PARTIDO_DEFAULT_CENTS = 300000;
+  const LIVE = ['pending_payment', 'active', 'past_due'];
+
+  router.get('/party-billing', async (_req: Request, res: Response) => {
+    try {
+      const { data: priceRow } = await supabaseAdmin
+        .from('module_prices').select('"moduleKey","monthlyCents",active')
+        .eq('moduleKey', PARTIDO_KEY).maybeSingle();
+
+      const { data: parties } = await supabaseAdmin
+        .from('parties').select('id, name, "presidentId", "createdAt"')
+        .order('createdAt', { ascending: false }).limit(1000);
+      const list = (parties ?? []) as any[];
+
+      const presidentIds = [...new Set(list.map((p) => p.presidentId).filter(Boolean))];
+      const usersRes = presidentIds.length
+        ? await supabaseAdmin.from('users').select('id, email, name').in('id', presidentIds)
+        : { data: [] as any[] };
+      const userMap = new Map((usersRes.data ?? []).map((u: any) => [u.id, u]));
+
+      const partyIds = list.map((p) => p.id);
+      const subsRes = partyIds.length
+        ? await supabaseAdmin.from('module_subscriptions').select('*')
+            .eq('tenantKind', 'party').eq('moduleKey', PARTIDO_KEY).in('tenantId', partyIds)
+        : { data: [] as any[] };
+      // Prioriza assinatura viva por partido (ignora canceladas se houver viva).
+      const subMap = new Map<string, any>();
+      for (const s of (subsRes.data ?? []) as any[]) {
+        const cur = subMap.get(s.tenantId);
+        if (!cur || (cur.status === 'canceled' && s.status !== 'canceled')) subMap.set(s.tenantId, s);
+      }
+
+      const parties_out = list.map((p) => {
+        const u: any = userMap.get(p.presidentId);
+        const s: any = subMap.get(p.id);
+        return {
+          partyId: p.id, name: p.name,
+          presidentEmail: u?.email ?? null, presidentName: u?.name ?? null,
+          billing: s ? {
+            status: s.status, amountCents: s.amountCents,
+            courtesy: !!s.metadata?.courtesy, note: s.metadata?.note ?? null,
+            provider: s.paymentProvider,
+          } : null,
+        };
+      });
+
+      return res.json({
+        price: {
+          moduleKey: PARTIDO_KEY,
+          monthlyCents: priceRow?.monthlyCents ?? PARTIDO_DEFAULT_CENTS,
+          configured: !!priceRow,
+        },
+        parties: parties_out,
+      });
+    } catch (err: any) {
+      console.error('[supreme] party-billing GET:', err);
+      return res.status(500).json({ error: err?.message || 'party_billing_failed' });
+    }
+  });
+
+  router.put('/party-billing/price', async (req: Request, res: Response) => {
+    const cents = Number(req.body?.monthlyCents);
+    if (!Number.isInteger(cents) || cents < 0 || cents > 100_000_000) {
+      return res.status(400).json({ error: 'invalid_amount' });
+    }
+    const { error } = await supabaseAdmin.from('module_prices').upsert(
+      { moduleKey: PARTIDO_KEY, monthlyCents: cents, active: true, updatedAt: new Date().toISOString() },
+      { onConflict: 'moduleKey' },
+    );
+    if (error) return res.status(500).json({ error: error.message });
+    await audit(supabaseAdmin, {
+      ...actorFromRequest(req), action: 'supreme.party.price_set',
+      resourceType: 'module_price', resourceId: PARTIDO_KEY,
+      severity: 'info', metadata: { monthlyCents: cents },
+    }).catch(() => {});
+    return res.json({ ok: true, monthlyCents: cents });
+  });
+
+  router.post('/party-billing/:partyId/courtesy', async (req: Request, res: Response) => {
+    const partyId = String(req.params.partyId);
+    const courtesy = req.body?.courtesy !== false; // default: marcar cortesia
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 280) : null;
+    const now = new Date().toISOString();
+    try {
+      // Garante a linha de preço (FK module_subscriptions.moduleKey → module_prices).
+      await supabaseAdmin.from('module_prices').upsert(
+        { moduleKey: PARTIDO_KEY, monthlyCents: PARTIDO_DEFAULT_CENTS, active: true },
+        { onConflict: 'moduleKey', ignoreDuplicates: true },
+      );
+
+      const { data: existing } = await supabaseAdmin.from('module_subscriptions')
+        .select('id, metadata').eq('tenantId', partyId).eq('tenantKind', 'party')
+        .eq('moduleKey', PARTIDO_KEY).in('status', LIVE).maybeSingle();
+
+      if (courtesy) {
+        const meta = { ...((existing?.metadata as any) || {}), courtesy: true, note };
+        if (existing) {
+          await supabaseAdmin.from('module_subscriptions').update({
+            status: 'active', paymentProvider: 'comp', amountCents: 0, metadata: meta, updatedAt: now,
+          }).eq('id', existing.id);
+        } else {
+          await supabaseAdmin.from('module_subscriptions').insert({
+            tenantId: partyId, tenantKind: 'party', moduleKey: PARTIDO_KEY,
+            status: 'active', amountCents: 0, paymentProvider: 'comp', metadata: meta,
+          });
+        }
+      } else if (existing) {
+        // Remover cortesia: cancela a linha comp (acesso não muda — sem enforcement).
+        await supabaseAdmin.from('module_subscriptions').update({
+          status: 'canceled',
+          metadata: { ...((existing.metadata as any) || {}), courtesy: false },
+          updatedAt: now,
+        }).eq('id', existing.id);
+      }
+
+      await audit(supabaseAdmin, {
+        ...actorFromRequest(req), action: 'supreme.party.courtesy_set',
+        resourceType: 'party', resourceId: partyId,
+        severity: 'info', metadata: { courtesy, note },
+      }).catch(() => {});
+      return res.json({ ok: true, courtesy });
+    } catch (err: any) {
+      console.error('[supreme] party courtesy:', err);
+      return res.status(500).json({ error: err?.message || 'courtesy_failed' });
+    }
+  });
+
   // Lê a config fiscal (singleton). Fallback seguro se a linha não existir.
   async function loadTaxSettings() {
     const { data } = await supabaseAdmin
@@ -320,6 +473,30 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   });
 
   // ── GET /financial ──────────────────────────────────────────────────
+  // Receita recorrente de módulos vendáveis (add-ons + Plano Partido), em centavos.
+  // Cortesia tem amountCents=0, então NÃO entra — conta só o que de fato fatura.
+  // Faz parte da receita bruta da empresa → entra na base do Simples e no P&L.
+  async function sumActiveModuleMrrCents(): Promise<number> {
+    const { data } = await supabaseAdmin
+      .from('module_subscriptions').select('"amountCents"').eq('status', 'active');
+    let cents = 0;
+    for (const m of (data as any[]) ?? []) cents += Math.max(0, Number(m.amountCents) || 0);
+    return cents;
+  }
+
+  // Folha ANUAL (×12) para o Fator R: custos mensais de salários/pessoal, USD→BRL.
+  async function computeFolha12Reais(usdBrl: number): Promise<number> {
+    const { data } = await supabaseAdmin
+      .from('platform_costs').select('"amountCents", currency, category')
+      .eq('active', true).eq('recurrence', 'monthly')
+      .in('category', ['salarios', 'pessoal']);
+    let mensal = 0;
+    for (const c of (data as any[]) ?? []) {
+      mensal += (Number(c.amountCents) || 0) / 100 * (c.currency === 'USD' ? usdBrl : 1);
+    }
+    return mensal * 12;
+  }
+
   // SaaS financial dashboard: MRR/ARR, subscriptions by status, per-plan
   // distribution, overdue (past_due) campaigns, confirmed revenue, AI cost.
   router.get('/financial', async (_req: Request, res: Response) => {
@@ -327,7 +504,27 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       const cfg = await loadTaxSettings();
       const { data, error } = await supabaseAdmin.rpc('supreme_financial_metrics', { p_usd_brl: cfg.usdBrlRate });
       if (error) return res.status(500).json({ error: 'financial_failed', detail: error.message });
-      return res.json({ financial: data });
+
+      // A RPC só conta planos de campanha. Soma a receita de módulos/partidos
+      // e desconta a DAS estimada do lucro (antes vinha "lucro antes de impostos").
+      const fin: any = data || {};
+      const moduleCents = await sumActiveModuleMrrCents();
+      if (fin.profitLoss) {
+        fin.mrrCents = (fin.mrrCents ?? 0) + moduleCents;
+        fin.arrCents = fin.mrrCents * 12;
+        const pl = fin.profitLoss;
+        pl.receitaCents = (pl.receitaCents ?? 0) + moduleCents;
+        pl.lucroLiquidoCents = (pl.lucroLiquidoCents ?? 0) + moduleCents; // receita de módulo ≈ margem pura
+        const receitaReais = pl.receitaCents / 100;
+        const folha12 = await computeFolha12Reais(cfg.usdBrlRate);
+        const tax = calcSimplesNacional({
+          rbt12: receitaReais * 12, receitaMes: receitaReais, folha12, anexoOverride: cfg.anexoOverride,
+        });
+        pl.dasMesCents = tax.dasMesCents;
+        pl.lucroAposImpostosCents = pl.lucroLiquidoCents - tax.dasMesCents;
+        pl.margemPct = pl.receitaCents > 0 ? Math.round((pl.lucroAposImpostosCents / pl.receitaCents) * 1000) / 10 : 0;
+      }
+      return res.json({ financial: fin });
     } catch (err: any) {
       return res.status(500).json({ error: err.message ?? 'financial_failed' });
     }
@@ -598,7 +795,8 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
       const cfg = await loadTaxSettings();
       const usdBrl = cfg.usdBrlRate;
 
-      // MRR (assinaturas ativas pagas) em reais
+      // Receita bruta = MRR de planos (assinaturas ativas pagas) + receita
+      // recorrente de módulos/partidos. Tudo entra na base do Simples (RBT12).
       const { data: subs } = await supabaseAdmin
         .from('subscriptions')
         .select('planId, status, plans!inner(monthlyCents)')
@@ -608,23 +806,15 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
         const cents = s.plans?.monthlyCents ?? 0;
         if (cents > 0) mrrReais += cents / 100;
       }
+      mrrReais += (await sumActiveModuleMrrCents()) / 100; // módulos + Plano Partido (cortesia=R$0)
 
-      // Folha mensal: custos de salários/pessoal (converte USD→BRL se houver)
-      const { data: costs } = await supabaseAdmin
-        .from('platform_costs')
-        .select('amountCents, currency, category, recurrence, active')
-        .eq('active', true).eq('recurrence', 'monthly')
-        .in('category', ['salarios', 'pessoal']);
-      let folhaMensalReais = 0;
-      for (const c of (costs as any[]) ?? []) {
-        const reais = (c.amountCents ?? 0) / 100 * (c.currency === 'USD' ? usdBrl : 1);
-        folhaMensalReais += reais;
-      }
+      // Folha anual (Fator R): custos de salários/pessoal, USD→BRL.
+      const folha12 = await computeFolha12Reais(usdBrl);
 
       const result = calcSimplesNacional({
         rbt12: mrrReais * 12,
         receitaMes: mrrReais,
-        folha12: folhaMensalReais * 12,
+        folha12,
         anexoOverride: cfg.anexoOverride,
       });
 
@@ -1264,32 +1454,67 @@ export function createSupremeAdminRouter(supabaseAdmin: SupabaseClient) {
   });
 
   // ---------- PARTIDOS (visão financeira do Supreme — só você enxerga) ----------
-  // Lista todos os partidos com plano, billingNote (valor combinado fora do Asaas),
-  // contagem de candidatos e somas de valorRecebido/valorAlocado. Front renderiza
-  // como tabela + receita mensal estimada.
+  // Lista os partidos com: presidente (nome/e-mail), preço do Plano Partido
+  // (fonte de verdade = module_prices('partido')), status de cobrança/cortesia
+  // (module_subscriptions), nº de candidatos e somas de repasses internos
+  // (party_candidates.valorRecebido/valorAlocado — NÃO é cobrança do plano).
   router.get('/parties', async (_req: Request, res: Response) => {
     try {
       const { data: parties, error } = await supabaseAdmin
         .from('parties')
-        .select('id, name, plan, status, "billingNote", "createdAt"')
+        .select('id, name, plan, status, "billingNote", "presidentId", "createdAt"')
         .order('createdAt', { ascending: false });
       if (error) throw error;
+      const list = (parties || []) as any[];
 
-      const out = await Promise.all((parties || []).map(async (p: any) => {
-        const [{ count: candidates }, { data: sums }] = await Promise.all([
-          supabaseAdmin.from('party_candidates').select('id', { count: 'exact', head: true }).eq('partyId', p.id),
-          supabaseAdmin.from('party_candidates').select('"valorRecebido", "valorAlocado"').eq('partyId', p.id),
-        ]);
-        const valorRecebido = (sums || []).reduce((s: number, r: any) => s + Number(r.valorRecebido || 0), 0);
-        const valorAlocado = (sums || []).reduce((s: number, r: any) => s + Number(r.valorAlocado || 0), 0);
-        return { ...p, candidatesCount: candidates || 0, valorRecebido, valorAlocado };
+      // Preço base do Plano Partido (fallback R$3.000 se a seed não foi aplicada).
+      const { data: priceRow } = await supabaseAdmin
+        .from('module_prices').select('"monthlyCents"').eq('moduleKey', 'partido').maybeSingle();
+      const planMonthlyCents = priceRow?.monthlyCents ?? 300000;
+
+      // Presidentes (nome/e-mail) e assinaturas de módulo (cortesia/status).
+      const presidentIds = [...new Set(list.map((p) => p.presidentId).filter(Boolean))];
+      const partyIds = list.map((p) => p.id);
+      const [usersRes, subsRes] = await Promise.all([
+        presidentIds.length
+          ? supabaseAdmin.from('users').select('id, name, email').in('id', presidentIds)
+          : Promise.resolve({ data: [] as any[] }),
+        partyIds.length
+          ? supabaseAdmin.from('module_subscriptions').select('*')
+              .eq('tenantKind', 'party').eq('moduleKey', 'partido').in('tenantId', partyIds)
+          : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const userMap = new Map((usersRes.data ?? []).map((u: any) => [u.id, u]));
+      const subMap = new Map<string, any>();
+      for (const s of (subsRes.data ?? []) as any[]) {
+        const cur = subMap.get(s.tenantId);
+        if (!cur || (cur.status === 'canceled' && s.status !== 'canceled')) subMap.set(s.tenantId, s);
+      }
+
+      const out = await Promise.all(list.map(async (p: any) => {
+        // Só a CONTAGEM de candidatos. Os valores de repasse interno
+        // (valorRecebido/valorAlocado) não são expostos ao Supreme — não são
+        // cobrança do plano e poluíam a visão financeira.
+        const { count: candidates } = await supabaseAdmin
+          .from('party_candidates').select('id', { count: 'exact', head: true }).eq('partyId', p.id);
+        const u: any = userMap.get(p.presidentId);
+        const sub: any = subMap.get(p.id);
+        return {
+          id: p.id, name: p.name, status: p.status, billingNote: p.billingNote, createdAt: p.createdAt,
+          presidentName: u?.name ?? null, presidentEmail: u?.email ?? null,
+          candidatesCount: candidates || 0,
+          courtesy: !!sub?.metadata?.courtesy,
+          billingStatus: sub?.status ?? null,
+          courtesyNote: sub?.metadata?.note ?? null,
+        };
       }));
-      return res.json({ parties: out });
+      return res.json({ planMonthlyCents, parties: out });
     } catch (err: any) {
       console.error('[supreme] list parties:', err);
       return res.status(500).json({ error: err.message });
     }
   });
+
 
   // Edita a billingNote (texto livre — ex.: "Plano Partido — R$ 2.500/mês,
   // 10ª parcela pendente"). Único campo editável daqui — mudanças estruturais
