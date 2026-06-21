@@ -75,6 +75,18 @@ export const MODULES: ModuleDef[] = [
     salesRoute: '/produtos/inteligencia',
     sellable: true,
   },
+  // Add-on avulso puro: NÃO está em nenhum plano (sem entrada em
+  // PLAN_FEATURE_TO_MODULE). Só fica ativo via tenant_module_entitlements
+  // (compra avulsa). A aba "Blindagem" e o backend gateiam por esse módulo.
+  {
+    key: 'legal_shield',
+    name: 'Blindagem Jurídica',
+    description: 'Copiloto contábil + jurídico: audita arrecadação/gastos vs TSE, gera parecer de risco e tese de defesa com base na jurisprudência.',
+    icon: 'ShieldAlert',
+    appRoute: '/app',
+    salesRoute: '/produtos/legal-shield',
+    sellable: true,
+  },
 ];
 
 // Mapeia uma feature do plano (plans.features) para o módulo que ela libera.
