@@ -102,32 +102,15 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     .eq('id', user.campaignId)
                     .maybeSingle();
                 
-                // Para usuários VIP, garantimos acesso total mesmo se a tabela estiver vazia
-                const isVIP = VIP_EMAILS.includes(user.email || '');
-                
-                if (error && !isVIP) {
+                // Governança: acesso vem do campaign_configs do tenant — sem
+                // override por e-mail VIP. Plano/limites são a verdade do banco.
+                if (error) {
                     console.error("Erro ao carregar campaign_configs:", error);
                     setPermissions(DEFAULT_PERMISSIONS);
                     setConfig(null);
-                } else if (data || isVIP) {
-                    const raw: any = data || { id: user.campaignId };
-                    let configData = { ...raw, customFields: raw.customFields ?? {} } as CampaignConfig;
-
-                    // VIP Override: Acesso total automático
-                    if (isVIP) {
-                        configData = {
-                            ...configData,
-                            planTier: 'completo',
-                            features: [
-                                'dashboard', 'ai_agents', 'calculator', 'visits', 'engagement',
-                                'resources', 'team', 'financial', 'training', 'tools',
-                                'permissions', 'settings', 'help', 'election_day',
-                                'analytics', 'crm'
-                            ],
-                            profilePermissions: DEFAULT_PERMISSIONS
-                        };
-                    }
-
+                } else if (data) {
+                    const raw: any = data;
+                    const configData = { ...raw, customFields: raw.customFields ?? {} } as CampaignConfig;
                     setConfig(configData);
                     setPermissions(configData.profilePermissions || DEFAULT_PERMISSIONS);
                 } else {
