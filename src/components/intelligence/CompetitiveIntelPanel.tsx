@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { Swords, Search, Loader2, Trash2, Newspaper, Megaphone, ShieldAlert, Target, TrendingUp, Globe, ChevronDown, Printer } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
-import { supabase } from '../../lib/supabaseClient';
 import { useAuth } from '../../contexts/AuthContext';
 import CompetitiveIntelReport from './CompetitiveIntelReport';
 
@@ -41,8 +40,10 @@ const CompetitiveIntelPanel: React.FC = () => {
 
   React.useEffect(() => {
     if (!user?.campaignId) return;
-    supabase.from('settings').select('campaignDetails').eq('campaignId', user.campaignId).maybeSingle()
-      .then(({ data }) => setCnpj((data as any)?.campaignDetails?.cnpj ?? null), () => {});
+    // CNPJ vem decifrado pelo backend (campo cifrado em repouso no settings).
+    authedFetch('/api/v1/settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setCnpj(data?.campaignDetails?.cnpj ?? null), () => {});
   }, [user?.campaignId]);
 
   const load = React.useCallback(async () => {

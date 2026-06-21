@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { handleSupabaseError, sanitizeData, OperationType } from '../utils/supabaseUtils';
+import { authedFetch } from '../lib/authedFetch';
 import { CampaignDetails } from '../types/campaign';
 import { useAuth } from './AuthContext';
 
@@ -43,20 +44,18 @@ export const SettingsProvider = ({ children }: { children?: React.ReactNode }) =
         if (!user?.campaignId) return;
 
         const fetchData = async () => {
-            const { data, error } = await supabase
-                .from('settings')
-                .select('*')
-                .eq('campaignId', user.campaignId)
-                .maybeSingle();
-
-            if (error) {
-                if (error.code !== 'PGRST116') {
-                    handleSupabaseError(error, OperationType.GET, `settings/${user.campaignId}`);
-                }
-            } else if (data) {
+            // campaignDetails vem pelo backend: CPF/CNPJ/RG do candidato são
+            // decifrados lá (a chave não existe no browser). Logos vêm junto.
+            // Realtime abaixo só dispara este refetch.
+            try {
+                const resp = await authedFetch('/api/v1/settings');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
                 if (data.campaignDetails) setCampaignDetails(data.campaignDetails as CampaignDetails);
                 if (data.headerLogo) setHeaderLogo(data.headerLogo);
                 if (data.footerLogo) setFooterLogo(data.footerLogo);
+            } catch (error) {
+                handleSupabaseError(error, OperationType.GET, `settings/${user.campaignId}`);
             }
         };
 
@@ -103,8 +102,18 @@ export const SettingsProvider = ({ children }: { children?: React.ReactNode }) =
     };
 
     const updateCampaignDetails = async (details: CampaignDetails) => {
-        await updateSettings({ campaignDetails: details });
-        setCampaignDetails(details);
+        if (!user?.campaignId) return;
+        // Backend cifra CPF/CNPJ/RG do candidato antes de gravar.
+        try {
+            const resp = await authedFetch('/api/v1/settings/campaign-details', {
+                method: 'PUT',
+                body: JSON.stringify({ campaignDetails: sanitizeData(details) }),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            setCampaignDetails(details);
+        } catch (error) {
+            handleSupabaseError(error, OperationType.WRITE, `settings/${user.campaignId}`);
+        }
     };
 
     const updateHeaderLogo = async (logo: string | null) => {
