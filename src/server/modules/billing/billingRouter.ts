@@ -9,6 +9,7 @@ import { audit, actorFromRequest } from '../observability/auditLogger';
 import { sendSubscriptionCanceledEmail } from '../email/emailService';
 import { requireSupremeAdmin } from '../../middleware/requireSupremeAdmin';
 import { runLifecycleSweep } from './subscriptionLifecycle';
+import { createAddonRouter } from './addonRouter';
 
 interface PlanInput {
   id: string;
@@ -76,6 +77,11 @@ function validatePlanInput(
 
 export function createBillingRouter(supabase: SupabaseClient): Router {
   const router = Router();
+
+  // Sub-router de venda avulsa de módulos (add-ons). Compartilha o gateway
+  // configurado e o customer Asaas do plano principal — uma assinatura
+  // Asaas por add-on contratado (Asaas não tem subscription items).
+  router.use('/addons', createAddonRouter(supabase));
 
   // GET /api/v1/billing/plans — public list of plans
   router.get('/plans', async (_req, res) => {

@@ -2,6 +2,9 @@ import * as React from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { LineChart, Brain, CheckCircle, ArrowRight, Sparkles } from 'lucide-react';
 import { moduleByKey } from '../lib/modules';
+import { useAuth } from '../contexts/AuthContext';
+import { authedFetch } from '../lib/authedFetch';
+import CheckoutDialog from '../components/billing/CheckoutDialog';
 
 // Página comercial avulsa do módulo (add-on). Pública: serve cross-sell de
 // Cenários/Inteligência pra quem está em Essencial/Estratégico e não quer
@@ -50,10 +53,12 @@ const formatBRL = (cents: number) =>
 const ProductPage: React.FC = () => {
   const { slug = '' } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const module = moduleByKey(slug);
   const copy = COPY[slug];
   const [monthlyCents, setMonthlyCents] = React.useState<number | null>(null);
   const [loadingPrice, setLoadingPrice] = React.useState(true);
+  const [checkoutOpen, setCheckoutOpen] = React.useState(false);
 
   React.useEffect(() => {
     let alive = true;
@@ -74,6 +79,30 @@ const ProductPage: React.FC = () => {
   }
 
   const Icon = copy.icon;
+
+  // Logado: abre o CheckoutDialog. Senão, leva pra cadastro preservando o
+  // intent — depois do registro a gente leva o usuário pra cá de volta.
+  const onPrimaryCta = () => {
+    if (user?.campaignId) setCheckoutOpen(true);
+    else navigate(`/register?next=${encodeURIComponent(`/produtos/${slug}`)}`);
+  };
+
+  const handleCheckoutSubmit = async (params: {
+    name: string; email: string; cpfCnpj?: string; phone?: string;
+    method: 'pix' | 'credit_card' | 'debit_card' | 'boleto' | 'undefined';
+  }) => {
+    const res = await authedFetch(`/api/v1/billing/addons/${slug}/checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.detail || json.error || 'Falha no checkout');
+    if (json.checkoutUrl) window.location.href = json.checkoutUrl;
+    else navigate('/app');
+  };
+
+  const ctaLabel = user?.campaignId ? `Contratar ${module.name}` : `Criar conta para contratar`;
 
   return (
     <div className="min-h-screen bg-[#0a0a0b] text-white py-16 px-6 font-sans">
@@ -123,10 +152,10 @@ const ProductPage: React.FC = () => {
               </p>
             </div>
             <button
-              onClick={() => navigate('/register')}
+              onClick={onPrimaryCta}
               className={`w-full mt-6 bg-gradient-to-r ${copy.accent} text-slate-900 font-bold py-3 rounded-xl hover:opacity-90 transition flex items-center justify-center gap-2`}
             >
-              Contratar {module.name} <ArrowRight className="w-4 h-4" />
+              {ctaLabel} <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -137,6 +166,16 @@ const ProductPage: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {monthlyCents != null && (
+        <CheckoutDialog
+          open={checkoutOpen}
+          planName={`Add-on ${module.name}`}
+          monthlyCents={monthlyCents}
+          onClose={() => setCheckoutOpen(false)}
+          onSubmit={handleCheckoutSubmit}
+        />
+      )}
     </div>
   );
 };
