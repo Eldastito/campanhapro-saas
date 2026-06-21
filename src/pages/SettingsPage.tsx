@@ -13,6 +13,7 @@ import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
 import ExternalMemoryRefreshCard from '../components/dashboard/ExternalMemoryRefreshCard';
 import CampaignPauseCard from '../components/settings/CampaignPauseCard';
 import PasskeyCard from '../components/security/PasskeyCard';
+import MfaCard from '../components/security/MfaCard';
 
 const SettingsPage = () => {
     const { campaignDetails, updateCampaignDetails } = useSettings();
@@ -29,6 +30,9 @@ const SettingsPage = () => {
 
             {/* Chaves de acesso / biometria (Passkeys) — só aparece com a flag ligada */}
             <PasskeyCard />
+
+            {/* Verificação em duas etapas (2FA / TOTP) — opt-in por usuário */}
+            <MfaCard />
 
             <Card>
                 <h3 className="text-lg font-bold text-slate-300 mb-4">Dados do Candidato e Orçamento</h3>
