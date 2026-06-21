@@ -9,7 +9,7 @@
  */
 export const ENCRYPTED_FIELDS = {
   incomes: ['documentoDoador'],
-  team_members: ['cpf', 'rg', 'bankName', 'bankAgency', 'bankAccount', 'pixKey'],
+  team_members: ['cpf', 'rg', 'voterId', 'bankName', 'bankAgency', 'bankAccount', 'pixKey'],
 } as const;
 
 /**
