@@ -65,6 +65,7 @@ import { createIncomesRouter } from './src/server/modules/financial/incomesRoute
 import { createTeamMembersRouter } from './src/server/modules/team/teamMembersRouter';
 import { createSettingsRouter } from './src/server/modules/settings/settingsRouter';
 import { createContractsRouter } from './src/server/modules/contracts/contractsRouter';
+import { createLegalBaseRouter } from './src/server/modules/rag/legalBaseRouter';
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
@@ -351,6 +352,7 @@ async function startServer() {
     app.use('/api/public/team', webhookLimiter, createTeamPublicRouter(supabaseAdmin));
     // Supreme Admin (SaaS operator) — every route gated by requireSupremeAdmin.
     app.use('/api/v1/supreme/contracts', requireAuth, mutationLimiter, requireSupremeAdmin(), createContractsRouter(supabaseAdmin));
+    app.use('/api/v1/supreme/legal-base', requireAuth, expensiveLimiter, requireSupremeAdmin(), createLegalBaseRouter(supabaseAdmin));
     app.use('/api/v1/supreme', requireAuth, mutationLimiter, requireSupremeAdmin(), createSupremeAdminRouter(supabaseAdmin));
 
     // Access logging — any authenticated user reports login/logout so the
