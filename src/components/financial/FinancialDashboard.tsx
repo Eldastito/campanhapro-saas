@@ -8,7 +8,8 @@ import Card from '../ui/Card';
 import { PrintIcon, FileTextIcon, AlertTriangleIcon, CheckCircleIcon } from '../icons';
 import Button from '../ui/Button';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-import { calculateDaysRemaining, exportToCsv } from '../../utils/helpers';
+import { calculateDaysRemaining, exportToCsv, downloadFile } from '../../utils/helpers';
+import { buildSpcePlanilha } from '../../lib/spceExport';
 
 const COLORS = ['#4ac7f0', '#1abc9c', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6', '#3498db', '#2ecc71'];
 
@@ -92,6 +93,18 @@ const FinancialDashboard = () => {
         exportToCsv(data, `Contas_Campanha_${new Date().toISOString().split('T')[0]}.csv`);
     };
 
+    // Export SPCE: planilha do contador (Receitas + Despesas separadas, com
+    // todos os campos TSE). Gera os dois arquivos prontos pra prestação de contas.
+    const handleExportSpce = () => {
+        if (incomes.length === 0 && expenses.length === 0) {
+            alert('Não há receitas ou despesas para exportar.');
+            return;
+        }
+        for (const file of buildSpcePlanilha(incomes, expenses)) {
+            downloadFile(file.filename, file.content, file.mimeType);
+        }
+    };
+
     const handlePrint = () => {
         // Ensure browser focus is on the frame and trigger standard print dialog
         window.focus();
@@ -114,6 +127,7 @@ const FinancialDashboard = () => {
                 </div>
                 <div className="flex gap-2">
                     <Button variant="secondary" onClick={handleExportAccounting}><FileTextIcon className="w-4 h-4" /> Exportar (Contador)</Button>
+                    <Button variant="secondary" onClick={handleExportSpce}><FileTextIcon className="w-4 h-4" /> Exportar SPCE (TSE)</Button>
                     <Button variant="secondary" onClick={handlePrint}><PrintIcon className="w-4 h-4" /> Imprimir</Button>
                 </div>
             </div>
