@@ -5,6 +5,7 @@ import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import type { ModuleDef } from '../lib/modules';
 import { LOGO_MONO_BASE64 } from '../constants';
+import SmokeyBackground from '../components/ui/SmokeyBackground';
 
 // Resolve o nome do ícone (string no registry) → componente lucide.
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -77,8 +78,9 @@ const HubPage: React.FC = () => {
   const currentTenant = tenants.find((t) => t.id === activeTenantId) ?? tenants[0];
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
+    <main className="relative min-h-screen w-full overflow-hidden bg-slate-950 text-slate-100">
+      <SmokeyBackground color="#1d4ed8" backdropBlurAmount="sm" className="absolute inset-0" />
+      <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 py-10">
         <div className="flex items-center gap-3 mb-8">
           <img src={LOGO_MONO_BASE64} alt="CampanhaPro" className="h-9 w-9" />
           <div className="flex-1">
@@ -146,7 +148,7 @@ const HubPage: React.FC = () => {
           </>
         )}
       </div>
-    </div>
+    </main>
   );
 };
 

@@ -127,6 +127,10 @@ const PRICING: Record<string, { in: number; out: number }> = {
     // OpenAI
     'gpt-4o-mini':                { in: 0.15, out: 0.60 },
     'gpt-4o':                     { in: 2.50, out: 10.00 },
+    // Reasoning (série o*) — preços aproximados p/ tracking de budget; ajustar
+    // se a OpenAI mudar a tabela. o4-mini é o reasoning custo-efetivo.
+    'o4-mini':                    { in: 1.10, out: 4.40 },
+    'o3':                         { in: 2.00, out: 8.00 },
     // Anthropic — Claude 4.x family
     'claude-haiku-4-5':           { in: 1.00, out: 5.00 },
     'claude-haiku-4-5-20251001':  { in: 1.00, out: 5.00 },
@@ -260,12 +264,19 @@ const callOpenAI = async (
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
     messages.push({ role: 'user', content: prompt });
 
-    const body: any = {
-        model,
-        messages,
-        temperature: config.temperature ?? 0.7,
-        max_tokens: config.maxTokens ?? 4000,
-    };
+    // Modelos de reasoning (série o*: o1/o3/o4-mini…) têm contrato diferente:
+    // não aceitam `temperature` custom (só o default) e usam
+    // `max_completion_tokens` no lugar de `max_tokens`. `reasoning_effort`
+    // controla a profundidade do raciocínio.
+    const isReasoning = /^o\d/.test(model);
+    const body: any = { model, messages };
+    if (isReasoning) {
+        body.max_completion_tokens = config.maxTokens ?? 4000;
+        body.reasoning_effort = 'medium';
+    } else {
+        body.temperature = config.temperature ?? 0.7;
+        body.max_tokens = config.maxTokens ?? 4000;
+    }
     if (tools && tools.length > 0) {
         body.tools = tools;
         body.tool_choice = 'auto';
@@ -429,15 +440,18 @@ export const AGENT_CONFIGS: Record<string, AgentConfig> = {
     pipeline:   { agentId: 'pipeline',   temperature: 0.7, maxTokens: 6000 },
     // Blindagem Jurídico-Contábil: provider OpenAI primário → Claude (raciocínio)
     // → Gemini. Temperature baixa (precisão > criatividade); teto alto p/ parecer.
+    // Primário OpenAI de REASONING (o4-mini) p/ raciocínio jurídico/contábil;
+    // Claude (sonnet-4-5) e Gemini como fallback. temperature só afeta os
+    // fallbacks — modelos o* ignoram temperature custom (ver callOpenAI).
     accountant: {
         agentId: 'accountant', temperature: 0.2, maxTokens: 5000,
         providerChain: ['openai', 'anthropic', 'gemini'],
-        model: { openai: 'gpt-4o', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' },
+        model: { openai: 'o4-mini', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' },
     },
     legal: {
         agentId: 'legal', temperature: 0.2, maxTokens: 6000,
         providerChain: ['openai', 'anthropic', 'gemini'],
-        model: { openai: 'gpt-4o', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' },
+        model: { openai: 'o4-mini', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' },
     },
 };
 

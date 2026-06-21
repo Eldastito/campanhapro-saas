@@ -1,8 +1,9 @@
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LOGO_MONO_BASE64 } from '../constants';
 import {
   Printer, Landmark, ShieldCheck, MapPinned, BarChart3, GitBranch,
-  Camera, Lock, Trophy, Gauge, CheckCircle2, ArrowRight,
+  Camera, Lock, Trophy, Gauge, CheckCircle2, ArrowRight, ArrowLeft,
 } from 'lucide-react';
 
 /**
@@ -28,6 +29,9 @@ const Bullet: React.FC<{ icon: any; title: string; children: React.ReactNode }> 
 );
 
 const PartyPitchPage: React.FC = () => {
+  const navigate = useNavigate();
+  // Volta pra de onde veio; se aberta direto (sem histórico), cai no Hub.
+  const goBack = () => (window.history.length > 1 ? navigate(-1) : navigate('/app/hub'));
   // Preço/condição vêm por parâmetro de URL para a proposta ser reaproveitável
   // por cliente (ex.: /proposta/partido?preco=2.500&periodo=mês&cond=Candidatos%20ilimitados).
   // Sem parâmetro, mostra "Sob proposta" — nada de preço chumbado.
@@ -52,7 +56,13 @@ const PartyPitchPage: React.FC = () => {
 
       {/* Toolbar (não imprime) */}
       <div className="no-print sticky top-0 z-10 bg-slate-900 text-white px-6 py-3 flex items-center justify-between">
-        <span className="text-sm text-slate-300">Proposta comercial · CampanhaPro Partido</span>
+        <div className="flex items-center gap-3">
+          <button onClick={goBack} className="flex items-center gap-1 text-sm text-slate-300 hover:text-white">
+            <ArrowLeft className="w-4 h-4" /> Voltar
+          </button>
+          <span className="text-sm text-slate-500 hidden sm:inline">·</span>
+          <span className="text-sm text-slate-300 hidden sm:inline">Proposta comercial · CampanhaPro Partido</span>
+        </div>
         <button onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-md px-4 py-2 text-sm flex items-center gap-2">
           <Printer className="w-4 h-4" /> Imprimir / Salvar PDF
         </button>
