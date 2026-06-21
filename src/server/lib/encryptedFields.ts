@@ -10,8 +10,14 @@
 export const ENCRYPTED_FIELDS = {
   incomes: ['documentoDoador'],
   team_members: ['cpf', 'rg', 'bankName', 'bankAgency', 'bankAccount', 'pixKey'],
-  // campaign_configs: CPF/CNPJ do candidato — colunas confirmadas na PR da config.
 } as const;
+
+/**
+ * Identificadores do candidato cifrados DENTRO do JSON `settings.campaignDetails`
+ * (não são colunas top-level). `identidade` = RG do candidato. dataNascimento e
+ * endereço ficam fora do escopo de propósito.
+ */
+export const CANDIDATE_DETAIL_FIELDS = ['cpf', 'cnpj', 'identidade'] as const;
 
 export type EncryptedTable = keyof typeof ENCRYPTED_FIELDS;
 

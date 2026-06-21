@@ -62,6 +62,7 @@ import { createControlPanelRouter } from './src/server/modules/controlPanel/cont
 import { createToolboxRouter } from './src/server/modules/toolbox/toolboxRouter';
 import { createIncomesRouter } from './src/server/modules/financial/incomesRouter';
 import { createTeamMembersRouter } from './src/server/modules/team/teamMembersRouter';
+import { createSettingsRouter } from './src/server/modules/settings/settingsRouter';
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
@@ -313,6 +314,7 @@ async function startServer() {
     app.use('/api/v1/toolbox', requireAuth, mutationLimiter, createToolboxRouter(supabaseAdmin));
     app.use('/api/v1/incomes', requireAuth, mutationLimiter, createIncomesRouter(supabaseAdmin));
     app.use('/api/v1/team-members', requireAuth, mutationLimiter, createTeamMembersRouter(supabaseAdmin));
+    app.use('/api/v1/settings', requireAuth, mutationLimiter, createSettingsRouter(supabaseAdmin));
     app.use('/api/v1/playbook', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'intelligence'), createPlaybookRouter(supabaseAdmin));
     app.use('/api/v1/party', requireAuth, mutationLimiter, moduleAccessAudit(supabaseAdmin, 'partido'), createPartyRouter(supabaseAdmin));
     app.use('/api/public/party', webhookLimiter, createPartyPublicRouter(supabaseAdmin));
