@@ -38,6 +38,7 @@
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "html5-qrcode": "^2.3.8",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.446.0",
     "react-router-dom": "^7.14.1",
     "recharts": "^3.8.1",

@@ -71,6 +71,36 @@ export function createContractsRouter(supabase: SupabaseClient): Router {
     return res.json({ contract: data });
   });
 
+  // Coleta uma assinatura desenhada na tela (imagem PNG dataURL). Anexa ao
+  // array signatures e marca o contrato como 'signed'.
+  router.post('/:id/sign', async (req: Request, res: Response) => {
+    const { nome, papel, imageDataUrl } = req.body || {};
+    if (typeof imageDataUrl !== 'string' || !imageDataUrl.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'invalid_signature' });
+    }
+    if (imageDataUrl.length > 3_000_000) return res.status(400).json({ error: 'signature_too_large' });
+
+    const { data: cur, error: getErr } = await supabase
+      .from('contracts').select('signatures').eq('id', req.params.id).maybeSingle();
+    if (getErr) return res.status(500).json({ error: getErr.message });
+    if (!cur) return res.status(404).json({ error: 'not_found' });
+
+    const signatures = Array.isArray((cur as any).signatures) ? (cur as any).signatures : [];
+    signatures.push({
+      nome: typeof nome === 'string' ? nome.slice(0, 200) : null,
+      papel: typeof papel === 'string' ? papel.slice(0, 120) : null,
+      imageDataUrl,
+      signedAt: new Date().toISOString(),
+    });
+
+    const { data, error } = await supabase
+      .from('contracts')
+      .update({ signatures, status: 'signed', updatedAt: new Date().toISOString() })
+      .eq('id', req.params.id).select('*').single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ contract: data });
+  });
+
   // Remove.
   router.delete('/:id', async (req: Request, res: Response) => {
     const { error } = await supabase.from('contracts').delete().eq('id', req.params.id);
