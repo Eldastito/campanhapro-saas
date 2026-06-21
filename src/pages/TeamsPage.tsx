@@ -29,7 +29,7 @@ const TeamsPage = () => {
           <UsersGroupIcon className="h-16 w-16 text-slate-500" />
           <h2 className="mt-4 text-2xl font-bold text-slate-300">Painel de Equipes</h2>
           <p className="mt-2 max-w-md text-slate-400">
-            Este recurso está disponível apenas no plano <strong>Campanha Total</strong>.
+            Este recurso está disponível apenas no plano <strong>Total</strong>.
             Ele permite que você filtre o dashboard por líder de equipe, acompanhando a performance
             de cada grupo separadamente.
           </p>

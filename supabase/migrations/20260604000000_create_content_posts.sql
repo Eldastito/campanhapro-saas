@@ -45,10 +45,12 @@ CREATE POLICY "content_posts_delete_own" ON content_posts
 CREATE POLICY "content_posts_service_role" ON content_posts
   FOR ALL USING (auth.role() = 'service_role');
 
--- Add content_studio feature to Pro and Enterprise plans
+-- Add content_studio feature to Estratégico and Total plans.
+-- Casamos por id (estável) em vez de nome: os planos foram renomeados de
+-- Pro/Enterprise → Estratégico/Total e o WHERE por nome ficaria órfão num reset.
 UPDATE plans
 SET features = array_append(features, 'content_studio')
-WHERE name IN ('Pro', 'Enterprise')
+WHERE id IN ('pro', 'enterprise')
   AND NOT ('content_studio' = ANY(features));
 
 -- Backfill active subscriptions
@@ -57,5 +59,5 @@ SET features = array_append(s.features, 'content_studio')
 FROM plans p
 WHERE s."planId" = p.id
   AND s.status = 'active'
-  AND p.name IN ('Pro', 'Enterprise')
+  AND p.id IN ('pro', 'enterprise')
   AND NOT ('content_studio' = ANY(s.features));

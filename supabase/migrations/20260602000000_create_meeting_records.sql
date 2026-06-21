@@ -36,10 +36,12 @@ CREATE POLICY "meeting_records_delete_own" ON meeting_records
 CREATE POLICY "meeting_records_service_role" ON meeting_records
   FOR ALL USING (auth.role() = 'service_role');
 
--- Add meetings feature to Pro and Enterprise plans
+-- Add meetings feature to Estratégico and Total plans.
+-- Os planos foram renomeados de Pro/Enterprise → Estratégico/Total; casamos por
+-- id (estável) em vez de nome pra não dessincronizar num db reset.
 UPDATE plans
 SET features = array_append(features, 'meetings')
-WHERE name IN ('Pro', 'Enterprise')
+WHERE id IN ('pro', 'enterprise')
   AND NOT ('meetings' = ANY(features));
 
 -- Backfill active subscriptions so existing users get access
@@ -48,5 +50,5 @@ SET features = array_append(s.features, 'meetings')
 FROM plans p
 WHERE s."planId" = p.id
   AND s.status = 'active'
-  AND p.name IN ('Pro', 'Enterprise')
+  AND p.id IN ('pro', 'enterprise')
   AND NOT ('meetings' = ANY(s.features));

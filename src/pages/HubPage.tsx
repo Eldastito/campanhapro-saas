@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutGrid, Megaphone, Landmark, Headphones, ArrowRight, Lock, Loader2, Plus, Building2, ChevronDown } from 'lucide-react';
+import { LayoutGrid, Megaphone, Landmark, Headphones, LineChart, Brain, ArrowRight, Lock, Loader2, Plus, Building2, ChevronDown } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import type { ModuleDef } from '../lib/modules';
@@ -8,7 +8,7 @@ import { LOGO_MONO_BASE64 } from '../constants';
 
 // Resolve o nome do ícone (string no registry) → componente lucide.
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  Megaphone, Landmark, Headphones, LayoutGrid,
+  Megaphone, Landmark, Headphones, LayoutGrid, LineChart, Brain,
 };
 const iconOf = (name: string) => ICONS[name] ?? LayoutGrid;
 

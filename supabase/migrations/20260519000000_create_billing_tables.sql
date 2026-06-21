@@ -1,8 +1,12 @@
 -- Phase 8: Billing — plans, subscriptions, usage records
 
--- Plans catalogue (seeded with Free / Pro / Enterprise)
+-- Plans catalogue (seeded with Gratuito / Essencial / Estratégico / Total).
+-- ATENÇÃO: os preços REAIS são 10/15/20 mil reais. A versão original deste seed
+-- saiu como pro=R$299 / enterprise=R$999 e foi corrigida no banco depois. O seed
+-- aqui ficou divergente até o usuário pedir "sumir com esses preços" — a partir
+-- daqui, esta migration é a fonte canônica e bate com o banco vivo.
 CREATE TABLE IF NOT EXISTS plans (
-  id              TEXT PRIMARY KEY,                -- 'free' | 'pro' | 'enterprise'
+  id              TEXT PRIMARY KEY,                -- 'free' | 'essencial' | 'pro' | 'enterprise'
   name            TEXT NOT NULL,
   "monthlyCents"  INTEGER NOT NULL DEFAULT 0,      -- price in BRL cents
   features        TEXT[] NOT NULL DEFAULT '{}',    -- e.g. ['ai_agents', 'visits', 'crm']
@@ -62,31 +66,43 @@ CREATE INDEX IF NOT EXISTS idx_usage_records_campaign_metric
 CREATE INDEX IF NOT EXISTS idx_usage_records_campaign_recent
   ON usage_records ("campaignId", "recordedAt" DESC);
 
--- Seed default plans
+-- Seed default plans (alinhado com o estado canônico do superadmin).
 INSERT INTO plans (id, name, "monthlyCents", features, limits) VALUES
   (
     'free',
     'Gratuito',
     0,
-    ARRAY['dashboard', 'crm', 'help'],
-    '{"contacts": 100, "ai_budget_cents": 0, "team_users": 2, "messages_per_month": 0}'::jsonb
+    ARRAY['dashboard', 'crm', 'help', 'visits', 'team', 'engagement', 'forms', 'resources'],
+    '{"ai_calls": 0, "contacts": -1, "team_users": -1, "ai_budget_cents": 0, "blasts_per_month": 0}'::jsonb
+  ),
+  (
+    'essencial',
+    'Essencial',
+    1000000,                                 -- R$ 10.000,00
+    ARRAY['dashboard', 'crm', 'help', 'visits', 'team', 'engagement', 'resources',
+          'goals', 'routines', 'ai_agents', 'forms', 'whatsapp_omnichannel'],
+    '{"ai_calls": 100, "contacts": -1, "team_users": -1, "ai_budget_cents": 10000, "blasts_per_month": 1000}'::jsonb
   ),
   (
     'pro',
-    'Pro',
-    29900,                                   -- R$ 299,00
-    ARRAY['dashboard', 'crm', 'help', 'ai_agents', 'visits', 'engagement',
-          'tools', 'resources', 'training', 'analytics', 'team', 'financial'],
-    '{"contacts": 10000, "ai_budget_cents": 50000, "team_users": 25, "messages_per_month": 5000}'::jsonb
+    'Estratégico',
+    1500000,                                 -- R$ 15.000,00
+    ARRAY['dashboard', 'crm', 'help', 'visits', 'team', 'engagement', 'resources',
+          'goals', 'routines', 'ai_agents', 'forms', 'analytics', 'financial',
+          'content_studio', 'rag', 'meetings', 'tools', 'training',
+          'whatsapp_omnichannel', 'call_center'],
+    '{"ai_calls": 100, "contacts": -1, "team_users": -1, "ai_budget_cents": 50000, "blasts_per_month": 10000}'::jsonb
   ),
   (
     'enterprise',
-    'Enterprise',
-    99900,                                   -- R$ 999,00
-    ARRAY['dashboard', 'crm', 'help', 'ai_agents', 'visits', 'engagement',
-          'tools', 'resources', 'training', 'analytics', 'team', 'financial',
-          'election_day', 'intelligence', 'scenarios'],
-    '{"contacts": -1, "ai_budget_cents": -1, "team_users": -1, "messages_per_month": -1}'::jsonb
+    'Total',
+    2000000,                                 -- R$ 20.000,00
+    ARRAY['dashboard', 'crm', 'help', 'visits', 'team', 'engagement', 'resources',
+          'goals', 'routines', 'ai_agents', 'forms', 'analytics', 'financial',
+          'content_studio', 'rag', 'meetings', 'tools', 'training',
+          'whatsapp_omnichannel', 'election_day', 'intelligence', 'scenarios',
+          'budget_ceo', 'paperclip', 'compliance', 'call_center'],
+    '{"ai_calls": -1, "contacts": -1, "team_users": -1, "ai_budget_cents": -1, "blasts_per_month": -1}'::jsonb
   )
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
