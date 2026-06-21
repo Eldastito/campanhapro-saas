@@ -18,6 +18,9 @@ interface AuthContextType {
   isInitializing: boolean;
   userType: AuthenticatedUser['type'] | null;
   sendPasswordReset: (email: string) => Promise<void>;
+  /** Senha OK (aal1) mas falta o 2º fator (TOTP). A UI mostra o desafio e o
+   *  usuário fica "não logado" até completar — gate de enforcement do 2FA. */
+  mfaPending: boolean;
 }
 
 const AuthContext = React.createContext<AuthContextType | undefined>(undefined);
@@ -26,6 +29,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
   const [user, setUser] = React.useState<AuthenticatedUser | null>(null);
   const [isLoading, setIsLoading] = React.useState<boolean>(false);
   const [isInitializing, setIsInitializing] = React.useState<boolean>(true);
+  const [mfaPending, setMfaPending] = React.useState<boolean>(false);
   // Último uid já hidratado — evita re-buscar/re-renderizar em TOKEN_REFRESHED/foco.
   const loadedUidRef = React.useRef<string | null>(null);
 
@@ -87,6 +91,21 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
 
       setTimeout(async () => {
         try {
+          // 2FA: se a sessão fez senha (aal1) mas exige 2º fator (aal2), NÃO
+          // consideramos logado — segura em mfaPending até o TOTP. Sem isso o
+          // router redirecionaria pro /app pulando o desafio. Leitura local do
+          // token (sem rede), seguro fora do callback síncrono do GoTrue.
+          try {
+            const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+            if (aal?.currentLevel === 'aal1' && aal?.nextLevel === 'aal2') {
+              setMfaPending(true);
+              setUser(null);
+              setIsInitializing(false);
+              return; // não seta loadedUidRef → re-avalia após o verify (aal2)
+            }
+          } catch { /* sem MFA → fluxo normal */ }
+          setMfaPending(false);
+
           const userData = await fetchOrCreateUser(session);
           if (userData) {
             const dbCampaignId = userData.campaignId;
@@ -251,7 +270,7 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
 
   const value = {
     user, login, register, loginWithGoogle, logout, sendPasswordReset,
-    isLoading, isInitializing, userType: user?.type || null,
+    isLoading, isInitializing, userType: user?.type || null, mfaPending,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

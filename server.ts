@@ -241,6 +241,10 @@ const callGeminiREST = async (prompt: string) => {
 
 async function startServer() {
   const app = express();
+  // Atrás do reverse proxy do Coolify: confia no 1º proxy pra req.ip refletir o
+  // X-Forwarded-For real (rate-limit por IP correto, log de IP no wipe/auditoria,
+  // cookies secure coerentes). Sem isso o rate-limit via no IP do proxy.
+  app.set('trust proxy', 1);
   const httpServer = createHttpServer(app);
   const port = Number(process.env.PORT) || 3001;
   console.log(`[System] Inicializando CampanhaPro v1.0.3...`);
