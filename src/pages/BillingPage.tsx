@@ -1,8 +1,9 @@
 import { authedFetch } from '../lib/authedFetch';
 import * as React from 'react';
-import { CreditCard, Loader2 } from 'lucide-react';
+import { CreditCard, Loader2, Download } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
+import { generateContractPdf } from '../lib/contractPdf';
 import Tabs from '../components/Tabs';
 import ErrorBoundary from '../components/dev/ErrorBoundary';
 import PlanCard, { Plan } from '../components/billing/PlanCard';
@@ -102,6 +103,51 @@ const HistoryTab: React.FC = () => {
             <span className="text-slate-500 text-right">
               {new Date(r.recorded_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
             </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+};
+
+// Contratos vinculados à campanha — read-only (criação/assinatura ficam no Supreme).
+const ContractsClientTab: React.FC = () => {
+  const [contracts, setContracts] = React.useState<any[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const res = await authedFetch('/api/v1/contracts');
+        if (res.ok) setContracts((await res.json()).contracts ?? []);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  if (loading) return <div className="flex justify-center py-8 text-slate-500"><Loader2 className="w-5 h-5 animate-spin" /></div>;
+  if (contracts.length === 0) {
+    return <div className="text-center py-8 text-slate-500 text-sm">Nenhum contrato vinculado a esta campanha.</div>;
+  }
+
+  return (
+    <Card>
+      <h3 className="text-sm font-semibold text-slate-300 mb-3">Contratos da campanha</h3>
+      <div className="space-y-2">
+        {contracts.map(c => (
+          <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-slate-700/30 rounded">
+            <div className="min-w-0">
+              <p className="text-sm text-slate-200 font-medium truncate">{c.title}</p>
+              <p className="text-[11px] text-slate-500">
+                <span className="uppercase">{c.status || 'draft'}</span>
+                {c.fields?.vigenciaInicio ? ` · vigência desde ${new Date(c.fields.vigenciaInicio).toLocaleDateString('pt-BR')}` : ''}
+                {Array.isArray(c.signatures) && c.signatures.length ? ` · ${c.signatures.length} assinatura(s)` : ''}
+              </p>
+            </div>
+            <Button variant="secondary" className="text-xs px-3 py-1.5 flex items-center gap-1.5 shrink-0" onClick={() => generateContractPdf(c)}>
+              <Download className="w-3.5 h-3.5" /> PDF
+            </Button>
           </div>
         ))}
       </div>
@@ -232,8 +278,8 @@ const BillingPage: React.FC = () => {
 
       <Tabs
         tabs={isAdmin
-          ? ['Planos', 'Uso', 'Histórico', 'Admin · Catálogo']
-          : ['Planos', 'Uso', 'Histórico']}
+          ? ['Planos', 'Uso', 'Histórico', 'Contratos', 'Admin · Catálogo']
+          : ['Planos', 'Uso', 'Histórico', 'Contratos']}
         mode="state"
       >
         <ErrorBoundary label="Planos">
@@ -248,6 +294,9 @@ const BillingPage: React.FC = () => {
         </ErrorBoundary>
         <ErrorBoundary label="Histórico">
           <HistoryTab />
+        </ErrorBoundary>
+        <ErrorBoundary label="Contratos">
+          <ContractsClientTab />
         </ErrorBoundary>
         {isAdmin && (
           <ErrorBoundary label="Admin · Catálogo">

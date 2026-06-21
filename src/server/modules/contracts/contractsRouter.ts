@@ -13,9 +13,11 @@
  */
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { decryptFields } from '../../lib/fieldCrypto';
+import { CANDIDATE_DETAIL_FIELDS } from '../../lib/encryptedFields';
 
 // Campos graváveis pelo cliente (createdAt/updatedAt/createdBy/signatures são do servidor).
-const WRITABLE = ['title', 'status', 'provider', 'client', 'people', 'clauses', 'fields'] as const;
+const WRITABLE = ['title', 'status', 'campaignId', 'provider', 'client', 'people', 'clauses', 'fields'] as const;
 
 function pick(body: any): Record<string, any> {
   const out: Record<string, any> = {};
@@ -30,11 +32,43 @@ export function createContractsRouter(supabase: SupabaseClient): Router {
   router.get('/', async (_req: Request, res: Response) => {
     const { data, error } = await supabase
       .from('contracts')
-      .select('id, title, status, provider, client, "createdAt", "updatedAt"')
+      .select('id, title, status, "campaignId", provider, client, "createdAt", "updatedAt"')
       .order('createdAt', { ascending: false })
       .limit(500);
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ contracts: data ?? [] });
+  });
+
+  // Campanhas + cadastro (decifrado) para o seletor e o pré-preenchimento do
+  // contratante. Registrado ANTES de /:id pra Express não casar "campaigns" como id.
+  router.get('/campaigns', async (_req: Request, res: Response) => {
+    const { data: camps, error } = await supabase
+      .from('campaigns').select('id, name').order('name', { ascending: true }).limit(1000);
+    if (error) return res.status(500).json({ error: error.message });
+
+    const ids = (camps ?? []).map((c: any) => c.id);
+    const { data: settings } = ids.length
+      ? await supabase.from('settings').select('campaignId, campaignDetails').in('campaignId', ids)
+      : { data: [] as any[] };
+    const byId = new Map((settings ?? []).map((s: any) => [s.campaignId, s.campaignDetails]));
+
+    const out = (camps ?? []).map((c: any) => {
+      const cd = byId.get(c.id) ? decryptFields(byId.get(c.id), CANDIDATE_DETAIL_FIELDS) : null;
+      // Mapeia o cadastro da campanha para os campos do contratante (Party).
+      const client = cd ? {
+        razaoSocial: cd.nomeCompleto || c.name || '',
+        cnpj: cd.cnpj || cd.cpf || '',
+        endereco: cd.endereco || '',
+        cidade: cd.cidade || '',
+        estado: cd.estado || '',
+        cep: cd.cep || '',
+        representante: cd.nomeCompleto || '',
+        email: cd.email || '',
+        telefone: cd.telefone || '',
+      } : { razaoSocial: c.name || '' };
+      return { campaignId: c.id, name: c.name || c.id, client };
+    });
+    return res.json({ campaigns: out });
   });
 
   // Detalhe completo.

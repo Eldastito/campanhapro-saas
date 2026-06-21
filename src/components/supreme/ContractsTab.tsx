@@ -21,14 +21,15 @@ interface Clause { titulo?: string; texto?: string; }
 interface Signature { nome?: string; papel?: string; imageDataUrl?: string; signedAt?: string; }
 interface ContractFields { objeto?: string; valor?: string; vigenciaInicio?: string; vigenciaFim?: string; foro?: string; observacoes?: string; }
 interface Contract {
-  id?: string; title: string; status?: string;
+  id?: string; title: string; status?: string; campaignId?: string;
   provider: Party; client: Party; people: Person[]; clauses: Clause[]; fields: ContractFields;
   signatures: Signature[];
   createdAt?: string; updatedAt?: string;
 }
+interface CampaignOption { campaignId: string; name: string; client: Party }
 
 const emptyContract: Contract = {
-  title: '', status: 'draft', provider: {}, client: {}, people: [], clauses: [], fields: {}, signatures: [],
+  title: '', status: 'draft', campaignId: '', provider: {}, client: {}, people: [], clauses: [], fields: {}, signatures: [],
 };
 
 const PARTY_FIELDS: { key: keyof Party; label: string }[] = [
@@ -68,6 +69,7 @@ const ContractsTab: React.FC = () => {
   const [signing, setSigning] = useState(false);
   const [signSaving, setSignSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [campaigns, setCampaigns] = useState<CampaignOption[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +79,19 @@ const ContractsTab: React.FC = () => {
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Campanhas (com cadastro) para vincular o contrato e pré-preencher o contratante.
+  useEffect(() => { (async () => {
+    const r = await authedFetch('/api/v1/supreme/contracts/campaigns');
+    if (r.ok) setCampaigns((await r.json()).campaigns ?? []);
+  })(); }, []);
+
+  // Copia o cadastro da campanha vinculada para os campos do contratante.
+  const prefillFromCampaign = () => setEditing((e) => {
+    if (!e?.campaignId) return e;
+    const camp = campaigns.find((c) => c.campaignId === e.campaignId);
+    return camp ? { ...e, client: { ...e.client, ...camp.client } } : e;
+  });
 
   const openNew = () => { setError(null); setEditing({ ...emptyContract, provider: {}, client: {}, people: [], clauses: [], fields: {} }); };
   const openEdit = async (id: string) => {
@@ -112,7 +127,7 @@ const ContractsTab: React.FC = () => {
       const r = await authedFetch(id ? `/api/v1/supreme/contracts/${id}` : '/api/v1/supreme/contracts', {
         method: id ? 'PUT' : 'POST',
         body: JSON.stringify({
-          title: editing.title, status: editing.status,
+          title: editing.title, status: editing.status, campaignId: editing.campaignId || null,
           provider: editing.provider, client: editing.client,
           people: editing.people, clauses: editing.clauses, fields: editing.fields,
         }),
@@ -169,6 +184,20 @@ const ContractsTab: React.FC = () => {
             <input className={input + ' mt-1'} placeholder="Ex.: Contrato de Licenciamento de Software — CampanhaPro"
               value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} />
           </label>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
+            <label className="text-[11px] text-slate-400">Campanha vinculada (opcional)
+              <select className={input + ' mt-1'} value={editing.campaignId || ''}
+                onChange={(e) => setEditing({ ...editing, campaignId: e.target.value })}>
+                <option value="">— Contratante externo (sem campanha) —</option>
+                {campaigns.map((c) => <option key={c.campaignId} value={c.campaignId}>{c.name}</option>)}
+              </select>
+            </label>
+            <Button onClick={prefillFromCampaign} disabled={!editing.campaignId}
+              className="bg-slate-700 hover:bg-slate-600 disabled:opacity-40 h-9 text-xs whitespace-nowrap">
+              Usar dados da campanha
+            </Button>
+          </div>
+          <p className="text-[10px] text-slate-600">Vincular a uma campanha pré-preenche o contratante e exibe o contrato no Faturamento do cliente.</p>
         </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
