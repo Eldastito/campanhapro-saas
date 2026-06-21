@@ -438,8 +438,12 @@ const PartyPresidentPage: React.FC = () => {
     window.open(wa, '_blank');
   };
 
+  // Convite ainda em aberto: 'pending' OU 'registering' (estado transitório do
+  // autocadastro; se travar no meio, o candidato fica visível e re-convidável
+  // em vez de sumir da lista). 'active' = já concluiu.
+  const isInviteOpen = (c: Candidate) => (c.status === 'pending' || c.status === 'registering') && !!c.inviteToken;
   // Candidatos ainda não cadastrados (pendentes) que têm link de convite.
-  const pendentesConvite = candidates.filter((c) => c.status === 'pending' && c.inviteToken);
+  const pendentesConvite = candidates.filter(isInviteOpen);
   // Copia "Nome: link" de todos os pendentes pra colar numa lista de transmissão.
   const copyAllInvites = () => {
     if (!pendentesConvite.length) return;
@@ -601,7 +605,7 @@ const PartyPresidentPage: React.FC = () => {
           const filtered = candidates.filter((c) => {
             if (q && !`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''}`.toLowerCase().includes(q)) return false;
             if (estadoFilter !== 'all' && (c.estado || '') !== estadoFilter) return false;
-            if (statusFilter === 'pending' && c.status !== 'pending') return false;
+            if (statusFilter === 'pending' && !(c.status === 'pending' || c.status === 'registering')) return false;
             if ((statusFilter === 'green' || statusFilter === 'yellow' || statusFilter === 'red') && c.score?.level !== statusFilter) return false;
             return true;
           });
@@ -654,13 +658,13 @@ const PartyPresidentPage: React.FC = () => {
                       🎯 {c.metasDone}/{c.metasTotal}
                     </span>
                   )}
-                  {c.status === 'pending' && c.inviteToken && (
+                  {isInviteOpen(c) && (
                     <button onClick={() => sendWhatsApp(c)} title="Enviar convite no WhatsApp"
                       className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-300 font-bold">
                       <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
                     </button>
                   )}
-                  {c.status === 'pending' && c.inviteToken && (
+                  {isInviteOpen(c) && (
                     <button onClick={() => copyLink(c.inviteToken)} title="Copiar link de cadastro"
                       className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">
                       {copied === c.inviteToken ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copiado</> : <><Link2 className="w-3.5 h-3.5" /> Link</>}

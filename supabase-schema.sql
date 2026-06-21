@@ -338,17 +338,22 @@ ALTER TABLE street_reports ENABLE ROW LEVEL SECURITY;
 -- HELPER FUNCTIONS
 -- =============================================
 
--- Função para verificar se o usuário é Supreme Admin
+-- Função para verificar se o usuário é Supreme Admin.
+-- Governança: decide SÓ pela flag no banco — sem e-mail hardcoded (era um
+-- backdoor por string). Mantido alinhado com a migration de hardening.
 CREATE OR REPLACE FUNCTION is_supreme_admin()
-RETURNS BOOLEAN AS $$
+RETURNS BOOLEAN
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $$
 BEGIN
   RETURN EXISTS (
-    SELECT 1 FROM users 
-    WHERE id = auth.uid() 
-    AND ("isSupremeAdmin" = TRUE OR email = 'eldastito@gmail.com')
+    SELECT 1 FROM users
+    WHERE id = auth.uid()
+      AND "isSupremeAdmin" = TRUE
   );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Função para obter o campaignId do usuário atual
 CREATE OR REPLACE FUNCTION get_user_campaign_id()

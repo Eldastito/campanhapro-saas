@@ -78,8 +78,6 @@ export const PLAN_CONFIGS = {
     }
 };
 
-const VIP_EMAILS = ['examepad@gmail.com', 'eldastito@gmail.com', 'examepad@teste.com'];
-
 export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { user } = useAuth();
     const [permissions, setPermissions] = React.useState<ProfilePermissions | null>(null);
@@ -87,17 +85,11 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const [isLoading, setIsLoading] = React.useState(true);
 
     React.useEffect(() => {
-        const isVIP = VIP_EMAILS.includes(user?.email || '');
-
+        // Sem acesso por e-mail hardcoded: quem não tem campanha não recebe config
+        // (vai pro onboarding). Permissões/plano vêm do banco como qualquer conta.
         if (!user?.campaignId) {
-            // VIP sem campaign_id ainda recebe acesso total
-            if (isVIP) {
-                setPermissions(DEFAULT_PERMISSIONS);
-                setConfig({ planTier: 'completo', features: Object.keys(PLAN_CONFIGS.completo.features) } as any);
-            } else {
-                setPermissions(DEFAULT_PERMISSIONS);
-                setConfig(null);
-            }
+            setPermissions(DEFAULT_PERMISSIONS);
+            setConfig(null);
             setIsLoading(false);
             return;
         }

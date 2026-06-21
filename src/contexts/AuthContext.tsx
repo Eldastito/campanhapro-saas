@@ -4,8 +4,9 @@ import { supabase } from '../lib/supabaseClient';
 import { AuthenticatedUser, Plan } from '../types/user';
 import { ensureCampaignConfig } from '../utils/planUtils';
 
-const SUPREME_ADMIN_EMAIL = 'eldastito@gmail.com';
-const VIP_EMAILS = ['eldastito@gmail.com', 'examepad@gmail.com'];
+// Governança: NADA de admin/plano por e-mail hardcoded. Supreme admin, tipo e
+// plano vêm 100% do banco (users.isSupremeAdmin / type / plan). Contas novas
+// passam pelo onboarding (/welcome) como qualquer uma.
 
 interface AuthContextType {
   user: AuthenticatedUser | null;
@@ -36,46 +37,19 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
       .single();
 
     if (userError && userError.code === 'PGRST116') {
-      const isVip = VIP_EMAILS.includes(session.user.email || '');
-
-      // Phase 9: only VIPs get auto-bootstrap (backward compat for existing onboarding).
-      // Regular new signups go through /welcome → backend onboarding/bootstrap endpoint
-      // which creates campaign + free subscription explicitly. We return a placeholder
-      // user (no campaign_id) so the router can redirect to /welcome.
-      if (!isVip) {
-        return {
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Novo Usuário',
-          type: null,
-          plan: null,
-          role: 'active',
-          campaign_id: null,
-          is_supreme_admin: false,
-        };
-      }
-
-      const autoCampaignId = crypto.randomUUID();
-      const initialPlan: Plan = Plan.TOTAL;
-      const { data: newUser, error: insertError } = await supabase.from('users').insert({
+      // Sem linha em users → conta nova. Devolve placeholder (sem campaign_id) pro
+      // router mandar pro /welcome, onde o backend (onboarding/bootstrap) cria
+      // campanha + assinatura. Sem auto-bootstrap por e-mail (governança).
+      return {
         id: session.user.id,
-        name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Novo Usuário',
         email: session.user.email,
-        type: 'Admin',
-        plan: initialPlan,
+        name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'Novo Usuário',
+        type: null,
+        plan: null,
         role: 'active',
-        campaignId: autoCampaignId,
-        isSupremeAdmin: false,
-      }).select().single();
-
-      if (insertError) return null;
-      userData = newUser;
-
-      try {
-        await ensureCampaignConfig(supabase, autoCampaignId, initialPlan);
-      } catch (err) {
-        console.warn('Falha ao criar campaign_configs inicial:', err);
-      }
+        campaign_id: null,
+        is_supreme_admin: false,
+      };
     } else if (userError) {
       return null;
     } else {
@@ -116,17 +90,16 @@ export const AuthProvider = ({ children }: { children?: React.ReactNode }) => {
           const userData = await fetchOrCreateUser(session);
           if (userData) {
             const dbCampaignId = userData.campaignId;
-            const dbIsSupremeAdmin = !!(userData.isSupremeAdmin);
             const dbAssignedLeaderId = userData.assignedLeaderId;
-            const isSupremeAdmin = session.user.email === SUPREME_ADMIN_EMAIL || dbIsSupremeAdmin;
-            const isVip = VIP_EMAILS.includes(session.user.email || '');
+            // Supreme admin, tipo e plano vêm SÓ do banco — sem override por e-mail.
+            const isSupremeAdmin = !!(userData.isSupremeAdmin);
             loadedUidRef.current = uid;
             setUser({
               ...userData,
               uid: session.user.id,
               isSupremeAdmin,
-              type: isVip && userData.type !== 'Admin' ? 'Admin' : userData.type,
-              plan: isVip && userData.plan !== 'Total' ? 'Total' : userData.plan,
+              type: userData.type,
+              plan: userData.plan,
               campaignId: dbCampaignId,
               assignedLeaderId: dbAssignedLeaderId,
             } as AuthenticatedUser);

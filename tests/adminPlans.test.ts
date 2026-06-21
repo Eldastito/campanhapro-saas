@@ -183,7 +183,9 @@ describe('Supreme Admin · plan CRUD', () => {
     assert.equal(audits[0].action, 'admin.plan.deactivate');
   });
 
-  test('Supreme Admin via env email is also accepted', async () => {
+  // Governança: supreme admin é SÓ pela flag no banco. O override por
+  // SUPREME_ADMIN_EMAIL (env) foi removido — este teste é a guarda disso.
+  test('Supreme Admin via env email is NOT accepted (flag-only)', async () => {
     process.env.SUPREME_ADMIN_EMAIL = 'owner@example.com';
     const sb = freshSupabase();
     const userByEmail = {
@@ -191,7 +193,7 @@ describe('Supreme Admin · plan CRUD', () => {
       campaignId: 'c1', isSupremeAdmin: false,
     };
     const res = await req(buildApp(userByEmail, sb), 'GET', '/api/v1/billing/admin/plans');
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 403);
     delete process.env.SUPREME_ADMIN_EMAIL;
   });
 });
