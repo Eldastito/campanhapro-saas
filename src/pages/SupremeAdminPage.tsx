@@ -17,6 +17,7 @@ import BusinessKpis from '../components/supreme/BusinessKpis';
 import PartiesTab from '../components/supreme/PartiesTab';
 import ModulesTab from './supreme/ModulesTab';
 import SupportSessionsTab from './supreme/SupportSessionsTab';
+import ContractsTab from '../components/supreme/ContractsTab';
 import TseKeysPanel from '../components/supreme/TseKeysPanel';
 import { 
     Users, ShieldAlert, Ban, CheckCircle, Globe,
@@ -88,7 +89,7 @@ async function supremeFetch(path: string, init?: RequestInit): Promise<any> {
 const SupremeAdminPage: React.FC = () => {
     const { user, logout, sendPasswordReset } = useAuth();
     // Aba ativa persistida na URL (?tab=) → sobrevive a refresh e é compartilhável.
-    const VALID_TABS = ['overview', 'campaigns', 'users', 'platform', 'financial', 'parties', 'modulos', 'suporte', 'audit', 'forms'] as const;
+    const VALID_TABS = ['overview', 'campaigns', 'users', 'platform', 'financial', 'parties', 'modulos', 'suporte', 'audit', 'forms', 'contratos'] as const;
     type SupremeTab = typeof VALID_TABS[number];
     const [activeTab, setActiveTab] = useState<SupremeTab>(() => {
         try {
@@ -688,6 +689,12 @@ const SupremeAdminPage: React.FC = () => {
                             className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'modulos' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
                         >
                             🧩 Módulos
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('contratos')}
+                            className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === 'contratos' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            📄 Contratos
                         </button>
                         <button
                             onClick={() => setActiveTab('suporte')}
@@ -1675,6 +1682,8 @@ const SupremeAdminPage: React.FC = () => {
                     {activeTab === 'parties' && <PartiesTab />}
 
                     {activeTab === 'modulos' && <ModulesTab />}
+
+                    {activeTab === 'contratos' && <ContractsTab />}
 
                     {activeTab === 'suporte' && <SupportSessionsTab />}
 
