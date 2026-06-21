@@ -133,6 +133,9 @@ const SupremeAdminPage: React.FC = () => {
     // Financial metrics (F3)
     const [financial, setFinancial] = useState<any | null>(null);
     const [runningLifecycle, setRunningLifecycle] = useState(false);
+    // Criptografia de campos sensíveis legados (CPF/RG/banco/PIX/etc.) em lote.
+    const [migratingEnc, setMigratingEnc] = useState(false);
+    const [encResult, setEncResult] = useState<any | null>(null);
     const [newCost, setNewCost] = useState({ category: 'infraestrutura', description: '', amount: '', currency: 'BRL' });
     const [taxes, setTaxes] = useState<any | null>(null);
     const [taxConfig, setTaxConfig] = useState<any>({ regime: 'simples', anexoOverride: 'auto', cnae: '', usdBrlRate: 5.40 });
@@ -567,6 +570,20 @@ const SupremeAdminPage: React.FC = () => {
             alert(`Erro ao rodar cobrança: ${e.message || 'desconhecido'}`);
         } finally {
             setRunningLifecycle(false);
+        }
+    };
+
+    const handleEncryptMigrateAll = async () => {
+        if (!confirm('Cifrar dados sensíveis legados (CPF, RG, título, banco, PIX, doc. do doador, CPF/CNPJ do candidato) em TODAS as campanhas?\n\nÉ seguro rodar mais de uma vez (idempotente). Requer FIELD_ENCRYPTION_KEY configurada no servidor.')) return;
+        setMigratingEnc(true);
+        setEncResult(null);
+        try {
+            const r = await supremeFetch('/encrypt-migrate-all', { method: 'POST' });
+            setEncResult(r?.summary ?? {});
+        } catch (e: any) {
+            alert(`Erro na migração: ${e.message || 'desconhecido'}`);
+        } finally {
+            setMigratingEnc(false);
         }
     };
 
@@ -1751,6 +1768,35 @@ const SupremeAdminPage: React.FC = () => {
                             animate={{ opacity: 1 }}
                             className="space-y-8"
                         >
+                            {/* Segurança — criptografia de campos sensíveis em repouso */}
+                            <Card className="bg-slate-900 border-white/5 p-6 space-y-3">
+                                <div className="flex items-center gap-3 border-b border-white/5 pb-4">
+                                    <Lock className="w-6 h-6 text-emerald-400" />
+                                    <h3 className="font-bold text-white uppercase tracking-widest text-sm">Criptografia de Dados Sensíveis</h3>
+                                </div>
+                                <p className="text-xs text-slate-400 leading-relaxed">
+                                    Cifra em repouso (AES-256-GCM) os campos legados em texto puro de <strong className="text-slate-200">todas as campanhas</strong>: CPF, RG, título de eleitor, dados bancários/PIX, documento do doador e CPF/CNPJ do candidato. Dados novos já entram cifrados automaticamente — isto é só para os antigos. É <strong className="text-emerald-300">idempotente</strong> (pode rodar de novo sem dano).
+                                </p>
+                                <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                                    Requer <code className="font-mono">FIELD_ENCRYPTION_KEY</code> configurada no servidor.
+                                </p>
+                                <Button onClick={handleEncryptMigrateAll} disabled={migratingEnc} className="bg-emerald-600 hover:bg-emerald-500 flex items-center gap-2 h-9 text-xs">
+                                    <Lock className={`w-4 h-4 ${migratingEnc ? 'animate-pulse' : ''}`} />
+                                    {migratingEnc ? 'Cifrando…' : 'Cifrar dados legados (todas as campanhas)'}
+                                </Button>
+                                {encResult && (
+                                    <div className="mt-2 p-3 bg-slate-950 rounded-lg border border-emerald-500/20 text-[11px] text-slate-300 space-y-1">
+                                        <p className="text-emerald-400 font-bold">Concluído ✓</p>
+                                        {['incomes', 'team_members', 'settings'].map((t) => (
+                                            <p key={t}>
+                                                <span className="text-slate-500 font-mono">{t}:</span>{' '}
+                                                {encResult[t]?.migrated ?? 0} cifrados de {encResult[t]?.scanned ?? 0} verificados
+                                            </p>
+                                        ))}
+                                    </div>
+                                )}
+                            </Card>
+
                             {/* Atalho para o Form Builder (a antiga seção estática virou a aba Formulários) */}
                             <Card className="bg-slate-900 border-white/5 p-6 space-y-3">
                                 <div className="flex items-center gap-3 border-b border-white/5 pb-4">
