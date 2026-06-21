@@ -189,13 +189,21 @@ const PartyPresidentPage: React.FC = () => {
   const [editing, setEditing] = React.useState(false);
 
   const openEdit = (c: Candidate) => { setEditFor(c); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', estado: c.estado || '', phone: c.phone || '' }); };
+  // M7: feedback padronizado de erro. Antes, vários saves do presidente falhavam
+  // em silêncio (fechavam o modal sem avisar). Usa alert pra ficar consistente
+  // com deleteCandidate (a página não tem sistema de toast próprio).
+  const notifyFail = async (r: Response, what: string) => {
+    const j = await r.json().catch(() => ({}));
+    alert(`${what} (${j?.detail || j?.error || `HTTP ${r.status}`}).`);
+  };
   const saveEdit = async () => {
     if (!editFor || !editForm.displayName.trim()) return;
     setEditing(true);
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${editFor.id}`, { method: 'PATCH', body: JSON.stringify(editForm) });
       if (r.ok) { setEditFor(null); await load(); }
-    } catch { /* */ }
+      else await notifyFail(r, 'Não consegui salvar as alterações');
+    } catch { alert('Falha de rede ao salvar. Tente de novo.'); }
     finally { setEditing(false); }
   };
   const deleteCandidate = async (c: Candidate) => {
@@ -230,8 +238,8 @@ const PartyPresidentPage: React.FC = () => {
       if (r.ok) {
         setCandidates((prev) => prev.map((c) => (c.id === target.id ? { ...c, repasseStatus: decision, valveNote: note } : c)));
         if (proofFor && proofFor.id === target.id) { setProofFor({ ...proofFor, repasseStatus: decision, valveNote: note }); await openProof({ ...proofFor, repasseStatus: decision }); }
-      }
-    } catch { /* */ }
+      } else await notifyFail(r, 'Não consegui atualizar a válvula');
+    } catch { alert('Falha de rede ao atualizar a válvula. Tente de novo.'); }
     finally { setValveBusy(null); }
   };
 
@@ -283,7 +291,9 @@ const PartyPresidentPage: React.FC = () => {
     try {
       const r = await authedFetch('/api/v1/party/provision', { method: 'POST', body: JSON.stringify({ name: provName.trim() }) });
       if (r.ok) await load();
-    } finally { setProvBusy(false); }
+      else await notifyFail(r, 'Não consegui criar o partido');
+    } catch { alert('Falha de rede ao criar o partido. Tente de novo.'); }
+    finally { setProvBusy(false); }
   };
 
   const openPartyEdit = () => { setPartyForm({ name: party?.name || '', numero: party?.numero || '' }); setPartyEditOpen(true); };
@@ -293,7 +303,9 @@ const PartyPresidentPage: React.FC = () => {
     try {
       const r = await authedFetch('/api/v1/party/profile', { method: 'PATCH', body: JSON.stringify({ name: partyForm.name.trim(), numero: partyForm.numero }) });
       if (r.ok) { setPartyEditOpen(false); await load(true); }
-    } finally { setPartySaving(false); }
+      else await notifyFail(r, 'Não consegui salvar o perfil do partido');
+    } catch { alert('Falha de rede ao salvar o perfil. Tente de novo.'); }
+    finally { setPartySaving(false); }
   };
 
   const addCandidate = async () => {
@@ -302,7 +314,9 @@ const PartyPresidentPage: React.FC = () => {
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
       if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' }); setAddOpen(false); await load(); }
-    } finally { setAdding(false); }
+      else await notifyFail(r, 'Não consegui adicionar o candidato');
+    } catch { alert('Falha de rede ao adicionar o candidato. Tente de novo.'); }
+    finally { setAdding(false); }
   };
 
   const importRows = async () => {
@@ -459,8 +473,9 @@ const PartyPresidentPage: React.FC = () => {
           });
         }
         setRepasseFor(null); await load();
-      }
-    } finally { setSavingRep(false); }
+      } else await notifyFail(r, 'Não consegui lançar o repasse');
+    } catch { alert('Falha de rede ao lançar o repasse. Tente de novo.'); }
+    finally { setSavingRep(false); }
   };
 
   // Pausar/reativar/cancelar recorrente (#147).

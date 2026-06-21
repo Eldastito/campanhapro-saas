@@ -10,7 +10,9 @@ import { supabase } from '../lib/supabaseClient';
  * mesmo padrão do Mapa da Campanha. NÃO expõe valores em R$.
  */
 const LEVEL_COLOR: Record<string, string> = { green: '#10b981', yellow: '#f59e0b', red: '#f43f5e' };
-const esc = (s: any) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] || c));
+// Escapa TUDO que pode quebrar o HTML do popup montado por string, inclusive o
+// apóstrofo ('). displayName/local vêm de dado do candidato — XSS-defendido.
+const esc = (s: any) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] || c));
 const SAFETY_POLL_MS = 120_000; // rede de segurança caso um broadcast se perca
 
 interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; noCommittee?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; level: string; checkins: number; }
@@ -24,13 +26,16 @@ const PartyTelaoPage: React.FC = () => {
   const mapDivRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<any>(null);
   const lgRef = React.useRef<{ comites?: any; checkins?: any }>({});
+  // Telão fica numa TV/projetor: uma falha de refresh NÃO pode trocar o mapa já
+  // carregado por uma tela de erro. Só erra full-screen na 1ª carga.
+  const hasDataRef = React.useRef(false);
 
   const load = React.useCallback(async () => {
     try {
       const r = await fetch(`/api/public/party/telao/${token}`);
-      if (!r.ok) { setError('Telão não encontrado ou link inválido.'); return; }
-      setData(await r.json()); setError(null);
-    } catch { setError('Falha ao carregar.'); }
+      if (!r.ok) { if (!hasDataRef.current) setError('Telão não encontrado ou link inválido.'); return; }
+      setData(await r.json()); hasDataRef.current = true; setError(null);
+    } catch { if (!hasDataRef.current) setError('Falha ao carregar.'); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -91,7 +96,9 @@ const PartyTelaoPage: React.FC = () => {
   }, [data]);
 
   if (loading) return <div className="h-screen w-screen bg-[#0a0a0b] flex items-center justify-center"><Loader2 className="w-10 h-10 text-indigo-500 animate-spin" /></div>;
-  if (error) return <div className="h-screen w-screen bg-[#0a0a0b] text-slate-300 flex items-center justify-center text-center p-8"><div><MapPin className="w-10 h-10 mx-auto mb-3 opacity-40" /><p>{error}</p></div></div>;
+  // Só mostra erro full-screen se NÃO há dados (1ª carga). Falha de refresh com
+  // mapa já na tela é silenciosa — o próximo poll/broadcast recupera.
+  if (error && !data) return <div className="h-screen w-screen bg-[#0a0a0b] text-slate-300 flex items-center justify-center text-center p-8"><div><MapPin className="w-10 h-10 mx-auto mb-3 opacity-40" /><p>{error}</p></div></div>;
 
   const s = data!.stats;
   return (
