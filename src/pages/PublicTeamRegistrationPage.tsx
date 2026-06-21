@@ -95,18 +95,14 @@ const PublicTeamRegistrationPage: React.FC = () => {
         setError(null);
 
         try {
-            // Sincronizando com CamelCase conforme o banco de dados
-            const payload = {
-                campaignId: campaignId,
-                role: 'Apoiador',
-                ...formData
-            };
-
-            const { error: insertError } = await supabase
-                .from('team_members')
-                .insert(sanitizeData(payload));
-
-            if (insertError) throw insertError;
+            // Backend cifra CPF/RG/título/banco/PIX antes de gravar (a chave vive
+            // só no servidor). Antes isso ia direto em texto puro via RLS anon.
+            const resp = await fetch('/api/public/team/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sanitizeData({ campaignId, ...formData })),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
             setIsSuccess(true);
         } catch (err: any) {

@@ -45,6 +45,7 @@ import { createPaymentWebhookRouter } from './src/server/modules/billing/payment
 import { createOnboardingRouter } from './src/server/modules/onboarding/onboardingRouter';
 import { startLifecycleSweeper } from './src/server/modules/billing/subscriptionLifecycle';
 import { createTeamInvitesRouter, createTeamInvitesPublicRouter } from './src/server/modules/team/teamInvitesRouter';
+import { createTeamPublicRouter } from './src/server/modules/team/teamPublicRouter';
 import { createTeamGoalsRouter } from './src/server/modules/team/teamGoalsRouter';
 import { createGoalsRouter } from './src/server/modules/goals/goalsRouter';
 import { createRoutinesRouter } from './src/server/modules/routines/routinesRouter';
@@ -345,6 +346,8 @@ async function startServer() {
     app.use('/l', webhookLimiter, createShortLinksPublicRouter(supabaseAdmin));
     // Public lead-capture forms (F5b) — sem auth, mediado por service_role.
     app.use('/api/public/forms', webhookLimiter, createPublicFormsRouter(supabaseAdmin));
+    // Auto-cadastro de apoiador (link público) — cifra CPF/RG/título/banco/PIX.
+    app.use('/api/public/team', webhookLimiter, createTeamPublicRouter(supabaseAdmin));
     // Supreme Admin (SaaS operator) — every route gated by requireSupremeAdmin.
     app.use('/api/v1/supreme', requireAuth, mutationLimiter, requireSupremeAdmin(), createSupremeAdminRouter(supabaseAdmin));
 
