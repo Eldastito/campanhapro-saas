@@ -129,3 +129,60 @@ export async function runComplianceReview(
     disclaimer: COMPLIANCE_DISCLAIMER,
   };
 }
+
+/**
+ * Persiste um parecer + suas citações (proveniência). Devolve o id do parecer.
+ */
+export async function saveComplianceOpinion(
+  supabase: any,
+  opts: {
+    campaignId: string;
+    userId?: string | null;
+    subject: ComplianceSubject;
+    electionYear?: number;
+    result: ComplianceReviewResult;
+  },
+): Promise<{ id: string }> {
+  const { campaignId, userId, subject, electionYear, result } = opts;
+
+  const { data, error } = await supabase
+    .from('legal_opinions')
+    .insert({
+      campaignId,
+      kind: 'combined',
+      subjectType: subject.kind,
+      subjectId: (subject.data?.id as string | undefined) ?? null,
+      title: subject.description.slice(0, 140),
+      accountingText: result.accounting.text,
+      legalText: result.legal.text,
+      riskLevel: result.riskHint,
+      electionYear: electionYear ?? null,
+      provider: result.legal.provider,
+      modelUsed: result.legal.model,
+      costCentsUsd: result.costCentsUsd,
+      disclaimer: result.disclaimer,
+      createdByUserId: userId ?? null,
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+
+  const opinionId = (data as any).id;
+  if (result.citations.length > 0) {
+    const rows = result.citations.map((c) => ({
+      opinionId,
+      campaignId,
+      chunkId: c.id,
+      source: c.source,
+      sourceOrg: c.sourceOrg,
+      sourceUrl: c.sourceUrl,
+      electionYear: c.electionYear,
+      excerpt: c.content.slice(0, 1000),
+      similarity: c.similarity,
+    }));
+    const { error: cErr } = await supabase.from('legal_opinion_citations').insert(rows);
+    if (cErr) throw cErr;
+  }
+
+  return { id: opinionId };
+}

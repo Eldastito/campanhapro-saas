@@ -66,6 +66,7 @@ import { createTeamMembersRouter } from './src/server/modules/team/teamMembersRo
 import { createSettingsRouter } from './src/server/modules/settings/settingsRouter';
 import { createContractsRouter } from './src/server/modules/contracts/contractsRouter';
 import { createLegalBaseRouter } from './src/server/modules/rag/legalBaseRouter';
+import { createLegalShieldRouter } from './src/server/modules/rag/legalShieldRouter';
 import { createPlaybookRouter } from './src/server/modules/playbook/playbookRouter';
 import { createPartyRouter } from './src/server/modules/party/partyRouter';
 import { createPartyPublicRouter } from './src/server/modules/party/partyPublicRouter';
@@ -281,6 +282,7 @@ async function startServer() {
     app.use('/api/v1/channels', requireAuth, messagingLimiter, requireFeature(supabaseAdmin, 'whatsapp_omnichannel'), createChannelsRouter(supabaseAdmin));
     app.use('/api/v1/whatsapp', requireAuth, mutationLimiter, requireFeature(supabaseAdmin, 'whatsapp_omnichannel'), createWhatsappRouter(supabaseAdmin));
     app.use('/api/v1/rag', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'rag'), requireAiBudget(supabaseAdmin), createRagRouter(supabaseAdmin));
+    app.use('/api/v1/legal-shield', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'legal_shield'), createLegalShieldRouter(supabaseAdmin));
     app.use('/api/v1/billing', requireAuth, mutationLimiter, createBillingRouter(supabaseAdmin));
     app.use('/api/v1/plan', requireAuth, createPlanStatusRouter(supabaseAdmin));
     app.use('/api/v1/onboarding', requireAuth, mutationLimiter, createOnboardingRouter(supabaseAdmin));
