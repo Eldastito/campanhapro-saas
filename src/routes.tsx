@@ -15,6 +15,7 @@ import PublicTeamRegistrationPage from './pages/PublicTeamRegistrationPage';
 import PublicFormPage from './pages/PublicFormPage';
 import SubscribePage from './pages/SubscribePage';
 import UseCasesPage from './pages/UseCasesPage';
+import ProductPage from './pages/ProductPage';
 import PartyPitchPage from './pages/PartyPitchPage';
 import PartyExecSummaryPage from './pages/PartyExecSummaryPage';
 import PublicPartyRegisterPage from './pages/PublicPartyRegisterPage';
@@ -73,6 +74,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/cadastro-equipe/:campaignId" element={<PublicTeamRegistrationPage />} />
                 <Route path="/f/:slug" element={<PublicFormPage />} />
                 <Route path="/casos-de-uso" element={<UseCasesPage />} />
+                <Route path="/produtos/:slug" element={<ProductPage />} />
                 <Route path="/proposta/partido" element={<PartyPitchPage />} />
                 <Route path="/sumario/partido" element={<PartyExecSummaryPage />} />
                 <Route path="/cadastro/partido/:token" element={<PublicPartyRegisterPage />} />

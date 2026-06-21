@@ -63,7 +63,7 @@ export const MODULES: ModuleDef[] = [
     // O app não usa sub-rotas: a aba "Cenários" é selecionada por nome dentro de
     // /app (gated pela feature `scenarios`). Igual a campanha/partido/callcenter.
     appRoute: '/app',
-    salesRoute: '/casos-de-uso',
+    salesRoute: '/produtos/cenarios',
     sellable: true,
   },
   {
@@ -72,7 +72,7 @@ export const MODULES: ModuleDef[] = [
     description: 'Mapeamento estratégico, adversários, sentimento e leitura tática do território.',
     icon: 'Brain',
     appRoute: '/app',
-    salesRoute: '/casos-de-uso',
+    salesRoute: '/produtos/inteligencia',
     sellable: true,
   },
 ];

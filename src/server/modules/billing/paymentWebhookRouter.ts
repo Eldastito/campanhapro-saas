@@ -53,9 +53,13 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
     res.sendStatus(200);
 
     try {
-      // Find the campaign tied to this subscription (if any)
+      // Find the campaign tied to this subscription (if any).
+      // Procura primeiro em `subscriptions` (plano). Se não achar, procura em
+      // `module_subscriptions` (add-on) — fluxos paralelos mas mesmo webhook.
       let campaignId: string | null = null;
       let subscriptionRowId: string | null = null;
+      let addonRowId: string | null = null;
+      let addonModuleKey: string | null = null;
       if (event.providerSubscriptionId) {
         const { data } = await supabase
           .from('subscriptions')
@@ -64,6 +68,19 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
           .maybeSingle();
         campaignId = data?.campaignId ?? null;
         subscriptionRowId = data?.id ?? null;
+
+        if (!subscriptionRowId) {
+          const { data: addon } = await supabase
+            .from('module_subscriptions')
+            .select('id, "tenantId", "moduleKey"')
+            .eq('asaasSubscriptionId', event.providerSubscriptionId)
+            .maybeSingle();
+          if (addon) {
+            campaignId = addon.tenantId;
+            addonRowId = addon.id;
+            addonModuleKey = addon.moduleKey;
+          }
+        }
       }
 
       // Idempotent insert — unique index on (provider, provider_event_id)
@@ -81,6 +98,38 @@ export function createPaymentWebhookRouter(supabase: SupabaseClient): Router {
         },
         { onConflict: 'provider,providerEventId', ignoreDuplicates: true },
       );
+
+      // Side-effects: add-on (module_subscriptions). Quando paid, garante o
+      // entitlement na `tenant_module_entitlements` — só ali o Hub/featureGate
+      // enxergam o módulo como ativo.
+      if (addonRowId && addonModuleKey && campaignId) {
+        const nextAddonStatus =
+          event.status === 'paid' ? 'active' :
+          event.status === 'overdue' ? 'past_due' :
+          event.status === 'failed' ? 'past_due' :
+          null;
+        if (nextAddonStatus) {
+          await supabase
+            .from('module_subscriptions')
+            .update({ status: nextAddonStatus, updatedAt: new Date().toISOString() })
+            .eq('id', addonRowId);
+        }
+        if (event.status === 'paid') {
+          try {
+            await supabase.from('tenant_module_entitlements').upsert({
+              tenantId: campaignId, tenantKind: 'campaign',
+              moduleKey: addonModuleKey, status: 'active',
+              source: 'addon:asaas',
+            }, { onConflict: 'tenantId,moduleKey' });
+          } catch (e) {
+            console.warn('[webhook] grant addon entitlement falhou:', e);
+          }
+        }
+        if (event.status === 'failed' || event.status === 'overdue') {
+          // Não revoga em past_due — o usuário ainda tem grace period; o lifecycle
+          // sweep cuida da revogação efetiva quando o atraso ficar crítico.
+        }
+      }
 
       // Side-effects on subscription status
       if (subscriptionRowId) {
