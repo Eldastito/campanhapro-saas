@@ -60,8 +60,10 @@ export const MODULES: ModuleDef[] = [
     name: 'Cenários',
     description: 'Simulações Monte Carlo da campanha: cenários eleitorais, projeção de meta e plano B.',
     icon: 'LineChart',
-    appRoute: '/app/scenarios',
-    salesRoute: '/produtos/cenarios',
+    // O app não usa sub-rotas: a aba "Cenários" é selecionada por nome dentro de
+    // /app (gated pela feature `scenarios`). Igual a campanha/partido/callcenter.
+    appRoute: '/app',
+    salesRoute: '/casos-de-uso',
     sellable: true,
   },
   {
@@ -69,8 +71,8 @@ export const MODULES: ModuleDef[] = [
     name: 'Inteligência',
     description: 'Mapeamento estratégico, adversários, sentimento e leitura tática do território.',
     icon: 'Brain',
-    appRoute: '/app/intelligence',
-    salesRoute: '/produtos/inteligencia',
+    appRoute: '/app',
+    salesRoute: '/casos-de-uso',
     sellable: true,
   },
 ];
