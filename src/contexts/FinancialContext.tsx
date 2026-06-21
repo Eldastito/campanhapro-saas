@@ -2,6 +2,7 @@ import * as React from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Income, Expense } from '../types/financial';
 import { handleSupabaseError, sanitizeData, OperationType } from '../utils/supabaseUtils';
+import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from './AuthContext';
 
 interface FinancialContextType {
@@ -27,14 +28,17 @@ export const FinancialProvider = ({ children }: { children?: React.ReactNode }) 
         if (user.type !== 'Admin' && user.type !== 'Líder' && user.type !== 'Candidato') return;
 
         const fetchData = async () => {
-            const { data: incomesData, error: incomesError } = await supabase
-                .from('incomes')
-                .select('*')
-                .eq('campaignId', user.campaignId)
-                .order('data', { ascending: false });
-            
-            if (incomesError) handleSupabaseError(incomesError, OperationType.GET, 'incomes');
-            else setIncomes(incomesData as Income[]);
+            // incomes vêm pelo backend (documentoDoador é decifrado lá — a chave
+            // de criptografia não existe no browser). Realtime abaixo só dispara
+            // este refetch; o payload do postgres_changes traz o doc cifrado.
+            try {
+                const resp = await authedFetch('/api/v1/incomes');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const json = await resp.json();
+                setIncomes((json.incomes ?? []) as Income[]);
+            } catch (incomesError) {
+                handleSupabaseError(incomesError, OperationType.GET, 'incomes');
+            }
 
             const { data: expensesData, error: expensesError } = await supabase
                 .from('expenses')
@@ -67,12 +71,15 @@ export const FinancialProvider = ({ children }: { children?: React.ReactNode }) 
     const addIncome = async (income: Omit<Income, 'id'>) => {
         if (!user?.campaignId) return;
         try {
-            const { error } = await supabase.from('incomes').insert(sanitizeData({ 
-                ...income, 
-                campaignId: user.campaignId,
-                createdBy: user.uid, 
-            }));
-            if (error) throw error;
+            // Backend cifra documentoDoador antes de gravar. Realtime refaz o fetch;
+            // ainda assim inserimos o retorno no estado para feedback imediato.
+            const resp = await authedFetch('/api/v1/incomes', {
+                method: 'POST',
+                body: JSON.stringify(income),
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const json = await resp.json();
+            if (json?.income) setIncomes(prev => [json.income as Income, ...prev]);
         } catch (error) {
             handleSupabaseError(error, OperationType.CREATE, 'incomes');
         }
@@ -80,8 +87,9 @@ export const FinancialProvider = ({ children }: { children?: React.ReactNode }) 
 
     const deleteIncome = async (id: string | number) => {
         try {
-            const { error } = await supabase.from('incomes').delete().eq('id', String(id));
-            if (error) throw error;
+            const resp = await authedFetch(`/api/v1/incomes/${id}`, { method: 'DELETE' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            setIncomes(prev => prev.filter(i => String(i.id) !== String(id)));
         } catch (error) {
             handleSupabaseError(error, OperationType.DELETE, `incomes/${id}`);
         }
