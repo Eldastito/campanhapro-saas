@@ -28,6 +28,13 @@ export interface AgentConfig {
     temperature?: number;
     /** Max tokens da resposta. Default 4000. */
     maxTokens?: number;
+    /**
+     * Ordem FIXA de providers para este agente, sobrescrevendo o PROVIDER_CHAIN
+     * global. Os agentes Contábil/Jurídico querem GPT → Claude → Gemini (modelo
+     * OpenAI como primário, Claude como fallback de raciocínio). Quando definida,
+     * ignora o sort por custo do `complexity` — a ordem é intencional.
+     */
+    providerChain?: Provider[];
 }
 
 export interface CallAgentOpts {
@@ -178,8 +185,16 @@ const effectiveCost = (model: string): number => {
  *   - 'premium' → ordena por custo descendente (mais caro/capaz primeiro)
  *   - 'balanced'→ mantém a ordem curada PROVIDER_CHAIN
  */
-const orderedProviders = (config: AgentConfig, opts: CallAgentOpts): Provider[] => {
+export const orderedProviders = (config: AgentConfig, opts: CallAgentOpts): Provider[] => {
     if (opts.forceProvider) return [opts.forceProvider];
+
+    // Override por agente: ordem fixa (ex.: jurídico/contábil = GPT → Claude →
+    // Gemini). Filtra providers sem key, mas NÃO reordena por custo.
+    if (config.providerChain && config.providerChain.length > 0) {
+        const fixed = config.providerChain.filter((p) => !!keyForProvider(p));
+        return fixed.length > 0 ? fixed : [...config.providerChain];
+    }
+
     const withKeys = PROVIDER_CHAIN.filter((p) => !!keyForProvider(p));
     // Se nenhuma key foi detectada (ex.: ambiente sem env no momento da checagem),
     // cai pra chain completa pra não travar — o erro real aparece na execução.
@@ -412,6 +427,18 @@ export const AGENT_CONFIGS: Record<string, AgentConfig> = {
     // Inteligência competitiva: dossiê factual longo (web_search) — teto alto p/ NÃO truncar.
     competitive_intel: { agentId: 'competitive_intel', temperature: 0.4, maxTokens: 7000 },
     pipeline:   { agentId: 'pipeline',   temperature: 0.7, maxTokens: 6000 },
+    // Blindagem Jurídico-Contábil: provider OpenAI primário → Claude (raciocínio)
+    // → Gemini. Temperature baixa (precisão > criatividade); teto alto p/ parecer.
+    accountant: {
+        agentId: 'accountant', temperature: 0.2, maxTokens: 5000,
+        providerChain: ['openai', 'anthropic', 'gemini'],
+        model: { openai: 'gpt-4o', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' },
+    },
+    legal: {
+        agentId: 'legal', temperature: 0.2, maxTokens: 6000,
+        providerChain: ['openai', 'anthropic', 'gemini'],
+        model: { openai: 'gpt-4o', anthropic: 'claude-sonnet-4-5', gemini: 'gemini-2.5-flash' },
+    },
 };
 
 /**
