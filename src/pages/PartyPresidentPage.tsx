@@ -607,7 +607,7 @@ const PartyPresidentPage: React.FC = () => {
           const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
           const q = norm(search.trim());
           const filtered = candidates.filter((c) => {
-            if (q && !norm(`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''}`).includes(q)) return false;
+            if (q && !norm(`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''} ${c.phone || ''}`).includes(q)) return false;
             if (estadoFilter !== 'all' && (c.estado || '') !== estadoFilter) return false;
             if (statusFilter === 'pending' && !(c.status === 'pending' || c.status === 'registering')) return false;
             if ((statusFilter === 'green' || statusFilter === 'yellow' || statusFilter === 'red') && c.score?.level !== statusFilter) return false;
@@ -623,8 +623,14 @@ const PartyPresidentPage: React.FC = () => {
             <div className="flex flex-col sm:flex-row gap-2 mb-2">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar candidato (nome, cargo, cidade, UF)…"
-                  className="w-full bg-[#1c2128] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-white text-sm" />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar candidato (nome, telefone, cargo, cidade, UF)…"
+                  className="w-full bg-[#1c2128] border border-white/10 rounded-xl pl-9 pr-9 py-2 text-white text-sm" />
+                {search && (
+                  <button onClick={() => setSearch('')} title="Limpar busca"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-500 hover:text-white hover:bg-white/10">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
               {estadosPresentes.length > 1 && (
                 <select value={estadoFilter} onChange={(e) => setEstadoFilter(e.target.value)}
@@ -685,6 +691,18 @@ const PartyPresidentPage: React.FC = () => {
                 </div>
               </div>
             ))}
+            {filtered.length === 0 && (
+              <div className="text-center py-12 border border-dashed border-white/10 rounded-3xl">
+                <Search className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                <p className="text-slate-400 text-sm">
+                  Nenhum candidato encontrado{search ? <> para "<b className="text-slate-300">{search}</b>"</> : ' com esses filtros'}.
+                </p>
+                <button onClick={() => { setSearch(''); setStatusFilter('all'); setEstadoFilter('all'); }}
+                  className="mt-3 text-xs font-bold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">
+                  Limpar filtros
+                </button>
+              </div>
+            )}
           </div>
           );
         })()
