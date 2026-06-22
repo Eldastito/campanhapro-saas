@@ -1382,6 +1382,12 @@ Saída JSON estrito (sem markdown):
     if (!text) return res.status(400).json({ error: 'texto_vazio' });
 
     try {
+      // Nome do presidente pra personalizar o atendimento (chama pelo nome).
+      const { data: presidente } = await supabase.from('users')
+        .select('name').eq('id', userId).maybeSingle();
+      const nomePresidente = String((presidente as any)?.name || '').trim();
+      const primeiroNome = nomePresidente.split(/\s+/)[0] || '';
+
       // 1. Snapshot determinístico do partido (escopado por partyId)
       const { data: cands } = await supabase.from('party_candidates')
         .select('displayName, cargo, regiao, estado, status, valorRecebido, repasseStatus')
@@ -1443,8 +1449,11 @@ Saída JSON estrito (sem markdown):
         generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
       });
       const hojeIso = new Date().toISOString().slice(0, 10);
-      const prompt = `Você é o assistente do Centro de Comando do partido, falando com o PRESIDENTE.
+      const prompt = `Você é o assistente do Centro de Comando do partido, falando com o PRESIDENTE${primeiroNome ? ` (nome: ${primeiroNome})` : ''}.
 
+VOCÊ EXECUTA AÇÕES — não é só consulta. Você consegue, COM CONFIRMAÇÃO do presidente: lançar/editar/excluir repasse, cadastrar/excluir candidato e gerar relatório. NUNCA diga que "não consegue abrir formulário", "não consegue preencher valores" ou "use os botões" para essas tarefas — você FAZ. O "formulário de repasse" de um candidato você preenche através da intenção "lancar_repasse".
+
+${primeiroNome ? `PERSONALIZAÇÃO: chame o presidente pelo primeiro nome ("${primeiroNome}") de forma natural — na saudação e em confirmações. Não repita o nome em toda frase; soe humano, não robótico.\n` : ''}
 Responda SEMPRE em JSON válido (nada fora do JSON):
 {
   "intent": "consulta" | "lancar_repasse" | "editar_repasse" | "excluir_repasse" | "criar_candidato" | "excluir_candidato" | "gerar_relatorio" | "ajuda" | "acao_nao_suportada",
@@ -1454,7 +1463,7 @@ Responda SEMPRE em JSON válido (nada fora do JSON):
 
 REGRAS:
 - "consulta": o presidente pergunta/pede pra ORGANIZAR, LISTAR, FILTRAR ou ORDENAR dados. Responda em "message" usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
-- "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR um valor a um candidato. Extraia candidateName, valor, descricao. Se faltar valor ou candidato, use "consulta" e peça o que falta.
+- "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR/REGISTRAR um valor a um candidato — INCLUINDO quando o presidente disser "abre/preenche o formulário de repasse do Fulano com X", "registra o repasse de X pro Fulano", "coloca o valor de X no repasse do Fulano". Tudo isso é lancar_repasse. Extraia candidateName, valor, descricao e data (se citada; formato YYYY-MM-DD). Se faltar valor ou candidato, use "consulta" e peça o que falta com um exemplo.
 - "editar_repasse": ALTERAR/EDITAR/MUDAR/CORRIGIR o valor de um repasse de um candidato. Extraia candidateName e o NOVO valor (campo "valor"). descricao opcional.
 - "excluir_repasse": APAGAR/EXCLUIR/REMOVER/CANCELAR um repasse de um candidato. Extraia candidateName. valor/descricao = null.
 - "criar_candidato": CRIAR/CADASTRAR/ADICIONAR um novo CANDIDATO/pessoa (ex: "cadastra a candidata Ana Maria Braga, vereadora, Niterói RJ"). Extraia candidateName (obrigatório) e, se citados, cargo, regiao (cidade), estado (UF), phone. Se não vier nome, use "consulta" e peça o nome.
@@ -1462,7 +1471,7 @@ REGRAS:
 - "excluir_candidato": EXCLUIR/APAGAR/REMOVER um CANDIDATO inteiro (a pessoa, não um repasse). Extraia candidateName.
 - "gerar_relatorio": GERAR/IMPRIMIR/BAIXAR RELATÓRIO de repasses. message = "Gerei o relatório, abrindo aqui." draft = null.
 - "ajuda": o usuário pergunta COMO fazer algo, o que você faz, pede ajuda/instruções, ou está claramente perdido (ex: "como cadastro um candidato?", "o que você consegue fazer?", "me ajuda", "não sei como lançar repasse"). draft = null. (O texto de ajuda é montado pelo sistema.)
-- "acao_nao_suportada": qualquer outra escrita (mexer em metas, comitê, válvula, etc). message explica que ainda não executa e oriente usar os botões. NUNCA finja que fez.
+- "acao_nao_suportada": SÓ para escritas que você realmente não faz (mexer em metas, comitê, válvula). NÃO use para repasse, candidato ou relatório — esses você FAZ. message explica que ainda não executa ESSA ação específica e orienta usar os botões. NUNCA finja que fez.
 
 COACHING (seja uma GUIA, não só executora):
 - Sempre que faltar um dado, o comando estiver ambíguo, ou você não encontrar o candidato, NÃO responda seco — ENSINE com um EXEMPLO de comando pronto pro usuário copiar. Ex: 'Não achei "Maria". Pra lançar, tente: "lança 5 mil pra Maria Silva, material gráfico".'
@@ -1530,6 +1539,8 @@ JSON:`;
         const wantName = String(parsed.draft.candidateName || '').trim().toLowerCase();
         const valor = Number(parsed.draft.valor) || 0;
         const descricao = String(parsed.draft.descricao || '').slice(0, 300);
+        // Data citada pelo presidente (ex: "lança 5 mil pro João no dia 10/03"); senão hoje.
+        const dataRepasse = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.draft.data || '')) ? parsed.draft.data : hojeIso;
 
         const { data: allCands } = await supabase.from('party_candidates')
           .select('id, displayName').eq('partyId', party.id);
@@ -1548,9 +1559,10 @@ JSON:`;
             type: 'create_repasse',
             candidateId: cand.id,
             candidateName: cand.displayName,
-            valor, descricao, data: hojeIso,
+            valor, descricao, data: dataRepasse,
           };
-          message = `Vou lançar um repasse de ${brl(valor)} para ${cand.displayName}${descricao ? ` (${descricao})` : ''}. Confirma?`;
+          const dataTxt = dataRepasse !== hojeIso ? ` em ${new Date(dataRepasse + 'T00:00:00').toLocaleDateString('pt-BR')}` : '';
+          message = `${primeiroNome ? primeiroNome + ', vou' : 'Vou'} lançar um repasse de ${brl(valor)} para ${cand.displayName}${descricao ? ` (${descricao})` : ''}${dataTxt}. Confirma?`;
         }
       }
 
