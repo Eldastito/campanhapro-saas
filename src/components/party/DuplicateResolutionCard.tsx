@@ -75,6 +75,13 @@ const DuplicateResolutionCard: React.FC<Props> = ({ groups, decisions, rows, onD
   const [expandedKeep, setExpandedKeep] = React.useState<number | null>(null);
   const allDecided = groups.every((_, i) => !!decisions[i]);
 
+  // Cargos divergentes dentro de um grupo? Por lei eleitoral, ninguém concorre
+  // a 2 cargos — então "Unificar" não faz sentido (são pessoas diferentes).
+  const cargosDivergent = (g: DupGroup): boolean => {
+    const cargos = new Set(g.indexes.map((i) => rows[i].cargo).filter((c) => c));
+    return cargos.size > 1;
+  };
+
   const describeOutcome = (g: DupGroup, dec: Decision): string => {
     if (dec.action === 'keep_all') return `Mantido ${g.indexes.length} cadastros separados.`;
     if (dec.action === 'keep_one') {
@@ -158,20 +165,26 @@ const DuplicateResolutionCard: React.FC<Props> = ({ groups, decisions, rows, onD
                     <button onClick={() => setExpandedKeep(null)} className="text-slate-400 hover:text-white underline">Cancelar</button>
                   </div>
                 ) : (
-                  <div className="mt-3 grid grid-cols-3 gap-1.5">
-                    <button onClick={() => onDecide(gi, { action: 'unify' })}
-                      className="bg-indigo-600 hover:bg-indigo-500 rounded-lg px-2 py-2 text-[11px] font-bold text-white flex items-center justify-center gap-1">
-                      <Merge className="w-3.5 h-3.5" /> Unificar
-                    </button>
-                    <button onClick={() => onDecide(gi, { action: 'keep_all' })}
-                      className="bg-slate-700 hover:bg-slate-600 rounded-lg px-2 py-2 text-[11px] font-bold text-white flex items-center justify-center gap-1">
-                      <Users className="w-3.5 h-3.5" /> Manter todos
-                    </button>
-                    <button onClick={() => setExpandedKeep(gi)}
-                      className="bg-rose-600/80 hover:bg-rose-600 rounded-lg px-2 py-2 text-[11px] font-bold text-white flex items-center justify-center gap-1">
-                      <X className="w-3.5 h-3.5" /> Manter só 1
-                    </button>
-                  </div>
+                  <>
+                    {cargosDivergent(g) && (
+                      <p className="text-[10px] text-rose-300 mt-2">⚠️ Cargos divergem — por lei eleitoral, são pessoas diferentes. Unificar fica indisponível.</p>
+                    )}
+                    <div className="mt-3 grid grid-cols-3 gap-1.5">
+                      <button onClick={() => onDecide(gi, { action: 'unify' })} disabled={cargosDivergent(g)}
+                        title={cargosDivergent(g) ? 'Cargos divergem — não é a mesma pessoa' : ''}
+                        className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg px-2 py-2 text-[11px] font-bold text-white flex items-center justify-center gap-1">
+                        <Merge className="w-3.5 h-3.5" /> Unificar
+                      </button>
+                      <button onClick={() => onDecide(gi, { action: 'keep_all' })}
+                        className="bg-slate-700 hover:bg-slate-600 rounded-lg px-2 py-2 text-[11px] font-bold text-white flex items-center justify-center gap-1">
+                        <Users className="w-3.5 h-3.5" /> Manter todos
+                      </button>
+                      <button onClick={() => setExpandedKeep(gi)}
+                        className="bg-rose-600/80 hover:bg-rose-600 rounded-lg px-2 py-2 text-[11px] font-bold text-white flex items-center justify-center gap-1">
+                        <X className="w-3.5 h-3.5" /> Manter só 1
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             );
