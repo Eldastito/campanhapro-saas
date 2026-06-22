@@ -7,7 +7,7 @@ import { Landmark, Lock, Loader2, CheckCircle2, ShieldCheck } from 'lucide-react
  * O nome do candidato vem do convite e fica TRAVADO — garante o vínculo e a
  * hierarquia. O convidado só define e-mail e senha.
  */
-interface Invite { partyName: string; candidate: { displayName: string; cargo?: string; regiao?: string }; alreadyRegistered: boolean; }
+interface Invite { partyName: string; candidate: { displayName: string; cargo?: string; regiao?: string; phone?: string | null }; alreadyRegistered: boolean; }
 
 const PublicPartyRegisterPage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -25,6 +25,7 @@ const PublicPartyRegisterPage: React.FC = () => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || 'Convite inválido');
         setInvite(j);
+        if (j.candidate?.phone) setForm((f) => ({ ...f, phone: j.candidate.phone }));
       } catch (e: any) { setErr(e.message); }
       finally { setLoading(false); }
     })();
