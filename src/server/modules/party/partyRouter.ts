@@ -304,15 +304,14 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
 
-    // Dedup (#147e): não recria quem já existe no partido (por nome+cidade OU
-    // telefone), nem repete dentro do próprio lote. Re-colar = no-op seguro.
-    // Nome+cidade (não só nome) evita colapsar homônimos de cidades diferentes.
+    // Dedup contra registros JÁ EXISTENTES no banco (nome+cidade OU telefone). NÃO
+    // mais corta duplicatas DENTRO do lote — quem decide isso é o usuário no card
+    // de resolução de duplicatas (frontend). Re-colar a planilha continua sendo
+    // no-op seguro porque os nomes já estarão no banco.
     const { data: existing } = await supabase.from('party_candidates')
       .select('displayName, phone, regiao').eq('partyId', party.id);
     const existKeys = new Set((existing || []).map((e: any) => normName(e.displayName) + '||' + normName(e.regiao)));
     const existPhones = new Set((existing || []).map((e: any) => normPhone(e.phone)).filter((p: string) => p.length >= 8));
-    const seenKeys = new Set<string>();
-    const seenPhones = new Set<string>();
 
     let duplicates = 0, invalid = 0;
     const toInsert: any[] = [];
@@ -323,9 +322,11 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       const regiao = (r.regiao || r.cidade || '').toString().trim();
       const nk = normName(displayName) + '||' + normName(regiao);
       const pk = normPhone(r.phone || r.telefone);
-      const isDup = existKeys.has(nk) || seenKeys.has(nk) || (pk.length >= 8 && (existPhones.has(pk) || seenPhones.has(pk)));
+      const isDup = existKeys.has(nk) || (pk.length >= 8 && existPhones.has(pk));
       if (isDup) { duplicates++; continue; }
-      seenKeys.add(nk); if (pk.length >= 8) seenPhones.add(pk);
+      // Trava re-importação na MESMA chamada: adiciona aos sets existentes pra
+      // se o usuário enviar a mesma linha 2x, só uma seja gravada.
+      existKeys.add(nk); if (pk.length >= 8) existPhones.add(pk);
       const valorRecebido = parseBRL(r.valor ?? r.valorRecebido ?? r.repasse ?? r['$']);
       const dataRepasse = /^\d{4}-\d{2}-\d{2}$/.test(r.data || '') ? r.data : null;
       toInsert.push({
@@ -367,6 +368,18 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (repasseRows.length) {
       await supabase.from('party_repasses').insert(repasseRows);
     }
+
+    // Pré-aquece geo_cache pras cidades dos candidatos importados em background
+    // (fire-and-forget). Sem isso, o telão "esconde" candidatos sem comitê na
+    // primeira carga até o cache esquentar — agora chegam antes do usuário abrir.
+    const uniqueCities = new Set<string>();
+    for (const r of cleanInsert as any[]) {
+      if (r.regiao) {
+        const q = r.estado ? `${r.regiao}, ${r.estado}, Brasil` : `${r.regiao}, Brasil`;
+        uniqueCities.add(q);
+      }
+    }
+    for (const q of uniqueCities) void import('../../../lib/geocode').then((m) => m.geocode(q));
 
     return res.json({ created: inserted.length, duplicates, invalid });
   });
@@ -463,52 +476,86 @@ REGRAS:
         };
       }).filter((r: any) => r.displayName && !isHeaderName(r.displayName)).slice(0, 5000);
 
-      // Merge inteligente: agrupa por (nome + cidade). Mesmo nome + mesma cidade =
-      // mesma pessoa → soma valores e pega primeiro campo não-vazio dos demais.
-      // Mesmo nome + cidade DIFERENTE = homônimos → mantém separados.
+      // Detecção de grupos de duplicatas — NÃO corta, NÃO mescla. O usuário decide.
+      // Quatro casos, do mais forte pro mais fraco. Cada linha entra em no máximo
+      // 1 grupo (cai no mais forte que aplica).
       type Row = typeof allRows[number];
-      const groups = new Map<string, Row[]>();
-      for (const row of allRows) {
-        const key = normName(row.displayName) + '||' + normName(row.regiao);
-        const g = groups.get(key);
-        if (g) g.push(row); else groups.set(key, [row]);
-      }
-      const merges: { displayName: string; regiao: string; valores: number[]; valorUnificado: number }[] = [];
-      const candidates: Row[] = [];
-      for (const [, group] of groups) {
-        if (group.length === 1) { candidates.push(group[0]); continue; }
-        // Checa se TODOS os campos são idênticos → duplicata pura, mantém só 1.
-        const allEqual = group.every((r) =>
-          r.cargo === group[0].cargo && r.regiao === group[0].regiao &&
-          r.estado === group[0].estado && r.phone === group[0].phone &&
-          r.valor === group[0].valor && r.data === group[0].data);
-        if (allEqual) { candidates.push(group[0]); continue; }
-        // Unifica: soma valores, pega primeiro não-vazio dos demais campos.
-        const merged = { ...group[0] };
-        const valores: number[] = [];
-        for (const row of group) {
-          const v = parseBRL(row.valor);
-          if (v > 0) valores.push(v);
-          if (!merged.cargo && row.cargo) merged.cargo = row.cargo;
-          if (!merged.estado && row.estado) merged.estado = row.estado;
-          if (!merged.phone && row.phone) merged.phone = row.phone;
-          if (!merged.data && row.data) merged.data = row.data;
+      const inGroup = new Set<number>();
+      const groups: { reason: 'identical' | 'name_city_state_phone' | 'name_city' | 'phone_diff_name'; indexes: number[] }[] = [];
+
+      // Pass 1: linhas 100% idênticas (todos os 7 campos iguais)
+      const byIdentical = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        const k = [normName(r.displayName), normName(r.cargo), normName(r.regiao), r.estado, normPhone(r.phone), r.valor, r.data].join('|');
+        if (!byIdentical.has(k)) byIdentical.set(k, []);
+        byIdentical.get(k)!.push(i);
+      });
+      for (const list of byIdentical.values()) {
+        if (list.length > 1) {
+          groups.push({ reason: 'identical', indexes: list });
+          list.forEach((i) => inGroup.add(i));
         }
-        const soma = valores.reduce((a, b) => a + b, 0);
-        merged.valor = soma > 0 ? String(soma) : '';
-        candidates.push(merged);
-        if (valores.length > 1) {
-          merges.push({ displayName: merged.displayName, regiao: merged.regiao, valores, valorUnificado: soma });
+      }
+
+      // Pass 2: nome+cidade+estado+telefone iguais (telefone obrigatório, 8+ dígitos)
+      const byNCSP = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        if (inGroup.has(i)) return;
+        const pk = normPhone(r.phone);
+        if (pk.length < 8) return;
+        const k = [normName(r.displayName), normName(r.regiao), r.estado, pk].join('|');
+        if (!byNCSP.has(k)) byNCSP.set(k, []);
+        byNCSP.get(k)!.push(i);
+      });
+      for (const list of byNCSP.values()) {
+        if (list.length > 1) {
+          groups.push({ reason: 'name_city_state_phone', indexes: list });
+          list.forEach((i) => inGroup.add(i));
+        }
+      }
+
+      // Pass 3: nome+cidade iguais (caso da Janaína — cidade igual mas dados divergem)
+      const byNC = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        if (inGroup.has(i)) return;
+        const k = normName(r.displayName) + '|' + normName(r.regiao);
+        if (!byNC.has(k)) byNC.set(k, []);
+        byNC.get(k)!.push(i);
+      });
+      for (const list of byNC.values()) {
+        if (list.length > 1) {
+          groups.push({ reason: 'name_city', indexes: list });
+          list.forEach((i) => inGroup.add(i));
+        }
+      }
+
+      // Pass 4: mesmo telefone, nomes diferentes (apelido vs nome completo OU
+      // telefone de família/compartilhado)
+      const byPhone = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        if (inGroup.has(i)) return;
+        const pk = normPhone(r.phone);
+        if (pk.length < 8) return;
+        if (!byPhone.has(pk)) byPhone.set(pk, []);
+        byPhone.get(pk)!.push(i);
+      });
+      for (const list of byPhone.values()) {
+        if (list.length > 1) {
+          const distinctNames = new Set(list.map((i: number) => normName(allRows[i].displayName)));
+          if (distinctNames.size > 1) {
+            groups.push({ reason: 'phone_diff_name', indexes: list });
+            list.forEach((i: number) => inGroup.add(i));
+          }
         }
       }
 
       supabase.from('party_ai_command_logs').insert({
         partyId: party.id, userId, inputType: 'import_parse',
         userCommand: isFile ? `import IA: arquivo ${mimeType}` : `import IA: ${text.length} chars`, detectedIntent: 'import_parse',
-        actionStatus: candidates.length ? 'preview' : 'vazio',
+        actionStatus: allRows.length ? 'preview' : 'vazio',
       }).then(() => {}, () => {});
 
-      return res.json({ candidates, ignored, merges, total: candidates.length });
+      return res.json({ candidates: allRows, ignored, duplicateGroups: groups, total: allRows.length });
     } catch (err: any) {
       console.error('[party] candidates/parse-ai:', err);
       return res.status(500).json({ error: 'parse_failed', message: 'Não consegui organizar a planilha. Tente colar de novo ou use o modo "Colar simples".' });
