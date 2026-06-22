@@ -29,14 +29,16 @@ function speak(text: string) {
 }
 
 interface RepasseDraft {
-  type: 'create_repasse' | 'edit_repasse' | 'delete_repasse' | 'create_candidate' | 'delete_candidate';
-  candidateId: string;
-  candidateName: string;
+  type: 'create_repasse' | 'edit_repasse' | 'delete_repasse' | 'create_candidate' | 'delete_candidate' | 'batch_repasse';
+  candidateId?: string;
+  candidateName?: string;
   valor?: number;
   valorAntigo?: number;
   descricao?: string;
   data?: string | null;
   repasseId?: string;
+  count?: number;
+  total?: number;
   // campos de candidato (create_candidate)
   cargo?: string;
   regiao?: string;
@@ -144,6 +146,10 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
           body: JSON.stringify({ valor: draft.valor, descricao: draft.descricao }),
         });
         okMsg = `✅ Repasse de ${draft.candidateName} alterado para ${brl(draft.valor || 0)}.`;
+      } else if (draft.type === 'batch_repasse') {
+        r = await authedFetch('/api/v1/party/batch-repasses', { method: 'POST' });
+        const j = await r.json().catch(() => ({}));
+        okMsg = `✅ ${j.created || 0} repasses lançados no histórico (${brl(j.totalValue || 0)}).`;
       } else if (draft.type === 'create_candidate') {
         r = await authedFetch('/api/v1/party/candidates', {
           method: 'POST',
@@ -273,13 +279,15 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                 {/* Card de confirmação: lançar/editar/excluir repasse + criar/excluir candidato */}
                 {m.draft && (() => {
                   const t = m.draft.type;
+                  const isBatch = t === 'batch_repasse';
                   const isDelete = t === 'delete_repasse' || t === 'delete_candidate';
                   const isEdit = t === 'edit_repasse';
                   const isCreateCand = t === 'create_candidate';
                   const isDeleteCand = t === 'delete_candidate';
                   const cls = isDelete ? 'bg-red-500/10 border-red-500/40' : 'bg-amber-500/10 border-amber-500/30';
                   const titleCls = isDelete ? 'text-red-300' : 'text-amber-300';
-                  const title = isDeleteCand ? '⚠️ Excluir candidato'
+                  const title = isBatch ? 'Lançamento em lote'
+                    : isDeleteCand ? '⚠️ Excluir candidato'
                     : isCreateCand ? 'Confirmar cadastro'
                     : t === 'delete_repasse' ? '⚠️ Confirmar EXCLUSÃO'
                     : isEdit ? 'Confirmar alteração' : 'Confirmar lançamento';
@@ -288,7 +296,13 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                   <div className={`ml-8 w-[85%] border rounded-xl p-3 ${cls}`}>
                     <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${titleCls}`}>{title}</p>
                     <div className="text-xs text-slate-200 space-y-0.5 mb-2.5">
-                      {isCreateCand ? (
+                      {isBatch ? (
+                        <>
+                          <p><b>{m.draft.count}</b> candidato{(m.draft.count || 0) > 1 ? 's' : ''} com valor mas sem registro no histórico</p>
+                          <p className="text-emerald-300 font-bold">Total: {brl(m.draft.total || 0)}</p>
+                          <p className="text-slate-400 text-[10px]">Cada um receberá um registro de repasse com a data de hoje.</p>
+                        </>
+                      ) : isCreateCand ? (
                         <>
                           <p>Cadastrar <b>{m.draft.candidateName}</b></p>
                           {(m.draft.cargo || loc) && <p className="text-slate-400">{[m.draft.cargo, loc].filter(Boolean).join(' · ')}</p>}
