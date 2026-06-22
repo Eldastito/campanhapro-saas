@@ -721,14 +721,13 @@ JSON esperado:
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const party = await candidateOfPresident(userId, req.params.id);
     if (!party) return res.status(404).json({ error: 'not_found' });
-    const { valor, data, descricao, itens } = req.body || {};
+    const { valor, data, descricao } = req.body || {};
     const v = Number(valor);
     if (!(v > 0)) return res.status(400).json({ error: 'valor_invalido' });
-    // Rateio: cada item = { categoria, valor }. Só entram os com valor > 0.
-    const cleanItens = Array.isArray(itens)
-      ? itens.map((i: any) => ({ categoria: String(i.categoria || '').slice(0, 60), valor: Number(i.valor) || 0 }))
-        .filter((i: any) => i.categoria && i.valor > 0)
-      : [];
+    // O presidente lança SÓ o valor + data (imutável). O rateio ("como o
+    // dinheiro foi aplicado") é prestação de contas do CANDIDATO — ele preenche
+    // na tela dele via PATCH /candidate/repasses/:id. Por isso nasce com itens [].
+    const cleanItens: { categoria: string; valor: number }[] = [];
     const { data: ins, error } = await supabase.from('party_repasses').insert({
       partyId: (party as any).id, candidateId: req.params.id, valor: v,
       data: /^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : null,
@@ -1150,6 +1149,72 @@ Saída JSON estrito (sem markdown):
     if (error) return dbFail(res, error);
     broadcastTelao(cand.partyId);
     return res.json({ checkin: data });
+  });
+
+  // ---- PRESTAÇÃO DE CONTAS DO CANDIDATO (#148) -------------------------------
+  // O candidato (e só ele) presta contas de COMO aplicou cada repasse que
+  // recebeu. O valor + data do repasse são do presidente e IMUTÁVEIS — aqui o
+  // candidato só preenche/edita o rateio (itens). O presidente vê isso em modo
+  // leitura no Centro de Comando, sem poder alterar.
+  const repasseAlocado = (r: any): number =>
+    Array.isArray(r?.itens) ? r.itens.reduce((a: number, it: any) => a + Number(it.valor || 0), 0) : 0;
+
+  // Lista os repasses recebidos pelo candidato logado (pra ele prestar contas).
+  router.get('/candidate/repasses', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const cand = await myCandidate(userId);
+    if (!cand) return res.status(404).json({ error: 'not_found' });
+    const { data } = await supabase.from('party_repasses')
+      .select('id, valor, data, descricao, itens, "createdAt"')
+      .eq('candidateId', cand.id).order('data', { ascending: false, nullsFirst: false });
+    const repasses = (data || []).map((r: any) => {
+      const alocado = repasseAlocado(r);
+      return { ...r, alocado, restante: Math.max(0, Number(r.valor || 0) - alocado) };
+    });
+    return res.json({ repasses });
+  });
+
+  // O candidato define/edita o rateio de UM repasse que recebeu. Sobrescreve a
+  // lista inteira de itens (o front gerencia add/editar/excluir e manda o array
+  // final). Valor e data do repasse NÃO são tocados aqui.
+  router.patch('/candidate/repasses/:id', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const cand = await myCandidate(userId);
+    if (!cand) return res.status(404).json({ error: 'not_found' });
+    // Garante que o repasse é deste candidato (escopo + posse).
+    const { data: rep } = await supabase.from('party_repasses')
+      .select('id, valor').eq('id', req.params.id).eq('candidateId', cand.id).maybeSingle();
+    if (!rep) return res.status(404).json({ error: 'repasse_nao_encontrado' });
+
+    const itensRaw = (req.body || {}).itens;
+    const itens = Array.isArray(itensRaw)
+      ? itensRaw.map((i: any) => ({
+          categoria: String(i.categoria || '').slice(0, 60),
+          valor: Number(i.valor) || 0,
+          descricao: i.descricao ? String(i.descricao).slice(0, 200) : undefined,
+        })).filter((i: any) => i.categoria && i.valor > 0)
+      : [];
+    // Trava de sanidade: o aplicado não pode exceder o valor recebido.
+    const totalItens = itens.reduce((s: number, it: any) => s + it.valor, 0);
+    if (totalItens > Number((rep as any).valor) + 0.005) {
+      return res.status(400).json({ error: 'aplicado_excede_recebido', detail: 'A soma da aplicação não pode passar do valor recebido neste repasse.' });
+    }
+
+    const { error } = await supabase.from('party_repasses')
+      .update({ itens, updatedAt: new Date().toISOString() }).eq('id', req.params.id);
+    if (error) return dbFail(res, error);
+
+    // Recalcula o cache valorAlocado do candidato (soma de todos os repasses).
+    const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', cand.id);
+    const totalAlocado = (all || []).reduce((s: number, r: any) => s + repasseAlocado(r), 0);
+    await supabase.from('party_candidates')
+      .update({ valorAlocado: totalAlocado, updatedAt: new Date().toISOString() }).eq('id', cand.id);
+    broadcastTelao(cand.partyId);
+
+    const alocado = totalItens;
+    return res.json({ ok: true, itens, alocado, restante: Math.max(0, Number((rep as any).valor) - alocado) });
   });
 
   // ---- Lado do COORDENADOR / LÍDER (ferramentas leves de campo, #83) ----
