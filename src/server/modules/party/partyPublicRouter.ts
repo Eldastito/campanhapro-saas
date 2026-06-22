@@ -89,10 +89,21 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
         cachedKeys.add((row as any).query);
         if ((row as any).lat != null && (row as any).lng != null) cityCoords[(row as any).query] = { lat: (row as any).lat, lng: (row as any).lng };
       }
-      // Aquece o cache em background pras cidades ainda não consultadas (sem travar
-      // a resposta nem esperar o throttle do Nominatim) — aparecem no próximo poll.
+      // Aguarda geocodificações pendentes por até 3s — o que ficar pronto neste
+      // poll vai pro cityCoords e aparece no mapa JÁ. Antes era fire-and-forget e
+      // o usuário precisava de outro poll pra ver candidatos sem comitê. Throttle
+      // do Nominatim é 1.1s/req, então ~2 cidades cabem nessa janela; o restante
+      // entra no próximo poll com cache já populado.
       const aQuecer = [...new Set(semComite.map((c: any) => cityQueryOf(c)!))].filter((q) => !cachedKeys.has(geoKey(q)));
-      for (const q of aQuecer) void geocode(q);
+      if (aQuecer.length) {
+        await Promise.race([
+          new Promise<void>((r) => setTimeout(r, 3000)),
+          Promise.allSettled(aQuecer.map(async (q) => {
+            const coord = await geocode(q);
+            if (coord) cityCoords[geoKey(q)] = coord;
+          })),
+        ]);
+      }
     }
 
     let green = 0, yellow = 0, red = 0;

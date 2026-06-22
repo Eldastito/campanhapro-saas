@@ -304,29 +304,51 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
 
-    // Dedup (#147e): não recria quem já existe no partido (por nome OU telefone),
-    // nem repete dentro do próprio lote. Re-colar a planilha vira no-op seguro.
+    // Dedup contra registros JÁ EXISTENTES no banco. Quem decide duplicata
+    // DENTRO do lote é o usuário no card de resolução (frontend).
+    // REGRA ELEITORAL: cargos diferentes = pessoas diferentes (Janaína Federal
+    // vs Janaína Estadual em Araruama NÃO são duplicatas). Logo, dedup só
+    // considera duplicata se nome+cidade batem E cargos são compatíveis (iguais
+    // ou pelo menos um vazio = desconhecido). Idem pra dedup por telefone.
     const { data: existing } = await supabase.from('party_candidates')
-      .select('displayName, phone').eq('partyId', party.id);
-    const existNames = new Set((existing || []).map((e: any) => normName(e.displayName)));
-    const existPhones = new Set((existing || []).map((e: any) => normPhone(e.phone)).filter((p: string) => p.length >= 8));
-    const seenNames = new Set<string>();
-    const seenPhones = new Set<string>();
+      .select('displayName, phone, regiao, cargo').eq('partyId', party.id);
+    const existByNC = new Map<string, string[]>(); // nome+cidade → cargos
+    const existByPhone = new Map<string, string[]>(); // telefone → cargos
+    for (const e of existing || []) {
+      const cargo = (e as any).cargo || '';
+      const nk = normName((e as any).displayName) + '||' + normName((e as any).regiao);
+      if (!existByNC.has(nk)) existByNC.set(nk, []);
+      existByNC.get(nk)!.push(cargo);
+      const pk = normPhone((e as any).phone);
+      if (pk.length >= 8) {
+        if (!existByPhone.has(pk)) existByPhone.set(pk, []);
+        existByPhone.get(pk)!.push(cargo);
+      }
+    }
+    const cargoCompat = (a: string, b: string) => !a || !b || a === b;
 
     let duplicates = 0, invalid = 0;
     const toInsert: any[] = [];
-    // Sem teto pequeno: processa TODOS os candidatos colados (limite alto só como
-    // proteção contra payload absurdo/timeout).
     for (const r of rows.slice(0, 5000)) {
       const displayName = String(r.displayName || r.nome || '').trim().slice(0, 160);
       if (!displayName) { invalid++; continue; }
-      // Não deixa a linha de cabeçalho ("Nome", "nome na urna eletronica"…) virar candidato.
       if (isHeaderName(displayName)) { invalid++; continue; }
-      const nk = normName(displayName);
+      const regiao = (r.regiao || r.cidade || '').toString().trim();
+      const nk = normName(displayName) + '||' + normName(regiao);
       const pk = normPhone(r.phone || r.telefone);
-      const isDup = existNames.has(nk) || seenNames.has(nk) || (pk.length >= 8 && (existPhones.has(pk) || seenPhones.has(pk)));
+      const incomingCargo = normalizeCargo(r.cargo) || ((r.cargo || '').toString().trim() || '');
+      const dupByNC = (existByNC.get(nk) || []).some((c: string) => cargoCompat(c, incomingCargo));
+      const dupByPhone = pk.length >= 8 && (existByPhone.get(pk) || []).some((c: string) => cargoCompat(c, incomingCargo));
+      const isDup = dupByNC || dupByPhone;
       if (isDup) { duplicates++; continue; }
-      seenNames.add(nk); if (pk.length >= 8) seenPhones.add(pk);
+      // Trava re-importação na MESMA chamada: adiciona aos índices pra se a mesma
+      // linha vier 2x, só uma seja gravada.
+      if (!existByNC.has(nk)) existByNC.set(nk, []);
+      existByNC.get(nk)!.push(incomingCargo);
+      if (pk.length >= 8) {
+        if (!existByPhone.has(pk)) existByPhone.set(pk, []);
+        existByPhone.get(pk)!.push(incomingCargo);
+      }
       const valorRecebido = parseBRL(r.valor ?? r.valorRecebido ?? r.repasse ?? r['$']);
       const dataRepasse = /^\d{4}-\d{2}-\d{2}$/.test(r.data || '') ? r.data : null;
       toInsert.push({
@@ -368,6 +390,18 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (repasseRows.length) {
       await supabase.from('party_repasses').insert(repasseRows);
     }
+
+    // Pré-aquece geo_cache pras cidades dos candidatos importados em background
+    // (fire-and-forget). Sem isso, o telão "esconde" candidatos sem comitê na
+    // primeira carga até o cache esquentar — agora chegam antes do usuário abrir.
+    const uniqueCities = new Set<string>();
+    for (const r of cleanInsert as any[]) {
+      if (r.regiao) {
+        const q = r.estado ? `${r.regiao}, ${r.estado}, Brasil` : `${r.regiao}, Brasil`;
+        uniqueCities.add(q);
+      }
+    }
+    for (const q of uniqueCities) void import('../../../lib/geocode').then((m) => m.geocode(q));
 
     return res.json({ created: inserted.length, duplicates, invalid });
   });
@@ -430,7 +464,7 @@ REGRAS:
 - Não invente dados: se um campo não existe, deixe "".
 - NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os campos acima.
 - phone só com dígitos; valor só com número (pode ter vírgula decimal).
-- Liste TODOS os candidatos encontrados, sem repetir o mesmo (mesmo nome) duas vezes.`;
+- Liste TODAS as linhas/candidatos encontrados — MESMO que o nome se repita (homônimos e registros múltiplos são comuns em planilhas de partido). O backend trata unificação; você só extrai.`;
 
       const result = isFile
         ? await model.generateContent([
@@ -446,11 +480,10 @@ REGRAS:
       const listRaw = Array.isArray(parsed) ? parsed : (parsed?.candidatos || parsed?.candidates || []);
       const ignored = (parsed?.colunasIgnoradas || parsed?.ignored || []).filter((x: any) => typeof x === 'string').slice(0, 20);
 
-      const seen = new Set<string>();
-      const candidates = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => {
+      // Normaliza todas as linhas (sem filtrar duplicatas ainda).
+      const allRows = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => {
         const valorNum = parseBRL(r?.valor ?? r?.valorRecebido ?? r?.['$']);
         const rawDate = String(r?.data || r?.dataRepasse || r?.dataPagamento || '').trim();
-        // Aceita YYYY-MM-DD direto ou converte DD/MM/YYYY → YYYY-MM-DD.
         let dataIso = '';
         if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) { dataIso = rawDate; }
         else { const dm = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/.exec(rawDate); if (dm) dataIso = `${dm[3]}-${dm[2]}-${dm[1]}`; }
@@ -463,21 +496,99 @@ REGRAS:
           valor: valorNum > 0 ? String(valorNum) : '',
           data: dataIso,
         };
-      }).filter((r: any) => {
-        if (!r.displayName || isHeaderName(r.displayName)) return false; // pula vazio/cabeçalho
-        const k = normName(r.displayName);
-        if (seen.has(k)) return false;                                   // corta duplicado (mesmo nome)
-        seen.add(k); return true;
-      }).slice(0, 5000);
+      }).filter((r: any) => r.displayName && !isHeaderName(r.displayName)).slice(0, 5000);
 
-      // Log leve pra observabilidade (não bloqueia, custo escondido do usuário).
+      // Detecção de grupos de duplicatas — NÃO corta, NÃO mescla. O usuário decide.
+      // Quatro casos, do mais forte pro mais fraco. Cada linha entra em no máximo
+      // 1 grupo (cai no mais forte que aplica).
+      type Row = typeof allRows[number];
+      const inGroup = new Set<number>();
+      const groups: { reason: 'identical' | 'name_city_state_phone' | 'name_city' | 'phone_diff_name'; indexes: number[] }[] = [];
+
+      // Pass 1: linhas 100% idênticas (todos os 7 campos iguais)
+      const byIdentical = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        const k = [normName(r.displayName), normName(r.cargo), normName(r.regiao), r.estado, normPhone(r.phone), r.valor, r.data].join('|');
+        if (!byIdentical.has(k)) byIdentical.set(k, []);
+        byIdentical.get(k)!.push(i);
+      });
+      for (const list of byIdentical.values()) {
+        if (list.length > 1) {
+          groups.push({ reason: 'identical', indexes: list });
+          list.forEach((i) => inGroup.add(i));
+        }
+      }
+
+      // REGRA ELEITORAL: ninguém pode concorrer a DOIS cargos ao mesmo tempo.
+      // Logo, se duas linhas têm o MESMO nome + cidade mas cargos diferentes
+      // (ex.: Janaína F vs Janaína E em Araruama), elas são HOMÔNIMOS — pessoas
+      // diferentes — e NÃO devem ser flagadas como duplicata. A IA só flagueia
+      // quando os cargos batem (ou estão vazios = desconhecido, podem coincidir).
+      const cargosCompativeis = (idxs: number[]): boolean => {
+        const distinct = new Set(idxs.map((i) => allRows[i].cargo).filter((c: string) => c));
+        return distinct.size <= 1;
+      };
+
+      // Pass 2: nome+cidade+estado+telefone iguais (telefone obrigatório, 8+ dígitos)
+      const byNCSP = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        if (inGroup.has(i)) return;
+        const pk = normPhone(r.phone);
+        if (pk.length < 8) return;
+        const k = [normName(r.displayName), normName(r.regiao), r.estado, pk].join('|');
+        if (!byNCSP.has(k)) byNCSP.set(k, []);
+        byNCSP.get(k)!.push(i);
+      });
+      for (const list of byNCSP.values()) {
+        if (list.length > 1 && cargosCompativeis(list)) {
+          groups.push({ reason: 'name_city_state_phone', indexes: list });
+          list.forEach((i) => inGroup.add(i));
+        }
+      }
+
+      // Pass 3: nome+cidade iguais (caso da Janaína). Só flagueia se cargos
+      // batem — cargos diferentes = pessoas diferentes (não pode concorrer a 2).
+      const byNC = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        if (inGroup.has(i)) return;
+        const k = normName(r.displayName) + '|' + normName(r.regiao);
+        if (!byNC.has(k)) byNC.set(k, []);
+        byNC.get(k)!.push(i);
+      });
+      for (const list of byNC.values()) {
+        if (list.length > 1 && cargosCompativeis(list)) {
+          groups.push({ reason: 'name_city', indexes: list });
+          list.forEach((i) => inGroup.add(i));
+        }
+      }
+
+      // Pass 4: mesmo telefone, nomes diferentes (apelido vs nome completo OU
+      // telefone de família/compartilhado)
+      const byPhone = new Map<string, number[]>();
+      allRows.forEach((r: Row, i: number) => {
+        if (inGroup.has(i)) return;
+        const pk = normPhone(r.phone);
+        if (pk.length < 8) return;
+        if (!byPhone.has(pk)) byPhone.set(pk, []);
+        byPhone.get(pk)!.push(i);
+      });
+      for (const list of byPhone.values()) {
+        if (list.length > 1) {
+          const distinctNames = new Set(list.map((i: number) => normName(allRows[i].displayName)));
+          if (distinctNames.size > 1) {
+            groups.push({ reason: 'phone_diff_name', indexes: list });
+            list.forEach((i: number) => inGroup.add(i));
+          }
+        }
+      }
+
       supabase.from('party_ai_command_logs').insert({
         partyId: party.id, userId, inputType: 'import_parse',
         userCommand: isFile ? `import IA: arquivo ${mimeType}` : `import IA: ${text.length} chars`, detectedIntent: 'import_parse',
-        actionStatus: candidates.length ? 'preview' : 'vazio',
+        actionStatus: allRows.length ? 'preview' : 'vazio',
       }).then(() => {}, () => {});
 
-      return res.json({ candidates, ignored, total: candidates.length });
+      return res.json({ candidates: allRows, ignored, duplicateGroups: groups, total: allRows.length });
     } catch (err: any) {
       console.error('[party] candidates/parse-ai:', err);
       return res.status(500).json({ error: 'parse_failed', message: 'Não consegui organizar a planilha. Tente colar de novo ou use o modo "Colar simples".' });

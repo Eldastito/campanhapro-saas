@@ -10,6 +10,7 @@ import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
 import PartyEmergencyWipe from '../components/party/PartyEmergencyWipe';
 import PartyBackup from '../components/party/PartyBackup';
 import PartyRestore from '../components/party/PartyRestore';
+import DuplicateResolutionCard from '../components/party/DuplicateResolutionCard';
 import PartyAIOrb from '../components/party/PartyAIOrb';
 
 /**
@@ -185,6 +186,12 @@ const PartyPresidentPage: React.FC = () => {
   const [aiFile, setAiFile] = React.useState<{ base64: string; mimeType: string; name: string } | null>(null);
   const [dragOver, setDragOver] = React.useState(false);
   const [importSummary, setImportSummary] = React.useState<{ created: number; duplicates: number; invalid: number } | null>(null);
+  // Grupos de duplicatas detectados pela IA (ANTES do preview). O usuário decide
+  // o que fazer com cada grupo (unificar / manter todos / manter só um).
+  type DupReason = 'identical' | 'name_city_state_phone' | 'name_city' | 'phone_diff_name';
+  const [aiDupGroups, setAiDupGroups] = React.useState<{ reason: DupReason; indexes: number[] }[]>([]);
+  const [aiDecisions, setAiDecisions] = React.useState<Record<number, { action: 'unify' | 'keep_all' | 'keep_one'; keepIdx?: number; outcomeText?: string }>>({});
+  const [showDupCard, setShowDupCard] = React.useState(false);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = React.useState(false);
   const [copiedAll, setCopiedAll] = React.useState(false);
@@ -430,6 +437,7 @@ const PartyPresidentPage: React.FC = () => {
   const parseWithAI = async () => {
     if (!importText.trim() && !aiFile) return;
     setAiParsing(true); setAiError(null); setAiPreview(null); setAiIgnored([]);
+    setAiDupGroups([]); setAiDecisions({}); setShowDupCard(false);
     try {
       const payload = aiFile
         ? { fileBase64: aiFile.base64, mimeType: aiFile.mimeType }
@@ -437,8 +445,18 @@ const PartyPresidentPage: React.FC = () => {
       const r = await authedFetch('/api/v1/party/candidates/parse-ai', { method: 'POST', body: JSON.stringify(payload) });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.message || j?.error || 'Falha ao organizar');
-      setAiPreview(j.candidates || []);
+      const candidates = j.candidates || [];
+      const groups = Array.isArray(j.duplicateGroups) ? j.duplicateGroups : [];
       setAiIgnored(j.ignored || []);
+      if (groups.length > 0) {
+        // Tem duplicatas → guarda os candidatos crus e abre o card de resolução.
+        // Só depois que o presidente decidir cada grupo o preview é montado.
+        setAiPreview(candidates);
+        setAiDupGroups(groups);
+        setShowDupCard(true);
+      } else {
+        setAiPreview(candidates);
+      }
       if (!(j.candidates || []).length) setAiError('Não encontrei candidatos. Confira o conteúdo colado ou o arquivo.');
     } catch (e: any) {
       setAiError(e?.message || 'Erro ao organizar com IA.');
@@ -452,7 +470,11 @@ const PartyPresidentPage: React.FC = () => {
       const rows = aiPreview.filter((c) => c.displayName.trim());
       const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
       const j = await r.json().catch(() => ({}));
-      if (r.ok) { setAiPreview(null); setAiIgnored([]); setImportText(''); setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(true); }
+      if (r.ok) {
+        setAiPreview(null); setAiIgnored([]); setImportText('');
+        setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 });
+        await load(true);
+      }
     } finally { setImporting(false); }
   };
   // edição inline da prévia da IA (#147e)
@@ -465,6 +487,7 @@ const PartyPresidentPage: React.FC = () => {
     setImportOpen(false); setImportText(''); setImportMode('manual');
     setAiPreview(null); setAiIgnored([]); setAiError(null); setImportSummary(null);
     setAiFile(null); setDragOver(false);
+    setAiDupGroups([]); setAiDecisions({}); setShowDupCard(false);
   };
 
   const inviteUrl = (token: string) => `${window.location.origin}/cadastro/partido/${token}`;
@@ -1015,6 +1038,62 @@ const PartyPresidentPage: React.FC = () => {
       {/* ORB Conversacional (#142) — assistente flutuante do partido */}
       <PartyAIOrb onRepasseDone={() => load(true)} />
 
+      {/* Card flutuante de resolução de duplicatas — aparece ANTES do preview
+          quando a IA detecta linhas potencialmente repetidas na planilha. */}
+      {showDupCard && aiDupGroups.length > 0 && aiPreview && (
+        <DuplicateResolutionCard
+          groups={aiDupGroups}
+          decisions={aiDecisions}
+          rows={aiPreview}
+          onDecide={(groupIdx, decision) => setAiDecisions((d) => {
+            if (!decision) { const next = { ...d }; delete next[groupIdx]; return next; }
+            return { ...d, [groupIdx]: decision };
+          })}
+          onContinue={() => {
+            // Aplica as decisões e monta a lista final do preview.
+            const removeIdx = new Set<number>();
+            const inserts: { afterIdx: number; row: typeof aiPreview[number] }[] = [];
+            aiDupGroups.forEach((g, gi) => {
+              const dec = aiDecisions[gi];
+              if (!dec) return; // mantém todos por padrão
+              if (dec.action === 'keep_all') return;
+              if (dec.action === 'keep_one') {
+                const keep = dec.keepIdx ?? g.indexes[0];
+                g.indexes.forEach((i) => { if (i !== keep) removeIdx.add(i); });
+                return;
+              }
+              if (dec.action === 'unify') {
+                // Soma valores, pega primeiro não-vazio dos demais campos.
+                const rows = g.indexes.map((i) => aiPreview[i]);
+                const merged = { ...rows[0] };
+                const valores: number[] = [];
+                for (const r of rows) {
+                  const v = Number(r.valor) || 0;
+                  if (v > 0) valores.push(v);
+                  if (!merged.cargo && r.cargo) merged.cargo = r.cargo;
+                  if (!merged.estado && r.estado) merged.estado = r.estado;
+                  if (!merged.phone && r.phone) merged.phone = r.phone;
+                  if (!merged.data && r.data) merged.data = r.data;
+                }
+                const soma = valores.reduce((a, b) => a + b, 0);
+                merged.valor = soma > 0 ? String(soma) : '';
+                // Remove originais; insere o merged na posição da primeira.
+                g.indexes.forEach((i) => removeIdx.add(i));
+                inserts.push({ afterIdx: g.indexes[0], row: merged });
+              }
+            });
+            const final: typeof aiPreview = [];
+            aiPreview.forEach((r, i) => {
+              if (!removeIdx.has(i)) final.push(r);
+              const ins = inserts.find((x) => x.afterIdx === i);
+              if (ins) final.push(ins.row);
+            });
+            setAiPreview(final);
+            setShowDupCard(false);
+          }}
+        />
+      )}
+
       {/* Modal: editar nome + número do partido */}
       {partyEditOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !partySaving && setPartyEditOpen(false)}>
@@ -1238,6 +1317,9 @@ const PartyPresidentPage: React.FC = () => {
                     </div>
                     {aiIgnored.length > 0 && (
                       <p className="text-[11px] text-slate-500 mb-1.5">Colunas ignoradas: {aiIgnored.join(', ')}.</p>
+                    )}
+                    {Object.keys(aiDecisions).length > 0 && (
+                      <p className="text-[11px] text-emerald-300 mb-1.5">✔️ {Object.keys(aiDecisions).length} grupo{Object.keys(aiDecisions).length > 1 ? 's' : ''} de duplicatas resolvido{Object.keys(aiDecisions).length > 1 ? 's' : ''}.</p>
                     )}
                     <div className="max-h-64 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
                       {aiPreview.map((c, i) => (
