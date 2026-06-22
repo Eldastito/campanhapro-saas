@@ -127,7 +127,7 @@ const SupremeAdminPage: React.FC = () => {
     // Global Users Data
     const [globalUsers, setGlobalUsers] = useState<AuthenticatedUser[]>([]);
     const [userSearch, setUserSearch] = useState('');
-    const [userFilter, setUserFilter] = useState<'all' | 'Admin' | 'Líder' | 'Apoiador' | 'Colaborador' | 'Pesquisador' | 'Suporte' | 'Manutenção'>('all');
+    const [userFilter, setUserFilter] = useState<'all' | 'Admin' | 'Líder' | 'Apoiador' | 'Colaborador' | 'Pesquisador' | 'Suporte' | 'Manutenção' | 'Presidente de Partido' | 'Candidato de Partido' | 'Líder Call Center' | 'Operador Call Center'>('all');
     
 
     // Platform metrics (F1) — real aggregates from supreme_platform_metrics()
@@ -1183,6 +1183,12 @@ const SupremeAdminPage: React.FC = () => {
                                         <option value="Apoiador">Apoiadores</option>
                                         <option value="Colaborador">Colaboradores</option>
                                         <option value="Pesquisador">Pesquisadores</option>
+                                        <optgroup label="Módulo Partido">
+                                            <option value="Presidente de Partido">Presidentes de Partido</option>
+                                            <option value="Candidato de Partido">Candidatos de Partido</option>
+                                            <option value="Líder Call Center">Líderes Call Center</option>
+                                            <option value="Operador Call Center">Operadores Call Center</option>
+                                        </optgroup>
                                     </select>
                                     <div className="relative">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />

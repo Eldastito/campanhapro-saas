@@ -38,7 +38,6 @@ interface ProofData {
   valveLog?: { decision: string; note?: string | null; createdAt: string }[];
 }
 
-const DEFAULT_CATS = ['Coordenador', 'Líder 1', 'Líder 2', 'Líder 3', 'Líder 4', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha'];
 // 27 UFs do Brasil (preparação nacional #147b). Seletor evita "rj"/"Rio de Janeiro" misturados.
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 // Cargos eletivos (lista fixa pra escolher no formulário e pra IA mapear).
@@ -197,7 +196,6 @@ const PartyPresidentPage: React.FC = () => {
   const [copiedAll, setCopiedAll] = React.useState(false);
   const [repasseFor, setRepasseFor] = React.useState<Candidate | null>(null);
   const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
-  const [repItems, setRepItems] = React.useState<{ categoria: string; valor: string }[]>([]);
   const [savingRep, setSavingRep] = React.useState(false);
   // Repasse recorrente (#147): flag "repetir até a eleição" + frequência.
   const [repRecurring, setRepRecurring] = React.useState(false);
@@ -208,6 +206,8 @@ const PartyPresidentPage: React.FC = () => {
   const [proofFor, setProofFor] = React.useState<Candidate | null>(null);
   const [proofData, setProofData] = React.useState<ProofData | null>(null);
   const [proofLoading, setProofLoading] = React.useState(false);
+  // Prestação de contas do candidato vista pelo presidente (#148) — SOMENTE LEITURA.
+  const [proofRepasses, setProofRepasses] = React.useState<any[]>([]);
   const [lightbox, setLightbox] = React.useState<string | null>(null);
   const [valveBusy, setValveBusy] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
@@ -300,11 +300,15 @@ const PartyPresidentPage: React.FC = () => {
   };
 
   const openProof = async (c: Candidate) => {
-    setProofFor(c); setProofData(null); setProofLoading(true);
+    setProofFor(c); setProofData(null); setProofRepasses([]); setProofLoading(true);
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${c.id}/proof`);
       const j = await r.json();
       if (r.ok) setProofData(j);
+      // Repasses + rateio (preenchido pelo candidato) — presidente só lê.
+      const rr = await authedFetch(`/api/v1/party/candidates/${c.id}/repasses`);
+      const rj = await rr.json().catch(() => ({}));
+      if (rr.ok && Array.isArray(rj.repasses)) setProofRepasses(rj.repasses);
     } catch { /* */ }
     finally { setProofLoading(false); }
   };
@@ -312,7 +316,6 @@ const PartyPresidentPage: React.FC = () => {
   const openRepasse = async (c: Candidate) => {
     setRepasseFor(c);
     setRepForm({ valor: '', data: '', descricao: '' });
-    setRepItems(DEFAULT_CATS.map((categoria) => ({ categoria, valor: '' })));
     setRepRecurring(false); setRepFreq('mensal'); setRepUntil('');
     // Auto-fill: se o candidato tem valorRecebido no cadastro mas AINDA não
     // tem nenhum repasse gravado, pré-preenche valor+data de hoje. Se já
@@ -539,11 +542,12 @@ const PartyPresidentPage: React.FC = () => {
     if (!repasseFor) return;
     const v = parseBRL(repForm.valor);
     if (!(v > 0)) return;
-    const itens = repItems.map((it) => ({ categoria: it.categoria.trim(), valor: parseBRL(it.valor) })).filter((it) => it.categoria && it.valor > 0);
+    // O presidente lança só valor+data. O rateio (como o dinheiro foi aplicado)
+    // é prestação de contas do candidato — ele preenche na tela dele.
     setSavingRep(true);
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${repasseFor.id}/repasses`, {
-        method: 'POST', body: JSON.stringify({ valor: v, data: repForm.data, descricao: repForm.descricao, itens }),
+        method: 'POST', body: JSON.stringify({ valor: v, data: repForm.data, descricao: repForm.descricao }),
       });
       if (r.ok) {
         // Flag "repetir até a eleição": cria o modelo recorrente. O repasse de
@@ -1375,8 +1379,6 @@ const PartyPresidentPage: React.FC = () => {
       {/* Modal: registrar repasse com RATEIO */}
       {repasseFor && (() => {
         const total = parseBRL(repForm.valor);
-        const alocado = repItems.reduce((s, it) => s + parseBRL(it.valor), 0);
-        const restante = total - alocado;
         return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !savingRep && setRepasseFor(null)}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -1403,27 +1405,10 @@ const PartyPresidentPage: React.FC = () => {
               <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
             </div>
 
-            <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Como o dinheiro será aplicado</p>
-            <div className="space-y-1.5 mb-2">
-              {repItems.map((it, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input value={it.categoria} onChange={(e) => setRepItems(repItems.map((x, j) => j === i ? { ...x, categoria: e.target.value } : x))}
-                    placeholder="Item" className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-slate-200" />
-                  <input value={it.valor} onChange={(e) => setRepItems(repItems.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))}
-                    placeholder="R$" className="w-28 bg-slate-950 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white text-right" />
-                  <button onClick={() => setRepItems(repItems.filter((_, j) => j !== i))} className="text-slate-500 hover:text-rose-400"><X className="w-3.5 h-3.5" /></button>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setRepItems([...repItems, { categoria: '', valor: '' }])} className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 mb-3"><Plus className="w-3.5 h-3.5" /> Adicionar item</button>
-
-            {/* Resumo: alocado × restante (o sinal de alerta) */}
-            <div className="rounded-xl bg-slate-950 border border-white/10 p-3 mb-3 text-sm">
-              <div className="flex justify-between text-slate-400"><span>Recebido</span><span className="text-white font-bold">{brl(total)}</span></div>
-              <div className="flex justify-between text-slate-400"><span>Alocado</span><span className="text-slate-200">{brl(alocado)}</span></div>
-              <div className={`flex justify-between font-black mt-1 pt-1 border-t border-white/5 ${restante > 0.005 ? 'text-rose-400' : restante < -0.005 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                <span>{restante < -0.005 ? 'Excede o recebido!' : 'Restante a justificar'}</span><span>{brl(restante)}</span>
-              </div>
+            {/* O rateio NÃO é mais preenchido pelo presidente — é prestação de
+                contas do candidato. Aqui só informamos isso. */}
+            <div className="rounded-xl bg-slate-950 border border-white/10 p-3 mb-3 text-xs text-slate-400 leading-relaxed">
+              💡 <b className="text-slate-200">Como o dinheiro será aplicado</b> é preenchido pelo próprio <b className="text-slate-200">{repasseFor.displayName}</b> na tela de prestação de contas dele. Você acompanha (somente leitura) pela <b className="text-slate-200">comprovação</b> do candidato — não edita esses valores.
             </div>
 
             {/* Repasse recorrente (#147): repete sozinho até a eleição */}
@@ -1581,6 +1566,42 @@ const PartyPresidentPage: React.FC = () => {
                       ))}
                     </div>
                   ) : <div className="text-xs text-slate-500">Nenhum check-in registrado ainda.</div>}
+                </div>
+
+                {/* Prestação de contas — preenchida pelo CANDIDATO, presidente só lê */}
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Prestação de contas <span className="text-[10px] normal-case font-normal text-slate-500">· preenchida pelo candidato</span></p>
+                  {proofRepasses.length ? (
+                    <div className="space-y-2">
+                      {proofRepasses.map((rep: any) => {
+                        const aplicado = Number(rep.alocado) || 0;
+                        const restante = (Number(rep.valor) || 0) - aplicado;
+                        const itens = Array.isArray(rep.itens) ? rep.itens : [];
+                        return (
+                          <div key={rep.id} className="bg-[#1c2128] rounded-2xl border border-white/5 p-3">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <p className="text-sm font-black text-white">{brl(Number(rep.valor) || 0)}
+                                <span className="text-[10px] font-normal text-slate-500 ml-1">{rep.data ? new Date(rep.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'sem data'}</span>
+                              </p>
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${restante > 0.005 ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                                {restante > 0.005 ? `${brl(restante)} a justificar` : 'tudo justificado ✅'}
+                              </span>
+                            </div>
+                            {itens.length ? (
+                              <ul className="space-y-0.5">
+                                {itens.map((it: any, i: number) => (
+                                  <li key={i} className="flex justify-between text-xs text-slate-300">
+                                    <span>{it.categoria}{it.descricao ? <span className="text-slate-500"> · {it.descricao}</span> : ''}</span>
+                                    <span className="text-slate-200 font-mono">{brl(Number(it.valor) || 0)}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : <p className="text-[11px] text-amber-300/80">⏳ Aguardando o candidato detalhar a aplicação.</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : <div className="text-xs text-slate-500">Nenhum repasse lançado ainda.</div>}
                 </div>
               </div>
             )}
