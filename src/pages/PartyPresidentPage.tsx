@@ -601,9 +601,13 @@ const PartyPresidentPage: React.FC = () => {
             <p className="text-slate-400">Nenhum candidato ainda. Clique em <b>"Novo candidato"</b> para começar — ou, em breve, importe sua planilha.</p>
           </div>
         ) : (() => {
-          const q = search.trim().toLowerCase();
+          // Busca tolerante: ignora maiúsc/minúsc E acentos (usuário não lembra
+          // se cadastrou "João" ou "joao"). NFD separa o acento do caractere e
+          // o range ̀-ͯ remove os diacríticos.
+          const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+          const q = norm(search.trim());
           const filtered = candidates.filter((c) => {
-            if (q && !`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''}`.toLowerCase().includes(q)) return false;
+            if (q && !norm(`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''}`).includes(q)) return false;
             if (estadoFilter !== 'all' && (c.estado || '') !== estadoFilter) return false;
             if (statusFilter === 'pending' && !(c.status === 'pending' || c.status === 'registering')) return false;
             if ((statusFilter === 'green' || statusFilter === 'yellow' || statusFilter === 'red') && c.score?.level !== statusFilter) return false;
