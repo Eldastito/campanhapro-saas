@@ -444,14 +444,20 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 65536 } });
       const regras = `Você recebe uma lista de candidatos de um partido — pode vir como planilha colada (com cabeçalho, colunas extras tipo CPF/e-mail/observações, ordem qualquer, separadores variados) OU como um ARQUIVO (imagem/foto de uma lista, ou PDF).
 
-Use o CABEÇALHO da planilha pra entender o que é cada coluna. Extraia APENAS estes campos:
-- displayName: nome da pessoa / "nome na urna" (obrigatório)
-- cargo: o cargo. Se vier código, EXPANDA: "F" = "Deputado Federal", "E" = "Deputado Estadual". Senão use Vereador/Prefeito/Senador/Deputado conforme o texto.
-- regiao: a CIDADE/município se houver
-- estado: a UF/estado (sigla de 2 letras: RJ, SP...) se houver
+⚠️ ATENÇÃO CRÍTICA — mapeie por SEMÂNTICA, NÃO por posição da coluna ⚠️
+NÃO assuma que a 2ª coluna do JSON é a 2ª coluna da planilha. SEMPRE leia o cabeçalho e mapeie pelo SIGNIFICADO. Erros comuns que você DEVE evitar:
+- ❌ Colocar VALOR (número R$) no campo "cargo" — cargo é texto (F/E/Vereador), não número
+- ❌ Colocar CARGO (F/E) no campo "regiao" — regiao é cidade
+- ❌ Colocar CIDADE no campo "estado" — estado é sigla UF de 2 letras (RJ, SP, MG…)
+
+Extraia APENAS estes campos, identificando cada um pelo CABEÇALHO da planilha:
+- displayName: nome da pessoa / "nome na urna" (obrigatório). Coluna tipo "nome", "candidato", "nome na urna eletronica".
+- cargo: o CARGO ELEITORAL (texto, NUNCA número). Coluna tipo "cargo", "função". Se vier código: "F"="Deputado Federal", "E"="Deputado Estadual". Outros: "Vereador", "Prefeito", "Senador". Se a coluna tiver NÚMERO, NÃO é cargo — é valor.
+- regiao: a CIDADE/município (texto). Coluna tipo "cidade", "município", "local". Ex.: "Niterói", "São Gonçalo", "Belford Roxo". NUNCA coloque "F"/"E" aqui — isso é cargo!
+- estado: a UF (sigla de EXATAMENTE 2 letras maiúsculas: RJ, SP, MG, RS…). Coluna tipo "UF", "estado". Se a planilha NÃO tem UF explícita mas tem cidade conhecida, INFIRA: Niterói→RJ, São Gonçalo→RJ, Belford Roxo→RJ, Caxias→RJ (Duque de Caxias), São Paulo→SP, Belo Horizonte→MG, etc. Bairros do Rio de Janeiro (Copacabana, Bangu, Pavuna, Tijuca, Jacarepaguá, Santa Cruz, Guaratiba, etc.) → estado="RJ" e regiao="Rio de Janeiro". NUNCA coloque nome de cidade em estado — só sigla de 2 letras.
 - phone: telefone/WhatsApp — só os dígitos. NUNCA use valor em R$ como telefone.
-- valor: o VALOR EM REAIS repassado/pago ao candidato (colunas tipo "$", "valor", "valor repassado", "pagamento", "repasse"). Se houver VÁRIAS colunas de valor (ex.: "Valor Previsto", "Valor Repassado", "Valor Comprovado"), use a de "Valor Repassado". Só o número (ex.: "25400" ou "25.400,00"). "" se não houver. NÃO confunda valor com telefone nem com número do candidato.
-- data: a DATA do repasse/pagamento (colunas tipo "data", "data repasse", "data pagamento", "dt pgto"). Formato YYYY-MM-DD (ex.: "2026-03-15"). Se vier DD/MM/AAAA, converta. "" se não houver.
+- valor: o VALOR EM REAIS repassado/pago ao candidato (colunas tipo "$", "valor", "valor repassado", "pagamento", "repasse"). Se houver VÁRIAS colunas de valor, use "Valor Repassado". Só o número (ex.: "25400" ou "25.400,00"). "" se não houver. Este é o ÚNICO campo numérico — se uma coluna tem só números, ela vai aqui, NÃO em cargo.
+- data: a DATA do repasse/pagamento. Formato YYYY-MM-DD. Se vier DD/MM/AAAA, converta. "" se não houver.
 
 Responda SOMENTE em JSON válido (nada fora do JSON):
 {
@@ -464,7 +470,19 @@ REGRAS:
 - Não invente dados: se um campo não existe, deixe "".
 - NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os campos acima.
 - phone só com dígitos; valor só com número (pode ter vírgula decimal).
-- Liste TODAS as linhas/candidatos encontrados — MESMO que o nome se repita (homônimos e registros múltiplos são comuns em planilhas de partido). O backend trata unificação; você só extrai.`;
+- Liste TODAS as linhas/candidatos encontrados — MESMO que o nome se repita (homônimos e registros múltiplos são comuns em planilhas de partido). O backend trata unificação; você só extrai.
+
+EXEMPLO concreto (planilha colada):
+"""
+nome na urna eletronica | $    | cargo | municipio
+Pastora Simone           | 25400| F     | Rio
+Cristiano Nogueira       | 14300| E     | Belford Roxo
+"""
+JSON esperado:
+{ "candidatos": [
+  { "displayName": "Pastora Simone",    "cargo": "Deputado Federal",  "regiao": "Rio de Janeiro", "estado": "RJ", "phone": "", "valor": "25400", "data": "" },
+  { "displayName": "Cristiano Nogueira", "cargo": "Deputado Estadual", "regiao": "Belford Roxo",   "estado": "RJ", "phone": "", "valor": "14300", "data": "" }
+] }`;
 
       const result = isFile
         ? await model.generateContent([
@@ -480,8 +498,43 @@ REGRAS:
       const listRaw = Array.isArray(parsed) ? parsed : (parsed?.candidatos || parsed?.candidates || []);
       const ignored = (parsed?.colunasIgnoradas || parsed?.ignored || []).filter((x: any) => typeof x === 'string').slice(0, 20);
 
+      // VALIDADOR DEFENSIVO: o Gemini às vezes desloca colunas (mapeia posição
+      // em vez de semântica). Sintomas vistos em prod: cargo virou número (era
+      // valor), regiao virou "F"/"E" (era cargo), estado virou nome de cidade
+      // (era cidade). Aqui detectamos e desfazemos o swap ANTES de devolver o
+      // preview, pra IA não gravar lixo no banco.
+      const fixSwappedFields = (r: any): any => {
+        const out = { ...r };
+        // 1. Se cargo é puramente numérico, é o VALOR mal-rotulado.
+        if (typeof out.cargo === 'string' && /^\d+([.,]\d+)?$/.test(out.cargo.trim())) {
+          if (!out.valor || String(out.valor).trim() === '') out.valor = out.cargo.trim();
+          out.cargo = '';
+        }
+        // 2. Se cargo está vazio mas regiao tem código de cargo (F/E/Vereador…),
+        // mova regiao → cargo.
+        const cargoCodes = /^(f|e|fed|est|vereador|vereadora|prefeito|prefeita|senador|senadora|presidente)$/i;
+        if (!out.cargo && typeof out.regiao === 'string' && cargoCodes.test(out.regiao.trim())) {
+          out.cargo = out.regiao.trim();
+          out.regiao = '';
+        }
+        // 3. Se estado NÃO é sigla de 2 letras E regiao está vazio, estado é
+        // provavelmente uma cidade que veio no lugar errado → estado → regiao.
+        if (out.estado && typeof out.estado === 'string') {
+          const e = out.estado.trim();
+          const isUF = /^[A-Za-z]{2}$/.test(e);
+          if (!isUF && !out.regiao) {
+            out.regiao = e;
+            out.estado = '';
+          } else if (!isUF && out.regiao && out.regiao !== e) {
+            // estado tem nome longo mas regiao já está preenchida com algo diferente —
+            // descarta estado (provavelmente lixo) em vez de sobrescrever regiao.
+            out.estado = '';
+          }
+        }
+        return out;
+      };
       // Normaliza todas as linhas (sem filtrar duplicatas ainda).
-      const allRows = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => {
+      const allRows = (Array.isArray(listRaw) ? listRaw : []).map(fixSwappedFields).map((r: any) => {
         const valorNum = parseBRL(r?.valor ?? r?.valorRecebido ?? r?.['$']);
         const rawDate = String(r?.data || r?.dataRepasse || r?.dataPagamento || '').trim();
         let dataIso = '';
