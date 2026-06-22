@@ -2,11 +2,13 @@
  * ORB Conversacional do Partido (#142) — Fase 2+3 do PRD.
  *
  * Bolinha flutuante no Centro de Comando. Abre um painel de chat onde o
- * presidente pergunta por texto OU voz (Web Speech API). A IA é CONSULTIVA
- * nesta fase (só leitura — total repassado, repasses, pendências, candidatos).
+ * presidente pergunta por texto OU voz (Web Speech API). A IA consulta E
+ * executa ações (lançar/editar/excluir repasse, cadastrar/excluir candidato,
+ * relatório) — SEMPRE com card de confirmação antes de gravar.
  *
  * Estados: idle | listening | thinking | error.
- * Segurança: backend valida role + escopa tudo ao partido. IA nunca escreve.
+ * Segurança: backend valida role + escopa tudo ao partido. Nada é gravado sem
+ * o presidente confirmar o draft.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, Send, Mic, Loader2, Bot, User, CheckCircle2, XCircle, Volume2 } from 'lucide-react';
@@ -229,7 +231,7 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
               <div>
                 <p className="text-sm font-bold text-white leading-tight">Assistente do Partido</p>
                 <p className="text-[10px] text-slate-400 leading-tight">
-                  {state === 'listening' ? '🎙️ Ouvindo...' : state === 'thinking' ? 'Pensando...' : 'Consulta · só leitura'}
+                  {state === 'listening' ? '🎙️ Ouvindo...' : state === 'thinking' ? 'Pensando...' : 'Consulta e ações · sempre confirma'}
                 </p>
               </div>
             </div>
@@ -241,7 +243,7 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
             {msgs.length === 0 && (
               <div className="text-center py-6">
                 <Bot className="w-10 h-10 text-indigo-400/50 mx-auto mb-2" />
-                <p className="text-xs text-slate-400 mb-3">Pergunte sobre repasses, candidatos e totais do partido.</p>
+                <p className="text-xs text-slate-400 mb-3">Pergunte ou peça ações: lançar repasse, cadastrar candidato, relatório. Sempre confirmo antes de salvar.</p>
                 <div className="space-y-1.5">
                   {SUGESTOES.map((s) => (
                     <button key={s} onClick={() => ask(s)}
