@@ -43,6 +43,10 @@ const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', '
 // Cargos eletivos (lista fixa pra escolher no formulário e pra IA mapear).
 const CARGOS = ['Presidente', 'Senador', 'Deputado Federal', 'Deputado Estadual', 'Prefeito', 'Vereador'];
 const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
+// Busca tolerante: ignora maiúsc/minúsc E acentos (usuário não lembra se
+// cadastrou "João" ou "joao"). NFD separa o acento do caractere e o range
+// ̀-ͯ remove os diacríticos.
+const normalizeText = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 interface Party { id: string; name: string; numero?: string | null; telaoToken?: string | null; plan?: string | null; }
 interface RecurringRepasse {
   id: string; candidateId: string; candidateName?: string; valor: number;
@@ -124,6 +128,24 @@ const ScoreChip: React.FC<{ s?: ScoreInfo; size?: 'sm' | 'md' }> = ({ s, size = 
   );
 };
 
+// Campo de busca reutilizado nas abas Candidatos/Ranking/Comprovação. Inclui o
+// X pra limpar quando há termo — evita o usuário ter que apagar caractere a
+// caractere e some com o "estado vazio" sem explicação.
+const SearchBar: React.FC<{ value: string; onChange: (v: string) => void; placeholder?: string; className?: string }> =
+  ({ value, onChange, placeholder, className }) => (
+  <div className={`relative ${className || ''}`}>
+    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder || 'Buscar…'}
+      className="w-full bg-[#1c2128] border border-white/10 rounded-xl pl-9 pr-9 py-2 text-white text-sm" />
+    {value && (
+      <button onClick={() => onChange('')} title="Limpar busca"
+        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-500 hover:text-white hover:bg-white/10">
+        <X className="w-4 h-4" />
+      </button>
+    )}
+  </div>
+);
+
 const PartyPresidentPage: React.FC = () => {
   const { user, logout } = useAuth();
   const [loading, setLoading] = React.useState(true);
@@ -189,38 +211,64 @@ const PartyPresidentPage: React.FC = () => {
   const [editing, setEditing] = React.useState(false);
 
   const openEdit = (c: Candidate) => { setEditFor(c); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', estado: c.estado || '', phone: c.phone || '' }); };
+
+  // Toast: feedback leve de sucesso/erro. Antes a página usava alert() (bloqueia
+  // e destoa) e vários saves fechavam o modal em silêncio. Some sozinho em ~3s.
+  const [toast, setToast] = React.useState<{ msg: string; kind: 'ok' | 'err' } | null>(null);
+  const toastTimer = React.useRef<number | null>(null);
+  const showToast = (msg: string, kind: 'ok' | 'err' = 'ok') => {
+    setToast({ msg, kind });
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3000);
+  };
+
+  // Diálogo de confirmação estilizado (promessa) — substitui window.confirm em
+  // ações destrutivas (excluir candidato, cancelar recorrente) pra combinar com
+  // o tema escuro e dar destaque ao botão perigoso.
+  const [confirmState, setConfirmState] = React.useState<
+    { title: string; body?: string; confirmLabel: string; danger?: boolean; resolve: (v: boolean) => void } | null
+  >(null);
+  const askConfirm = (opts: { title: string; body?: string; confirmLabel?: string; danger?: boolean }) =>
+    new Promise<boolean>((resolve) => setConfirmState({ confirmLabel: 'Confirmar', ...opts, resolve }));
+  const closeConfirm = (v: boolean) => { confirmState?.resolve(v); setConfirmState(null); };
+
   // M7: feedback padronizado de erro. Antes, vários saves do presidente falhavam
-  // em silêncio (fechavam o modal sem avisar). Usa alert pra ficar consistente
-  // com deleteCandidate (a página não tem sistema de toast próprio).
+  // em silêncio (fechavam o modal sem avisar).
   const notifyFail = async (r: Response, what: string) => {
     const j = await r.json().catch(() => ({}));
-    alert(`${what} (${j?.detail || j?.error || `HTTP ${r.status}`}).`);
+    showToast(`${what} (${j?.detail || j?.error || `HTTP ${r.status}`}).`, 'err');
   };
   const saveEdit = async () => {
     if (!editFor || !editForm.displayName.trim()) return;
     setEditing(true);
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${editFor.id}`, { method: 'PATCH', body: JSON.stringify(editForm) });
-      if (r.ok) { setEditFor(null); await load(); }
+      if (r.ok) { setEditFor(null); await load(); showToast('Alterações salvas ✅'); }
       else await notifyFail(r, 'Não consegui salvar as alterações');
-    } catch { alert('Falha de rede ao salvar. Tente de novo.'); }
+    } catch { showToast('Falha de rede ao salvar. Tente de novo.', 'err'); }
     finally { setEditing(false); }
   };
   const deleteCandidate = async (c: Candidate) => {
-    if (!window.confirm(`Excluir "${c.displayName}"? Isso remove o candidato e todos os dados dele (comitê, check-ins, repasses).${c.status === 'active' ? ' A conta de acesso dele também será apagada.' : ''}`)) return;
+    const ok = await askConfirm({
+      title: `Excluir "${c.displayName}"?`,
+      body: `Isso remove o candidato e todos os dados dele (comitê, check-ins, repasses).${c.status === 'active' ? ' A conta de acesso dele também será apagada.' : ''}`,
+      confirmLabel: 'Excluir', danger: true,
+    });
+    if (!ok) return;
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${c.id}`, { method: 'DELETE' });
       if (r.ok) {
         setCandidates((prev) => prev.filter((x) => x.id !== c.id));
+        showToast('Candidato excluído.');
       } else {
         // Antes falhava em silêncio (o item "voltava" no reload). Agora avisa.
         const j = await r.json().catch(() => ({}));
-        alert(j?.error === 'not_found'
+        showToast(j?.error === 'not_found'
           ? 'Não consegui excluir: candidato não encontrado ou fora do seu partido.'
-          : `Não consegui excluir (${j?.error || r.status}).`);
+          : `Não consegui excluir (${j?.error || r.status}).`, 'err');
       }
     } catch {
-      alert('Falha de rede ao excluir. Tente de novo.');
+      showToast('Falha de rede ao excluir. Tente de novo.', 'err');
     }
   };
 
@@ -238,8 +286,9 @@ const PartyPresidentPage: React.FC = () => {
       if (r.ok) {
         setCandidates((prev) => prev.map((c) => (c.id === target.id ? { ...c, repasseStatus: decision, valveNote: note } : c)));
         if (proofFor && proofFor.id === target.id) { setProofFor({ ...proofFor, repasseStatus: decision, valveNote: note }); await openProof({ ...proofFor, repasseStatus: decision }); }
+        showToast(decision === 'liberado' ? 'Repasse liberado ✅' : decision === 'retido' ? 'Repasse segurado ⏸️' : 'Repasse cortado ⛔');
       } else await notifyFail(r, 'Não consegui atualizar a válvula');
-    } catch { alert('Falha de rede ao atualizar a válvula. Tente de novo.'); }
+    } catch { showToast('Falha de rede ao atualizar a válvula. Tente de novo.', 'err'); }
     finally { setValveBusy(null); }
   };
 
@@ -290,9 +339,9 @@ const PartyPresidentPage: React.FC = () => {
     setProvBusy(true);
     try {
       const r = await authedFetch('/api/v1/party/provision', { method: 'POST', body: JSON.stringify({ name: provName.trim() }) });
-      if (r.ok) await load();
+      if (r.ok) { await load(); showToast('Partido criado ✅'); }
       else await notifyFail(r, 'Não consegui criar o partido');
-    } catch { alert('Falha de rede ao criar o partido. Tente de novo.'); }
+    } catch { showToast('Falha de rede ao criar o partido. Tente de novo.', 'err'); }
     finally { setProvBusy(false); }
   };
 
@@ -302,9 +351,9 @@ const PartyPresidentPage: React.FC = () => {
     setPartySaving(true);
     try {
       const r = await authedFetch('/api/v1/party/profile', { method: 'PATCH', body: JSON.stringify({ name: partyForm.name.trim(), numero: partyForm.numero }) });
-      if (r.ok) { setPartyEditOpen(false); await load(true); }
+      if (r.ok) { setPartyEditOpen(false); await load(true); showToast('Partido atualizado ✅'); }
       else await notifyFail(r, 'Não consegui salvar o perfil do partido');
-    } catch { alert('Falha de rede ao salvar o perfil. Tente de novo.'); }
+    } catch { showToast('Falha de rede ao salvar o perfil. Tente de novo.', 'err'); }
     finally { setPartySaving(false); }
   };
 
@@ -313,9 +362,9 @@ const PartyPresidentPage: React.FC = () => {
     setAdding(true);
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
-      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' }); setAddOpen(false); await load(); }
+      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' }); setAddOpen(false); await load(); showToast('Candidato adicionado ✅'); }
       else await notifyFail(r, 'Não consegui adicionar o candidato');
-    } catch { alert('Falha de rede ao adicionar o candidato. Tente de novo.'); }
+    } catch { showToast('Falha de rede ao adicionar o candidato. Tente de novo.', 'err'); }
     finally { setAdding(false); }
   };
 
@@ -476,9 +525,9 @@ const PartyPresidentPage: React.FC = () => {
             }),
           });
         }
-        setRepasseFor(null); await load();
+        setRepasseFor(null); await load(); showToast(repRecurring ? 'Repasse lançado e recorrência criada ✅' : 'Repasse lançado ✅');
       } else await notifyFail(r, 'Não consegui lançar o repasse');
-    } catch { alert('Falha de rede ao lançar o repasse. Tente de novo.'); }
+    } catch { showToast('Falha de rede ao lançar o repasse. Tente de novo.', 'err'); }
     finally { setSavingRep(false); }
   };
 
@@ -487,16 +536,25 @@ const PartyPresidentPage: React.FC = () => {
     setRecBusy(rec.id);
     try {
       const r = await authedFetch(`/api/v1/party/recurring-repasses/${rec.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: !rec.ativo }) });
-      if (r.ok) await loadRecurring();
-    } finally { setRecBusy(null); }
+      if (r.ok) { await loadRecurring(); showToast(rec.ativo ? 'Recorrência pausada.' : 'Recorrência retomada.'); }
+      else await notifyFail(r, 'Não consegui atualizar a recorrência');
+    } catch { showToast('Falha de rede. Tente de novo.', 'err'); }
+    finally { setRecBusy(null); }
   };
   const cancelRecurring = async (rec: RecurringRepasse) => {
-    if (!window.confirm(`Cancelar o repasse automático de ${brl(rec.valor)} para ${rec.candidateName || 'este candidato'}? Os repasses já lançados continuam no histórico.`)) return;
+    const ok = await askConfirm({
+      title: 'Cancelar repasse automático?',
+      body: `Cancelar o repasse automático de ${brl(rec.valor)} para ${rec.candidateName || 'este candidato'}? Os repasses já lançados continuam no histórico.`,
+      confirmLabel: 'Cancelar recorrência', danger: true,
+    });
+    if (!ok) return;
     setRecBusy(rec.id);
     try {
       const r = await authedFetch(`/api/v1/party/recurring-repasses/${rec.id}`, { method: 'DELETE' });
-      if (r.ok) await loadRecurring();
-    } finally { setRecBusy(null); }
+      if (r.ok) { await loadRecurring(); showToast('Recorrência cancelada.'); }
+      else await notifyFail(r, 'Não consegui cancelar a recorrência');
+    } catch { showToast('Falha de rede. Tente de novo.', 'err'); }
+    finally { setRecBusy(null); }
   };
 
   const totalRepassado = candidates.reduce((s, c) => s + (Number(c.valorRecebido) || 0), 0);
@@ -601,37 +659,27 @@ const PartyPresidentPage: React.FC = () => {
             <p className="text-slate-400">Nenhum candidato ainda. Clique em <b>"Novo candidato"</b> para começar — ou, em breve, importe sua planilha.</p>
           </div>
         ) : (() => {
-          // Busca tolerante: ignora maiúsc/minúsc E acentos (usuário não lembra
-          // se cadastrou "João" ou "joao"). NFD separa o acento do caractere e
-          // o range ̀-ͯ remove os diacríticos.
-          const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-          const q = norm(search.trim());
+          const q = normalizeText(search.trim());
           const filtered = candidates.filter((c) => {
-            if (q && !norm(`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''} ${c.phone || ''}`).includes(q)) return false;
+            if (q && !normalizeText(`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''} ${c.phone || ''}`).includes(q)) return false;
             if (estadoFilter !== 'all' && (c.estado || '') !== estadoFilter) return false;
             if (statusFilter === 'pending' && !(c.status === 'pending' || c.status === 'registering')) return false;
             if ((statusFilter === 'green' || statusFilter === 'yellow' || statusFilter === 'red') && c.score?.level !== statusFilter) return false;
             return true;
           });
           const estadosPresentes = [...new Set(candidates.map((c) => c.estado).filter(Boolean) as string[])].sort();
-          const FILTERS: { k: typeof statusFilter; label: string }[] = [
-            { k: 'all', label: 'Todos' }, { k: 'green', label: '🟢' }, { k: 'yellow', label: '🟡' }, { k: 'red', label: '🔴' }, { k: 'pending', label: 'Pendentes' },
+          const FILTERS: { k: typeof statusFilter; label: string; title: string }[] = [
+            { k: 'all', label: 'Todos', title: 'Todos os candidatos' },
+            { k: 'green', label: '🟢 Em dia', title: 'Score verde — em dia' },
+            { k: 'yellow', label: '🟡 Atenção', title: 'Score amarelo — atenção' },
+            { k: 'red', label: '🔴 Risco', title: 'Score vermelho — risco' },
+            { k: 'pending', label: 'Pendentes', title: 'Ainda não concluíram o cadastro' },
           ];
           return (
           <div className="space-y-2">
             {/* Busca + filtro */}
             <div className="flex flex-col sm:flex-row gap-2 mb-2">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar candidato (nome, telefone, cargo, cidade, UF)…"
-                  className="w-full bg-[#1c2128] border border-white/10 rounded-xl pl-9 pr-9 py-2 text-white text-sm" />
-                {search && (
-                  <button onClick={() => setSearch('')} title="Limpar busca"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-500 hover:text-white hover:bg-white/10">
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
+              <SearchBar value={search} onChange={setSearch} placeholder="Buscar candidato (nome, telefone, cargo, cidade, UF)…" className="flex-1" />
               {estadosPresentes.length > 1 && (
                 <select value={estadoFilter} onChange={(e) => setEstadoFilter(e.target.value)}
                   className="bg-[#1c2128] border border-white/10 rounded-xl px-3 py-2 text-white text-sm shrink-0">
@@ -641,7 +689,7 @@ const PartyPresidentPage: React.FC = () => {
               )}
               <div className="flex gap-1 overflow-x-auto no-scrollbar">
                 {FILTERS.map((f) => (
-                  <button key={f.k} onClick={() => setStatusFilter(f.k)}
+                  <button key={f.k} onClick={() => setStatusFilter(f.k)} title={f.title}
                     className={`text-xs font-bold px-3 py-2 rounded-xl whitespace-nowrap shrink-0 border ${statusFilter === f.k ? 'bg-indigo-600 border-transparent text-white' : 'bg-[#1c2128] border-white/10 text-slate-400'}`}>{f.label}</button>
                 ))}
               </div>
@@ -725,6 +773,12 @@ const PartyPresidentPage: React.FC = () => {
             const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
             return d <= 0 ? 'hoje' : d === 1 ? 'ontem' : `${d}d`;
           };
+          // Busca filtra a TABELA mas preserva a posição real (medalha) do ranking
+          // completo — buscar não "promove" ninguém ao 🥇.
+          const q = normalizeText(search.trim());
+          const shownRanked = ranked
+            .map((c, idx) => ({ c, idx }))
+            .filter(({ c }) => !q || normalizeText(`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''} ${c.phone || ''}`).includes(q));
           return (
             <div className="space-y-4">
               {/* Resumo do partido */}
@@ -735,8 +789,10 @@ const PartyPresidentPage: React.FC = () => {
                 <div className="bg-slate-800/60 border border-white/10 rounded-2xl p-3 text-center"><p className="text-lg font-black text-rose-300 leading-tight mt-1">{brl(aJustificar)}</p><p className="text-[11px] text-slate-400">a justificar</p></div>
               </div>
 
-              {/* Pódio top 3 */}
-              {ranked.length >= 3 && (
+              <SearchBar value={search} onChange={setSearch} placeholder="Buscar no ranking (nome, telefone, cargo, cidade, UF)…" />
+
+              {/* Pódio top 3 — escondido durante a busca (não faz sentido com filtro) */}
+              {ranked.length >= 3 && !q && (
                 <div className="bg-gradient-to-br from-indigo-600/15 to-purple-600/10 border border-white/10 rounded-3xl p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-indigo-300 mb-3 flex items-center gap-1.5"><Trophy className="w-4 h-4" /> Destaques do partido</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -756,13 +812,13 @@ const PartyPresidentPage: React.FC = () => {
                 <div className="hidden sm:grid grid-cols-[2rem_1fr_5rem_6rem_6rem_5rem] gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-white/5">
                   <span>#</span><span>Candidato</span><span className="text-center">Score</span><span className="text-right">Recebeu</span><span className="text-right">A justificar</span><span className="text-center">Ativo</span>
                 </div>
-                {ranked.map((c, i) => {
+                {shownRanked.map(({ c, idx }) => {
                   const recebido = Number(c.valorRecebido) || 0;
                   const restante = recebido - (Number(c.valorAlocado) || 0);
                   return (
                     <button key={c.id} onClick={() => openProof(c)}
                       className="w-full grid grid-cols-[2rem_1fr_5rem] sm:grid-cols-[2rem_1fr_5rem_6rem_6rem_5rem] gap-2 px-4 py-3 items-center text-left hover:bg-white/5 border-b border-white/5 last:border-0 transition-colors">
-                      <span className="font-black text-slate-400">{medal(i)}</span>
+                      <span className="font-black text-slate-400">{medal(idx)}</span>
                       <span className="min-w-0">
                         <span className="flex items-center gap-1.5"><span className="font-bold text-white truncate">{c.displayName}</span><ValveChip status={c.repasseStatus} /></span>
                         <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</span>
@@ -774,6 +830,12 @@ const PartyPresidentPage: React.FC = () => {
                     </button>
                   );
                 })}
+                {shownRanked.length === 0 && (
+                  <div className="text-center py-10 px-4">
+                    <p className="text-slate-400 text-sm">Nenhum candidato encontrado para "<b className="text-slate-300">{search}</b>".</p>
+                    <button onClick={() => setSearch('')} className="mt-3 text-xs font-bold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">Limpar busca</button>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -869,10 +931,19 @@ const PartyPresidentPage: React.FC = () => {
       {tab === 'Comprovação' && (
         candidates.length === 0 ? (
           <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para acompanhar a comprovação.</div>
-        ) : (
+        ) : (() => {
+          const q = normalizeText(search.trim());
+          const shown = candidates.filter((c) => !q || normalizeText(`${c.displayName} ${c.cargo || ''} ${c.regiao || ''} ${c.estado || ''} ${c.phone || ''} ${c.committee?.address || ''}`).includes(q));
+          return (
           <div className="space-y-2">
             <p className="text-sm text-slate-400 mb-1">Comitês geolocalizados e check-ins por candidato — a prova de que a estrutura existe.</p>
-            {candidates.map((c) => {
+            <SearchBar value={search} onChange={setSearch} placeholder="Buscar candidato (nome, cargo, cidade, endereço)…" />
+            {shown.length === 0 ? (
+              <div className="text-center py-10 px-4">
+                <p className="text-slate-400 text-sm">Nenhum candidato encontrado para "<b className="text-slate-300">{search}</b>".</p>
+                <button onClick={() => setSearch('')} className="mt-3 text-xs font-bold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300">Limpar busca</button>
+              </div>
+            ) : shown.map((c) => {
               const com = c.committee;
               const strong = !!(com && com.lat && com.hasPhoto && com.geoSource === 'gps');
               const approx = !!(com && com.lat && com.hasPhoto && com.geoSource === 'address');
@@ -899,7 +970,8 @@ const PartyPresidentPage: React.FC = () => {
               );
             })}
           </div>
-        )
+          );
+        })()
       )}
 
       {tab === 'Telão' && (() => {
@@ -1419,6 +1491,32 @@ const PartyPresidentPage: React.FC = () => {
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[60] p-4" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="foto" className="max-w-full max-h-full object-contain rounded-xl" />
           <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 text-white/80 hover:text-white"><X className="w-6 h-6" /></button>
+        </div>
+      )}
+
+      {/* Toast flutuante — feedback visual pra ações (substitui alert()) */}
+      {toast && (
+        <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] px-5 py-3 rounded-2xl border shadow-lg text-sm font-bold flex items-center gap-2 animate-[fadeIn_0.15s_ease-out] ${
+          toast.kind === 'ok' ? 'bg-emerald-950 border-emerald-500/40 text-emerald-200' : 'bg-rose-950 border-rose-500/40 text-rose-200'
+        }`}>
+          {toast.kind === 'ok' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <X className="w-4 h-4 shrink-0" />}
+          {toast.msg}
+        </div>
+      )}
+
+      {/* Confirm dialog estilizado — substitui window.confirm() */}
+      {confirmState && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4" onClick={() => closeConfirm(false)}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
+            <h4 className="font-bold text-white text-lg mb-1">{confirmState.title}</h4>
+            {confirmState.body && <p className="text-sm text-slate-400 mb-4">{confirmState.body}</p>}
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => closeConfirm(false)} className="px-4 py-2 rounded-xl text-sm font-bold text-slate-300 bg-white/5 hover:bg-white/10">Cancelar</button>
+              <button onClick={() => closeConfirm(true)} className={`px-4 py-2 rounded-xl text-sm font-bold text-white ${confirmState.danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
+                {confirmState.confirmLabel}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
