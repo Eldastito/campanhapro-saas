@@ -1405,6 +1405,24 @@ Saída JSON estrito (sem markdown):
   });
 
   //
+  // Histórico de mensagens da IA — carrega as últimas N pro chat não zerar no refresh.
+  router.get('/ai/messages', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+    const { data } = await supabase.from('party_ai_messages')
+      .select('role, text, intent, "createdAt"')
+      .eq('partyId', party.id)
+      .order('createdAt', { ascending: true })
+      .limit(100);
+    return res.json({ messages: data || [] });
+  });
+
   // Segurança: a IA NUNCA toca o banco direto. O backend monta um snapshot
   // determinístico (SQL controlado, escopado ao partido do presidente) e injeta
   // no prompt. O Gemini só interpreta/formata — não inventa (dados no contexto)
@@ -1474,6 +1492,13 @@ Saída JSON estrito (sem markdown):
           `- ${r.data} · ${brl(Number(r.valor) || 0)} · ${repMap[r.candidateId] || '?'} · ${r.descricao || 's/descrição'}`),
       ].join('\n');
 
+      // 1b. Carrega o histórico recente de conversas pra dar contexto ao Gemini
+      const { data: recentMsgs } = await supabase.from('party_ai_messages')
+        .select('role, text').eq('partyId', party.id)
+        .order('createdAt', { ascending: false }).limit(20);
+      const historyLines = (recentMsgs || []).reverse().map((m: any) =>
+        `${m.role === 'user' ? 'PRESIDENTE' : 'ASSISTENTE'}: ${String(m.text).slice(0, 400)}`);
+
       // 2. Gemini interpreta — retorna JSON estruturado (consulta OU intenção de lançar repasse)
       const geminiKey = process.env.GEMINI_API_KEY;
       if (!geminiKey) {
@@ -1533,7 +1558,7 @@ COMO RESPONDER CONSULTAS DE LISTA/ORDENAÇÃO (importante):
 
 SNAPSHOT ATUAL DO PARTIDO (hoje: ${hojeIso}):
 ${snapshot}
-
+${historyLines.length ? `\nCONVERSA RECENTE (contexto — use pra entender referências como "ele", "o mesmo", "aquele candidato"):\n${historyLines.join('\n')}\n` : ''}
 PEDIDO DO PRESIDENTE: "${text}"
 
 JSON:`;
@@ -1746,6 +1771,13 @@ JSON:`;
         partyId: party.id, userId, inputType: (req.body || {}).inputType || 'text',
         userCommand: text.slice(0, 500), detectedIntent: finalIntent, actionStatus: draft ? 'draft' : (options ? 'choosing' : 'ok'),
       }).then(() => {}, () => {});
+
+      // Persiste mensagens (user + assistant) pra histórico sobreviver refresh
+      const now = new Date().toISOString();
+      await supabase.from('party_ai_messages').insert([
+        { partyId: party.id, userId, role: 'user', text: text.slice(0, 2000), intent: null, createdAt: now },
+        { partyId: party.id, userId, role: 'assistant', text: message.slice(0, 2000), intent: finalIntent, createdAt: new Date(Date.now() + 1).toISOString() },
+      ]).then(() => {}, () => {});
 
       return res.json({ intent: finalIntent, message, draft, options, pendingAction });
     } catch (err: any) {
