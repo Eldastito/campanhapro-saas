@@ -95,11 +95,27 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [showReport, setShowReport] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const recRef = useRef<SpeechRec | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { setVoiceSupported(!!getRecognition()); }, []);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }, [msgs, state]);
+
+  // Carrega histórico persistido na primeira abertura do chat
+  useEffect(() => {
+    if (!open || historyLoaded) return;
+    setHistoryLoaded(true);
+    (async () => {
+      try {
+        const r = await authedFetch('/api/v1/party/ai/messages');
+        const j = await r.json().catch(() => ({}));
+        if (Array.isArray(j.messages) && j.messages.length) {
+          setMsgs(j.messages.map((m: any) => ({ role: m.role, text: m.text })));
+        }
+      } catch { /* silencioso — começa sem histórico */ }
+    })();
+  }, [open, historyLoaded]);
 
   const ask = async (text: string, inputType: 'text' | 'voice' = 'text') => {
     const q = text.trim();
