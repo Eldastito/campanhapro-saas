@@ -304,29 +304,28 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
 
-    // Dedup (#147e): não recria quem já existe no partido (por nome OU telefone),
-    // nem repete dentro do próprio lote. Re-colar a planilha vira no-op seguro.
+    // Dedup (#147e): não recria quem já existe no partido (por nome+cidade OU
+    // telefone), nem repete dentro do próprio lote. Re-colar = no-op seguro.
+    // Nome+cidade (não só nome) evita colapsar homônimos de cidades diferentes.
     const { data: existing } = await supabase.from('party_candidates')
-      .select('displayName, phone').eq('partyId', party.id);
-    const existNames = new Set((existing || []).map((e: any) => normName(e.displayName)));
+      .select('displayName, phone, regiao').eq('partyId', party.id);
+    const existKeys = new Set((existing || []).map((e: any) => normName(e.displayName) + '||' + normName(e.regiao)));
     const existPhones = new Set((existing || []).map((e: any) => normPhone(e.phone)).filter((p: string) => p.length >= 8));
-    const seenNames = new Set<string>();
+    const seenKeys = new Set<string>();
     const seenPhones = new Set<string>();
 
     let duplicates = 0, invalid = 0;
     const toInsert: any[] = [];
-    // Sem teto pequeno: processa TODOS os candidatos colados (limite alto só como
-    // proteção contra payload absurdo/timeout).
     for (const r of rows.slice(0, 5000)) {
       const displayName = String(r.displayName || r.nome || '').trim().slice(0, 160);
       if (!displayName) { invalid++; continue; }
-      // Não deixa a linha de cabeçalho ("Nome", "nome na urna eletronica"…) virar candidato.
       if (isHeaderName(displayName)) { invalid++; continue; }
-      const nk = normName(displayName);
+      const regiao = (r.regiao || r.cidade || '').toString().trim();
+      const nk = normName(displayName) + '||' + normName(regiao);
       const pk = normPhone(r.phone || r.telefone);
-      const isDup = existNames.has(nk) || seenNames.has(nk) || (pk.length >= 8 && (existPhones.has(pk) || seenPhones.has(pk)));
+      const isDup = existKeys.has(nk) || seenKeys.has(nk) || (pk.length >= 8 && (existPhones.has(pk) || seenPhones.has(pk)));
       if (isDup) { duplicates++; continue; }
-      seenNames.add(nk); if (pk.length >= 8) seenPhones.add(pk);
+      seenKeys.add(nk); if (pk.length >= 8) seenPhones.add(pk);
       const valorRecebido = parseBRL(r.valor ?? r.valorRecebido ?? r.repasse ?? r['$']);
       const dataRepasse = /^\d{4}-\d{2}-\d{2}$/.test(r.data || '') ? r.data : null;
       toInsert.push({
@@ -430,7 +429,7 @@ REGRAS:
 - Não invente dados: se um campo não existe, deixe "".
 - NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os campos acima.
 - phone só com dígitos; valor só com número (pode ter vírgula decimal).
-- Liste TODOS os candidatos encontrados, sem repetir o mesmo (mesmo nome) duas vezes.`;
+- Liste TODAS as linhas/candidatos encontrados — MESMO que o nome se repita (homônimos e registros múltiplos são comuns em planilhas de partido). O backend trata unificação; você só extrai.`;
 
       const result = isFile
         ? await model.generateContent([
@@ -446,11 +445,10 @@ REGRAS:
       const listRaw = Array.isArray(parsed) ? parsed : (parsed?.candidatos || parsed?.candidates || []);
       const ignored = (parsed?.colunasIgnoradas || parsed?.ignored || []).filter((x: any) => typeof x === 'string').slice(0, 20);
 
-      const seen = new Set<string>();
-      const candidates = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => {
+      // Normaliza todas as linhas (sem filtrar duplicatas ainda).
+      const allRows = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => {
         const valorNum = parseBRL(r?.valor ?? r?.valorRecebido ?? r?.['$']);
         const rawDate = String(r?.data || r?.dataRepasse || r?.dataPagamento || '').trim();
-        // Aceita YYYY-MM-DD direto ou converte DD/MM/YYYY → YYYY-MM-DD.
         let dataIso = '';
         if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) { dataIso = rawDate; }
         else { const dm = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/.exec(rawDate); if (dm) dataIso = `${dm[3]}-${dm[2]}-${dm[1]}`; }
@@ -463,21 +461,54 @@ REGRAS:
           valor: valorNum > 0 ? String(valorNum) : '',
           data: dataIso,
         };
-      }).filter((r: any) => {
-        if (!r.displayName || isHeaderName(r.displayName)) return false; // pula vazio/cabeçalho
-        const k = normName(r.displayName);
-        if (seen.has(k)) return false;                                   // corta duplicado (mesmo nome)
-        seen.add(k); return true;
-      }).slice(0, 5000);
+      }).filter((r: any) => r.displayName && !isHeaderName(r.displayName)).slice(0, 5000);
 
-      // Log leve pra observabilidade (não bloqueia, custo escondido do usuário).
+      // Merge inteligente: agrupa por (nome + cidade). Mesmo nome + mesma cidade =
+      // mesma pessoa → soma valores e pega primeiro campo não-vazio dos demais.
+      // Mesmo nome + cidade DIFERENTE = homônimos → mantém separados.
+      type Row = typeof allRows[number];
+      const groups = new Map<string, Row[]>();
+      for (const row of allRows) {
+        const key = normName(row.displayName) + '||' + normName(row.regiao);
+        const g = groups.get(key);
+        if (g) g.push(row); else groups.set(key, [row]);
+      }
+      const merges: { displayName: string; regiao: string; valores: number[]; valorUnificado: number }[] = [];
+      const candidates: Row[] = [];
+      for (const [, group] of groups) {
+        if (group.length === 1) { candidates.push(group[0]); continue; }
+        // Checa se TODOS os campos são idênticos → duplicata pura, mantém só 1.
+        const allEqual = group.every((r) =>
+          r.cargo === group[0].cargo && r.regiao === group[0].regiao &&
+          r.estado === group[0].estado && r.phone === group[0].phone &&
+          r.valor === group[0].valor && r.data === group[0].data);
+        if (allEqual) { candidates.push(group[0]); continue; }
+        // Unifica: soma valores, pega primeiro não-vazio dos demais campos.
+        const merged = { ...group[0] };
+        const valores: number[] = [];
+        for (const row of group) {
+          const v = parseBRL(row.valor);
+          if (v > 0) valores.push(v);
+          if (!merged.cargo && row.cargo) merged.cargo = row.cargo;
+          if (!merged.estado && row.estado) merged.estado = row.estado;
+          if (!merged.phone && row.phone) merged.phone = row.phone;
+          if (!merged.data && row.data) merged.data = row.data;
+        }
+        const soma = valores.reduce((a, b) => a + b, 0);
+        merged.valor = soma > 0 ? String(soma) : '';
+        candidates.push(merged);
+        if (valores.length > 1) {
+          merges.push({ displayName: merged.displayName, regiao: merged.regiao, valores, valorUnificado: soma });
+        }
+      }
+
       supabase.from('party_ai_command_logs').insert({
         partyId: party.id, userId, inputType: 'import_parse',
         userCommand: isFile ? `import IA: arquivo ${mimeType}` : `import IA: ${text.length} chars`, detectedIntent: 'import_parse',
         actionStatus: candidates.length ? 'preview' : 'vazio',
       }).then(() => {}, () => {});
 
-      return res.json({ candidates, ignored, total: candidates.length });
+      return res.json({ candidates, ignored, merges, total: candidates.length });
     } catch (err: any) {
       console.error('[party] candidates/parse-ai:', err);
       return res.status(500).json({ error: 'parse_failed', message: 'Não consegui organizar a planilha. Tente colar de novo ou use o modo "Colar simples".' });

@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   Landmark, Users, Wallet, Target, Plus, MapPinned,
   Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle, Search, Pencil, Trash2,
-  Eye, EyeOff, Sparkles, FileText,
+  Eye, EyeOff, Sparkles, FileText, Merge,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
@@ -185,6 +185,8 @@ const PartyPresidentPage: React.FC = () => {
   const [aiFile, setAiFile] = React.useState<{ base64: string; mimeType: string; name: string } | null>(null);
   const [dragOver, setDragOver] = React.useState(false);
   const [importSummary, setImportSummary] = React.useState<{ created: number; duplicates: number; invalid: number } | null>(null);
+  const [aiMerges, setAiMerges] = React.useState<{ displayName: string; regiao: string; valores: number[]; valorUnificado: number }[]>([]);
+  const [showMergeCard, setShowMergeCard] = React.useState(false);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = React.useState(false);
   const [copiedAll, setCopiedAll] = React.useState(false);
@@ -429,7 +431,7 @@ const PartyPresidentPage: React.FC = () => {
   // IA: extrai candidatos de planilha colada OU de arquivo (imagem/PDF) → preview.
   const parseWithAI = async () => {
     if (!importText.trim() && !aiFile) return;
-    setAiParsing(true); setAiError(null); setAiPreview(null); setAiIgnored([]);
+    setAiParsing(true); setAiError(null); setAiPreview(null); setAiIgnored([]); setAiMerges([]);
     try {
       const payload = aiFile
         ? { fileBase64: aiFile.base64, mimeType: aiFile.mimeType }
@@ -439,6 +441,7 @@ const PartyPresidentPage: React.FC = () => {
       if (!r.ok) throw new Error(j?.message || j?.error || 'Falha ao organizar');
       setAiPreview(j.candidates || []);
       setAiIgnored(j.ignored || []);
+      setAiMerges(Array.isArray(j.merges) ? j.merges : []);
       if (!(j.candidates || []).length) setAiError('Não encontrei candidatos. Confira o conteúdo colado ou o arquivo.');
     } catch (e: any) {
       setAiError(e?.message || 'Erro ao organizar com IA.');
@@ -452,7 +455,12 @@ const PartyPresidentPage: React.FC = () => {
       const rows = aiPreview.filter((c) => c.displayName.trim());
       const r = await authedFetch('/api/v1/party/candidates/import', { method: 'POST', body: JSON.stringify({ rows }) });
       const j = await r.json().catch(() => ({}));
-      if (r.ok) { setAiPreview(null); setAiIgnored([]); setImportText(''); setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 }); await load(true); }
+      if (r.ok) {
+        setAiPreview(null); setAiIgnored([]); setImportText('');
+        setImportSummary({ created: j.created || 0, duplicates: j.duplicates || 0, invalid: j.invalid || 0 });
+        if (aiMerges.length > 0) setShowMergeCard(true);
+        await load(true);
+      }
     } finally { setImporting(false); }
   };
   // edição inline da prévia da IA (#147e)
@@ -464,7 +472,7 @@ const PartyPresidentPage: React.FC = () => {
   const closeImport = () => {
     setImportOpen(false); setImportText(''); setImportMode('manual');
     setAiPreview(null); setAiIgnored([]); setAiError(null); setImportSummary(null);
-    setAiFile(null); setDragOver(false);
+    setAiFile(null); setDragOver(false); setAiMerges([]); setShowMergeCard(false);
   };
 
   const inviteUrl = (token: string) => `${window.location.origin}/cadastro/partido/${token}`;
@@ -1015,6 +1023,46 @@ const PartyPresidentPage: React.FC = () => {
       {/* ORB Conversacional (#142) — assistente flutuante do partido */}
       <PartyAIOrb onRepasseDone={() => load(true)} />
 
+      {/* Card flutuante de unificações — aparece após importar com merges */}
+      {showMergeCard && aiMerges.length > 0 && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4" onClick={() => setShowMergeCard(false)}>
+          <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl max-w-lg w-full p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-bold text-white flex items-center gap-2">
+                <Merge className="w-5 h-5 text-amber-400" />
+                {aiMerges.length} candidato{aiMerges.length > 1 ? 's' : ''} unificado{aiMerges.length > 1 ? 's' : ''}
+              </h4>
+              <button onClick={() => setShowMergeCard(false)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-xs text-slate-400 mb-3">Linhas com mesmo nome e mesma cidade tiveram valores de repasse somados automaticamente.</p>
+            <div className="max-h-64 overflow-y-auto space-y-2">
+              {aiMerges.map((m, i) => (
+                <div key={i} className="bg-slate-950 border border-white/10 rounded-xl p-3">
+                  <p className="text-sm font-bold text-white">{m.displayName}{m.regiao ? <span className="text-slate-400 font-normal"> · {m.regiao}</span> : ''}</p>
+                  <div className="flex items-center gap-2 mt-1.5 text-xs">
+                    <div className="flex flex-wrap gap-1">
+                      {m.valores.map((v, vi) => (
+                        <span key={vi} className="bg-slate-800 text-slate-300 rounded px-1.5 py-0.5">
+                          {v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="text-slate-500">=</span>
+                    <span className="bg-emerald-600/20 text-emerald-300 font-bold rounded px-2 py-0.5">
+                      {m.valorUnificado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setShowMergeCard(false)}
+              className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2.5 font-bold text-white text-sm">
+              Entendi
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Modal: editar nome + número do partido */}
       {partyEditOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !partySaving && setPartyEditOpen(false)}>
@@ -1238,6 +1286,9 @@ const PartyPresidentPage: React.FC = () => {
                     </div>
                     {aiIgnored.length > 0 && (
                       <p className="text-[11px] text-slate-500 mb-1.5">Colunas ignoradas: {aiIgnored.join(', ')}.</p>
+                    )}
+                    {aiMerges.length > 0 && (
+                      <p className="text-[11px] text-amber-300 mb-1.5">🔗 {aiMerges.length} candidato{aiMerges.length > 1 ? 's' : ''} com mesmo nome e cidade teve{aiMerges.length > 1 ? 'ram' : ''} valores somados automaticamente.</p>
                     )}
                     <div className="max-h-64 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
                       {aiPreview.map((c, i) => (
