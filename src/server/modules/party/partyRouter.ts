@@ -1203,7 +1203,7 @@ Saída JSON estrito (sem markdown):
     }
 
     const { error } = await supabase.from('party_repasses')
-      .update({ itens, updatedAt: new Date().toISOString() }).eq('id', req.params.id);
+      .update({ itens }).eq('id', req.params.id);
     if (error) return dbFail(res, error);
 
     // Recalcula o cache valorAlocado do candidato (soma de todos os repasses).
