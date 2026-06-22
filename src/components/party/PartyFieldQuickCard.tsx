@@ -3,6 +3,7 @@ import { Camera, Loader2, MapPin, Users, Handshake, CheckCircle2, AlertTriangle,
 import Card from '../ui/Card';
 import { authedFetch } from '../../lib/authedFetch';
 import { captureGeo, compressImage, GEO_MESSAGES, type CapturedGeo } from '../../lib/captureUtils';
+import MemberInviteCard from './MemberInviteCard';
 
 /**
  * Ferramentas leves de campo do Coordenador/Líder de partido (#83).
@@ -110,6 +111,7 @@ const PartyFieldQuickCard: React.FC = () => {
   };
 
   return (
+    <>
     <Card className="no-print p-5 border-t-4 border-t-emerald-500">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
@@ -195,6 +197,9 @@ const PartyFieldQuickCard: React.FC = () => {
         </div>
       )}
     </Card>
+    {/* Convite em cadeia: Coordenador convida Líder; Líder convida sua equipe */}
+    <div className="mt-4"><MemberInviteCard /></div>
+    </>
   );
 };
 
