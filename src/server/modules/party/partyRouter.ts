@@ -327,8 +327,8 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       const isDup = existNames.has(nk) || seenNames.has(nk) || (pk.length >= 8 && (existPhones.has(pk) || seenPhones.has(pk)));
       if (isDup) { duplicates++; continue; }
       seenNames.add(nk); if (pk.length >= 8) seenPhones.add(pk);
-      // valor (coluna "$"/valor/repasse) → valorRecebido. 0 quando não houver.
       const valorRecebido = parseBRL(r.valor ?? r.valorRecebido ?? r.repasse ?? r['$']);
+      const dataRepasse = /^\d{4}-\d{2}-\d{2}$/.test(r.data || '') ? r.data : null;
       toInsert.push({
         partyId: party.id,
         displayName,
@@ -339,12 +339,37 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         valorRecebido,
         status: 'pending',
         inviteToken: newToken(),
+        _dataRepasse: dataRepasse,
       });
     }
     if (!toInsert.length) return res.json({ created: 0, duplicates, invalid });
-    const { data, error } = await supabase.from('party_candidates').insert(toInsert).select('id');
+    // Separa _dataRepasse antes de gravar (campo auxiliar, não existe na tabela).
+    const repasseMeta = toInsert.map((r) => ({ valor: r.valorRecebido, data: r._dataRepasse }));
+    const cleanInsert = toInsert.map(({ _dataRepasse, ...rest }) => rest);
+    const { data, error } = await supabase.from('party_candidates').insert(cleanInsert).select('id');
     if (error) return dbFail(res, error);
-    return res.json({ created: (data || []).length, duplicates, invalid });
+
+    // Cria registro de repasse (party_repasses) para cada candidato importado
+    // que tenha valor > 0 — assim o histórico financeiro fica populado desde o
+    // início, não só o campo resumo "valorRecebido".
+    const inserted = data || [];
+    const repasseRows = inserted.map((row: any, i: number) => {
+      const m = repasseMeta[i];
+      if (!m || !(m.valor > 0)) return null;
+      return {
+        partyId: party.id,
+        candidateId: row.id,
+        valor: m.valor,
+        data: m.data,
+        descricao: 'Repasse importado via planilha',
+        createdBy: userId,
+      };
+    }).filter(Boolean);
+    if (repasseRows.length) {
+      await supabase.from('party_repasses').insert(repasseRows);
+    }
+
+    return res.json({ created: inserted.length, duplicates, invalid });
   });
 
   // Import assistido por IA (#147d): recebe uma planilha colada "suja" (com
@@ -392,10 +417,11 @@ Use o CABEÇALHO da planilha pra entender o que é cada coluna. Extraia APENAS e
 - estado: a UF/estado (sigla de 2 letras: RJ, SP...) se houver
 - phone: telefone/WhatsApp — só os dígitos. NUNCA use valor em R$ como telefone.
 - valor: o VALOR EM REAIS repassado/pago ao candidato (colunas tipo "$", "valor", "valor repassado", "pagamento", "repasse"). Se houver VÁRIAS colunas de valor (ex.: "Valor Previsto", "Valor Repassado", "Valor Comprovado"), use a de "Valor Repassado". Só o número (ex.: "25400" ou "25.400,00"). "" se não houver. NÃO confunda valor com telefone nem com número do candidato.
+- data: a DATA do repasse/pagamento (colunas tipo "data", "data repasse", "data pagamento", "dt pgto"). Formato YYYY-MM-DD (ex.: "2026-03-15"). Se vier DD/MM/AAAA, converta. "" se não houver.
 
 Responda SOMENTE em JSON válido (nada fora do JSON):
 {
-  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "", "valor": "" } ],
+  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "", "valor": "", "data": "" } ],
   "colunasIgnoradas": ["nome das colunas/seções extras que você descartou"]
 }
 
@@ -423,14 +449,19 @@ REGRAS:
       const seen = new Set<string>();
       const candidates = (Array.isArray(listRaw) ? listRaw : []).map((r: any) => {
         const valorNum = parseBRL(r?.valor ?? r?.valorRecebido ?? r?.['$']);
+        const rawDate = String(r?.data || r?.dataRepasse || r?.dataPagamento || '').trim();
+        // Aceita YYYY-MM-DD direto ou converte DD/MM/YYYY → YYYY-MM-DD.
+        let dataIso = '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) { dataIso = rawDate; }
+        else { const dm = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/.exec(rawDate); if (dm) dataIso = `${dm[3]}-${dm[2]}-${dm[1]}`; }
         return {
           displayName: String(r?.displayName || r?.nome || '').trim().slice(0, 160),
           cargo: (normalizeCargo(r?.cargo) || String(r?.cargo || '').trim()).slice(0, 80),
           regiao: String(r?.regiao || r?.cidade || '').trim().slice(0, 80),
           estado: normalizeUF(r?.estado || r?.uf) || '',
           phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
-          // string pra edição na prévia; "" quando 0/sem valor.
           valor: valorNum > 0 ? String(valorNum) : '',
+          data: dataIso,
         };
       }).filter((r: any) => {
         if (!r.displayName || isHeaderName(r.displayName)) return false; // pula vazio/cabeçalho
