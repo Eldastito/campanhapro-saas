@@ -1363,6 +1363,47 @@ Saída JSON estrito (sem markdown):
   });
 
   // ── ORB CONVERSACIONAL (#142) — IA consultiva (só LEITURA nesta fase) ──
+  // Lançamento em lote: cria registros de repasse para candidatos que têm
+  // valorRecebido > 0 mas nenhum registro em party_repasses (backfill de
+  // candidatos importados antes da criação automática de repasses).
+  router.post('/batch-repasses', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
+      return res.status(403).json({ error: 'apenas_presidente' });
+    }
+    const party = await partyOf(userId);
+    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
+
+    const { data: allCands } = await supabase.from('party_candidates')
+      .select('id, displayName, valorRecebido').eq('partyId', party.id);
+    const withValor = (allCands || []).filter((c: any) => Number(c.valorRecebido) > 0);
+    if (!withValor.length) return res.json({ created: 0, totalValue: 0 });
+
+    const ids = withValor.map((c: any) => c.id);
+    const { data: existingRepasses } = await supabase.from('party_repasses')
+      .select('candidateId').in('candidateId', ids);
+    const idsWithRepasse = new Set((existingRepasses || []).map((r: any) => r.candidateId));
+    const pending = withValor.filter((c: any) => !idsWithRepasse.has(c.id));
+    if (!pending.length) return res.json({ created: 0, totalValue: 0 });
+
+    const hojeIso = new Date().toISOString().slice(0, 10);
+    const rows = pending.map((c: any) => ({
+      partyId: party.id,
+      candidateId: c.id,
+      valor: Number(c.valorRecebido),
+      data: hojeIso,
+      descricao: 'Repasse registrado em lote (backfill)',
+      createdBy: userId,
+    }));
+    const { error } = await supabase.from('party_repasses').insert(rows);
+    if (error) return dbFail(res, error);
+
+    const totalValue = rows.reduce((s, r) => s + r.valor, 0);
+    return res.json({ created: rows.length, totalValue });
+  });
+
   //
   // Segurança: a IA NUNCA toca o banco direto. O backend monta um snapshot
   // determinístico (SQL controlado, escopado ao partido do presidente) e injeta
@@ -1456,7 +1497,7 @@ VOCÊ EXECUTA AÇÕES — não é só consulta. Você consegue, COM CONFIRMAÇÃ
 ${primeiroNome ? `PERSONALIZAÇÃO: chame o presidente pelo primeiro nome ("${primeiroNome}") de forma natural — na saudação e em confirmações. Não repita o nome em toda frase; soe humano, não robótico.\n` : ''}
 Responda SEMPRE em JSON válido (nada fora do JSON):
 {
-  "intent": "consulta" | "lancar_repasse" | "editar_repasse" | "excluir_repasse" | "criar_candidato" | "excluir_candidato" | "gerar_relatorio" | "ajuda" | "acao_nao_suportada",
+  "intent": "consulta" | "lancar_repasse" | "lancar_repasse_lote" | "editar_repasse" | "excluir_repasse" | "criar_candidato" | "excluir_candidato" | "gerar_relatorio" | "ajuda" | "acao_nao_suportada",
   "message": "texto curto pro presidente",
   "draft": null OU { "candidateName": "nome citado", "valor": numero_em_reais, "descricao": "finalidade", "cargo": "cargo se citado", "regiao": "cidade se citada", "estado": "UF se citada", "phone": "telefone se citado" }
 }
@@ -1464,6 +1505,7 @@ Responda SEMPRE em JSON válido (nada fora do JSON):
 REGRAS:
 - "consulta": o presidente pergunta/pede pra ORGANIZAR, LISTAR, FILTRAR ou ORDENAR dados. Responda em "message" usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
 - "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR/REGISTRAR um valor a um candidato — INCLUINDO quando o presidente disser "abre/preenche o formulário de repasse do Fulano com X", "registra o repasse de X pro Fulano", "coloca o valor de X no repasse do Fulano". Tudo isso é lancar_repasse. Extraia candidateName, valor, descricao e data (se citada; formato YYYY-MM-DD). Se faltar valor ou candidato, use "consulta" e peça o que falta com um exemplo.
+- "lancar_repasse_lote": LANÇAR REPASSES EM LOTE / pra TODOS / pra vários candidatos / "lança os repasses dos importados" / "preenche os repasses de todos". Quando o presidente pedir algo em massa (todos os candidatos, os que já têm valor, os importados), use esta intenção. draft = null. A mensagem deve pedir confirmação com o total de candidatos e valor.
 - "editar_repasse": ALTERAR/EDITAR/MUDAR/CORRIGIR o valor de um repasse de um candidato. Extraia candidateName e o NOVO valor (campo "valor"). descricao opcional.
 - "excluir_repasse": APAGAR/EXCLUIR/REMOVER/CANCELAR um repasse de um candidato. Extraia candidateName. valor/descricao = null.
 - "criar_candidato": CRIAR/CADASTRAR/ADICIONAR um novo CANDIDATO/pessoa (ex: "cadastra a candidata Ana Maria Braga, vereadora, Niterói RJ"). Extraia candidateName (obrigatório) e, se citados, cargo, regiao (cidade), estado (UF), phone. Se não vier nome, use "consulta" e peça o nome.
@@ -1513,7 +1555,7 @@ JSON:`;
         return res.json({ intent: 'consulta', draft: null, message: msg || 'Não consegui formatar a resposta. Pode reformular a pergunta?' });
       }
 
-      const intent = ['consulta', 'lancar_repasse', 'editar_repasse', 'excluir_repasse', 'criar_candidato', 'excluir_candidato', 'gerar_relatorio', 'ajuda', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
+      const intent = ['consulta', 'lancar_repasse', 'lancar_repasse_lote', 'editar_repasse', 'excluir_repasse', 'criar_candidato', 'excluir_candidato', 'gerar_relatorio', 'ajuda', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
       let message = String(parsed.message || '').slice(0, 2000);
       let draft: any = null;
 
@@ -1563,6 +1605,31 @@ JSON:`;
           };
           const dataTxt = dataRepasse !== hojeIso ? ` em ${new Date(dataRepasse + 'T00:00:00').toLocaleDateString('pt-BR')}` : '';
           message = `${primeiroNome ? primeiroNome + ', vou' : 'Vou'} lançar um repasse de ${brl(valor)} para ${cand.displayName}${descricao ? ` (${descricao})` : ''}${dataTxt}. Confirma?`;
+        }
+      }
+
+      // LANÇAMENTO EM LOTE: cria registros de repasse para candidatos que têm
+      // valorRecebido > 0 mas nenhum registro em party_repasses (ex: importados
+      // antes da correção que criava repasses automaticamente).
+      if (intent === 'lancar_repasse_lote') {
+        const { data: allCands } = await supabase.from('party_candidates')
+          .select('id, displayName, valorRecebido').eq('partyId', party.id);
+        const withValor = (allCands || []).filter((c: any) => Number(c.valorRecebido) > 0);
+        if (!withValor.length) {
+          message = 'Nenhum candidato tem valor de repasse cadastrado. Importe com valores ou lance individualmente.';
+        } else {
+          const ids = withValor.map((c: any) => c.id);
+          const { data: existingRepasses } = await supabase.from('party_repasses')
+            .select('candidateId').in('candidateId', ids);
+          const idsWithRepasse = new Set((existingRepasses || []).map((r: any) => r.candidateId));
+          const pending = withValor.filter((c: any) => !idsWithRepasse.has(c.id));
+          if (!pending.length) {
+            message = `${primeiroNome ? primeiroNome + ', todos' : 'Todos'} os ${withValor.length} candidatos com valor já têm registro de repasse no histórico. Nada a fazer.`;
+          } else {
+            const totalLote = pending.reduce((s: number, c: any) => s + Number(c.valorRecebido), 0);
+            draft = { type: 'batch_repasse', count: pending.length, total: totalLote };
+            message = `${primeiroNome ? primeiroNome + ', encontrei' : 'Encontrei'} ${pending.length} candidato${pending.length > 1 ? 's' : ''} com valor (${brl(totalLote)} no total) mas sem registro no histórico de repasses. Vou criar um registro de repasse pra cada um com a data de hoje. Confirma?`;
+          }
         }
       }
 
