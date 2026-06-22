@@ -309,11 +309,23 @@ const PartyPresidentPage: React.FC = () => {
     finally { setProofLoading(false); }
   };
 
-  const openRepasse = (c: Candidate) => {
+  const openRepasse = async (c: Candidate) => {
     setRepasseFor(c);
     setRepForm({ valor: '', data: '', descricao: '' });
     setRepItems(DEFAULT_CATS.map((categoria) => ({ categoria, valor: '' })));
     setRepRecurring(false); setRepFreq('mensal'); setRepUntil('');
+    // Auto-fill: se o candidato tem valorRecebido no cadastro mas AINDA não
+    // tem nenhum repasse gravado, pré-preenche valor+data de hoje. Se já
+    // tem repasse, abre vazio (presidente está criando um novo).
+    try {
+      const r = await authedFetch(`/api/v1/party/candidates/${c.id}/repasses`);
+      const j = await r.json().catch(() => ({}));
+      const hasRepasses = Array.isArray(j.repasses) && j.repasses.length > 0;
+      const valorImportado = Number((c as any).valorRecebido) || 0;
+      if (!hasRepasses && valorImportado > 0) {
+        setRepForm({ valor: String(valorImportado), data: new Date().toISOString().slice(0, 10), descricao: 'Repasse importado via cadastro' });
+      }
+    } catch { /* silencioso — abre form vazio */ }
   };
 
   const loadRecurring = React.useCallback(async () => {
@@ -1379,6 +1391,12 @@ const PartyPresidentPage: React.FC = () => {
                 {VALVE_META[repasseFor.repasseStatus]?.emoji} Atenção: você marcou o repasse deste candidato como <b>{repasseFor.repasseStatus === 'retido' ? 'SEGURADO' : 'CORTADO'}</b>{repasseFor.valveNote ? ` (${repasseFor.valveNote})` : ''}. Registrar mesmo assim ficará no histórico.
               </div>
             )}
+
+            {/* Aviso de imutabilidade — uma vez registrado, valor e data não podem ser alterados. */}
+            <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-[11px] text-amber-200 leading-relaxed">
+              ⚠️ <b>Atenção:</b> uma vez registrado, o <b>valor</b> e a <b>data</b> deste repasse NÃO poderão ser alterados nem o repasse excluído (regra de prestação de contas).
+              Para qualquer ajuste, será necessário lançar um <b>NOVO repasse</b> (positivo para acréscimo, negativo para estorno).
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
               <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor total recebido *" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold" />

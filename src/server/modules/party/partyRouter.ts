@@ -1218,61 +1218,22 @@ Saída JSON estrito (sem markdown):
     return res.json({ checkin: data });
   });
 
-  // Recalcula os caches de total recebido/alocado de um candidato (#145).
-  async function recalcCandidateTotals(candidateId: string) {
-    const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', candidateId);
-    const totalRecebido = (all || []).reduce((s: number, r: any) => s + Number(r.valor || 0), 0);
-    const totalAlocado = (all || []).reduce((s: number, r: any) =>
-      s + (Array.isArray(r.itens) ? r.itens.reduce((a: number, it: any) => a + Number(it.valor || 0), 0) : 0), 0);
-    await supabase.from('party_candidates').update({
-      valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
-    }).eq('id', candidateId);
-  }
-
-  // Valida que um repasse pertence a um candidato do partido do presidente.
-  async function repasseOfPresident(userId: string, repasseId: string) {
-    const party = await partyOf(userId);
-    if (!party) return null;
-    const { data: rep } = await supabase.from('party_repasses')
-      .select('*').eq('id', repasseId).eq('partyId', party.id).maybeSingle();
-    return rep ? { party, repasse: rep as any } : null;
-  }
-
-  // ── EDITAR repasse (#145) ──────────────────────────────────────────────
-  router.patch('/repasses/:id', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const found = await repasseOfPresident(userId, req.params.id);
-    if (!found) return res.status(404).json({ error: 'not_found' });
-
-    const { valor, descricao, data } = req.body || {};
-    const patch: any = { updatedAt: new Date().toISOString() };
-    if (valor !== undefined) {
-      const v = Number(valor);
-      if (!(v > 0)) return res.status(400).json({ error: 'valor_invalido' });
-      patch.valor = v;
-    }
-    if (descricao !== undefined) patch.descricao = descricao?.toString().trim() || null;
-    if (data !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(data)) patch.data = data;
-
-    const { error } = await supabase.from('party_repasses').update(patch).eq('id', req.params.id);
-    if (error) return dbFail(res, error);
-    await recalcCandidateTotals(found.repasse.candidateId);
-    broadcastTelao(found.party.id);
-    return res.json({ ok: true });
+  // ── EDITAR/EXCLUIR repasse ─────────────────────────────────────────────
+  // IMUTABILIDADE: uma vez registrado, repasse NÃO pode ser editado nem
+  // excluído. Para acerto contábil, presidente cria um NOVO repasse (positivo
+  // ou negativo). Trava no banco preserva integridade da prestação de contas.
+  router.patch('/repasses/:id', async (_req: Request, res: Response) => {
+    return res.status(403).json({
+      error: 'repasse_imutavel',
+      detail: 'Repasse registrado não pode ser editado. Crie um NOVO repasse de ajuste (valor positivo ou negativo) — fica no histórico.',
+    });
   });
 
-  // ── EXCLUIR repasse (#145) ─────────────────────────────────────────────
-  router.delete('/repasses/:id', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const found = await repasseOfPresident(userId, req.params.id);
-    if (!found) return res.status(404).json({ error: 'not_found' });
-    const { error } = await supabase.from('party_repasses').delete().eq('id', req.params.id);
-    if (error) return dbFail(res, error);
-    await recalcCandidateTotals(found.repasse.candidateId);
-    broadcastTelao(found.party.id);
-    return res.json({ ok: true });
+  router.delete('/repasses/:id', async (_req: Request, res: Response) => {
+    return res.status(403).json({
+      error: 'repasse_imutavel',
+      detail: 'Repasse registrado não pode ser excluído. Para anular, lance um NOVO repasse com valor negativo de mesmo montante.',
+    });
   });
 
   // ── REPASSE RECORRENTE (#147) ──────────────────────────────────────────
@@ -1613,12 +1574,23 @@ Saída JSON estrito (sem markdown):
 
       // 1. Snapshot determinístico do partido (escopado por partyId)
       const { data: cands } = await supabase.from('party_candidates')
-        .select('displayName, cargo, regiao, estado, status, valorRecebido, repasseStatus')
+        .select('id, displayName, cargo, regiao, estado, status, valorRecebido, repasseStatus')
         .eq('partyId', party.id).order('valorRecebido', { ascending: false });
       const candidates = cands || [];
       const totalRepassado = candidates.reduce((s: number, c: any) => s + (Number(c.valorRecebido) || 0), 0);
       const cadastrados = candidates.filter((c: any) => c.status === 'active').length;
       const pendentes = candidates.filter((c: any) => c.status === 'pending').length;
+
+      // Conta repasses por candidato (pra IA identificar quem tem múltiplos
+      // formulários de prestação de contas). Repasses são imutáveis — múltiplos
+      // = histórico de acertos contábeis legítimos.
+      const { data: allRepasses } = await supabase.from('party_repasses')
+        .select('candidateId').eq('partyId', party.id);
+      const countByCand: Record<string, number> = {};
+      for (const r of allRepasses || []) {
+        const id = (r as any).candidateId;
+        if (id) countByCand[id] = (countByCand[id] || 0) + 1;
+      }
 
       const { data: repasses } = await supabase.from('party_repasses')
         .select('valor, data, descricao, candidateId')
@@ -1647,9 +1619,12 @@ Saída JSON estrito (sem markdown):
         ``,
         `LEGENDA DE STATUS: "active" = cadastro concluído (já criou acesso/senha); "pending" = cadastro pendente (ainda não concluiu — o convite foi enviado mas ele não criou o acesso).`,
         ``,
-        `CANDIDATOS (nome | cargo | cidade/UF | status | valor recebido):`,
-        ...candidates.slice(0, 120).map((c: any) =>
-          `- ${c.displayName} | ${c.cargo || 's/cargo'} | ${local(c)} | ${statusLabel(c.status)} | ${brl(Number(c.valorRecebido) || 0)}`),
+        `CANDIDATOS (nome | cargo | cidade/UF | status | valor recebido | nº repasses):`,
+        ...candidates.slice(0, 120).map((c: any) => {
+          const n = countByCand[c.id] || 0;
+          const repColumn = n > 1 ? `${n} repasses (múltiplos formulários)` : `${n} repasse`;
+          return `- ${c.displayName} | ${c.cargo || 's/cargo'} | ${local(c)} | ${statusLabel(c.status)} | ${brl(Number(c.valorRecebido) || 0)} | ${repColumn}`;
+        }),
         ``,
         `REPASSES RECENTES (data · valor · candidato · descrição):`,
         ...(repasses || []).map((r: any) =>
@@ -1695,8 +1670,8 @@ REGRAS:
 - "consulta": o presidente pergunta/pede pra ORGANIZAR, LISTAR, FILTRAR ou ORDENAR dados. Responda em "message" usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
 - "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR/REGISTRAR um valor a um candidato — INCLUINDO quando o presidente disser "abre/preenche o formulário de repasse do Fulano com X", "registra o repasse de X pro Fulano", "coloca o valor de X no repasse do Fulano". Tudo isso é lancar_repasse. Extraia candidateName, valor, descricao e data (se citada; formato YYYY-MM-DD). Se faltar valor ou candidato, use "consulta" e peça o que falta com um exemplo.
 - "lancar_repasse_lote": LANÇAR REPASSES EM LOTE / pra TODOS / pra vários candidatos / "lança os repasses dos importados" / "preenche os repasses de todos". Quando o presidente pedir algo em massa (todos os candidatos, os que já têm valor, os importados), use esta intenção. draft = null. A mensagem deve pedir confirmação com o total de candidatos e valor.
-- "editar_repasse": ALTERAR/EDITAR/MUDAR/CORRIGIR o valor de um repasse de um candidato. Extraia candidateName e o NOVO valor (campo "valor"). descricao opcional.
-- "excluir_repasse": APAGAR/EXCLUIR/REMOVER/CANCELAR um repasse de um candidato. Extraia candidateName. valor/descricao = null.
+- "editar_repasse": IGNORE essa intenção — repasses registrados são IMUTÁVEIS por compliance. Se o presidente pedir pra editar/alterar/corrigir um repasse, use intent="acao_nao_suportada" e message="Repasse já registrado não pode ser editado (regra de prestação de contas). Pra ajustar, lance um NOVO repasse — pode ser positivo (acréscimo) ou negativo (estorno) — e ele entra no histórico."
+- "excluir_repasse": IGNORE essa intenção — repasses registrados são IMUTÁVEIS. Se o presidente pedir pra excluir/apagar/remover/cancelar um repasse, use intent="acao_nao_suportada" e message="Repasse registrado não pode ser excluído (regra de prestação de contas). Pra anular, lance um NOVO repasse com valor NEGATIVO de mesmo montante — fica como estorno no histórico."
 - "criar_candidato": CRIAR/CADASTRAR/ADICIONAR um novo CANDIDATO/pessoa (ex: "cadastra a candidata Ana Maria Braga, vereadora, Niterói RJ"). Extraia candidateName (obrigatório) e, se citados, cargo, regiao (cidade), estado (UF), phone. Se não vier nome, use "consulta" e peça o nome.
   O campo "cargo" DEVE ser exatamente um destes: "Presidente", "Senador", "Deputado Federal", "Deputado Estadual", "Prefeito", "Vereador". Mapeie variações pro valor da lista (ex: "vereadora"→"Vereador", "prefeita"→"Prefeito", "deputada estadual"→"Deputado Estadual"). Se o cargo citado não for nenhum desses, deixe cargo vazio.
 - "excluir_candidato": EXCLUIR/APAGAR/REMOVER um CANDIDATO inteiro (a pessoa, não um repasse). Extraia candidateName.
