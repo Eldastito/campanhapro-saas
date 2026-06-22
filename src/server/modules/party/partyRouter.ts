@@ -1218,27 +1218,7 @@ Saída JSON estrito (sem markdown):
     return res.json({ checkin: data });
   });
 
-  // Recalcula os caches de total recebido/alocado de um candidato (#145).
-  async function recalcCandidateTotals(candidateId: string) {
-    const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', candidateId);
-    const totalRecebido = (all || []).reduce((s: number, r: any) => s + Number(r.valor || 0), 0);
-    const totalAlocado = (all || []).reduce((s: number, r: any) =>
-      s + (Array.isArray(r.itens) ? r.itens.reduce((a: number, it: any) => a + Number(it.valor || 0), 0) : 0), 0);
-    await supabase.from('party_candidates').update({
-      valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
-    }).eq('id', candidateId);
-  }
-
-  // Valida que um repasse pertence a um candidato do partido do presidente.
-  async function repasseOfPresident(userId: string, repasseId: string) {
-    const party = await partyOf(userId);
-    if (!party) return null;
-    const { data: rep } = await supabase.from('party_repasses')
-      .select('*').eq('id', repasseId).eq('partyId', party.id).maybeSingle();
-    return rep ? { party, repasse: rep as any } : null;
-  }
-
-  // ── EDITAR repasse (#145) ──────────────────────────────────────────────
+  // ── EDITAR/EXCLUIR repasse ─────────────────────────────────────────────
   // IMUTABILIDADE: uma vez registrado, repasse NÃO pode ser editado nem
   // excluído. Para acerto contábil, presidente cria um NOVO repasse (positivo
   // ou negativo). Trava no banco preserva integridade da prestação de contas.
