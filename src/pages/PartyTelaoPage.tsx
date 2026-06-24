@@ -208,23 +208,30 @@ const PartyTelaoPage: React.FC = () => {
   // Redesenha quando os dados mudam.
   React.useEffect(() => { dataRef.current = data; draw(); }, [data, draw]);
 
-  if (loading) return <div className="h-screen w-screen bg-[#0a0a0b] flex items-center justify-center"><Loader2 className="w-10 h-10 text-indigo-500 animate-spin" /></div>;
-  if (error && !data) return <div className="h-screen w-screen bg-[#0a0a0b] text-slate-300 flex items-center justify-center text-center p-8"><div><MapPin className="w-10 h-10 mx-auto mb-3 opacity-40" /><p>{error}</p></div></div>;
-
-  const s = data!.stats;
+  // IMPORTANTE: o container do mapa é renderizado SEMPRE (mesmo em loading/erro),
+  // senão o useEffect de init roda antes do <div> existir e o mapa nunca é criado
+  // (mapa preto). Spinner e erro viram overlays por cima.
+  const s = data?.stats;
   return (
     <div className="h-screen w-screen bg-[#0a0a0b] text-white relative overflow-hidden">
       <div ref={mapDivRef} className="absolute inset-0 z-0" />
 
+      {loading && (
+        <div className="absolute inset-0 z-[600] bg-[#0a0a0b]/80 flex items-center justify-center"><Loader2 className="w-10 h-10 text-indigo-500 animate-spin" /></div>
+      )}
+      {error && !data && (
+        <div className="absolute inset-0 z-[600] bg-[#0a0a0b] text-slate-300 flex items-center justify-center text-center p-8"><div><MapPin className="w-10 h-10 mx-auto mb-3 opacity-40" /><p>{error}</p></div></div>
+      )}
+
       {/* Cabeçalho flutuante */}
-      <div className="absolute top-0 left-0 right-0 z-[500] pointer-events-none p-4 sm:p-6 bg-gradient-to-b from-black/70 to-transparent">
-        <h1 className="text-2xl sm:text-3xl font-black tracking-tight">{data!.partyName}</h1>
+      {data && <div className="absolute top-0 left-0 right-0 z-[500] pointer-events-none p-4 sm:p-6 bg-gradient-to-b from-black/70 to-transparent">
+        <h1 className="text-2xl sm:text-3xl font-black tracking-tight">{data.partyName}</h1>
         <p className="text-xs text-slate-400">Telão ao vivo · estrutura de campo · atualiza em tempo real</p>
         <p className="text-[10px] text-slate-500 mt-0.5">● comitê com local · ◌ sem comitê (aprox. pela cidade) · agrupados por região (clique pra abrir) · cor = saúde</p>
-      </div>
+      </div>}
 
       {/* Placar 🟢🟡🔴 + totais */}
-      <div className="absolute bottom-0 left-0 right-0 z-[500] p-4 sm:p-6 bg-gradient-to-t from-black/80 to-transparent">
+      {data && s && <div className="absolute bottom-0 left-0 right-0 z-[500] p-4 sm:p-6 bg-gradient-to-t from-black/80 to-transparent">
         <div className="flex flex-wrap gap-2 sm:gap-3">
           <Card v={s.candidates} l="Candidatos" c="text-white" />
           <Card v={s.committees} l="Comitês no mapa" c="text-indigo-300" />
@@ -233,7 +240,7 @@ const PartyTelaoPage: React.FC = () => {
           <Card v={s.yellow} l="🟡 Atenção" c="text-amber-300" />
           <Card v={s.red} l="🔴 Risco" c="text-rose-300" />
         </div>
-      </div>
+      </div>}
 
       {/* Lightbox — foto do comitê expandida */}
       {lightbox && (
