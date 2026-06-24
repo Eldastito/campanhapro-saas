@@ -191,6 +191,21 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       }
     }
 
+    // Equipe REGISTRADA pelo candidato (inclui convites ainda pendentes). As
+    // metas/checklist do presidente marcam assim que o candidato cadastra o
+    // coordenador/líder — mesmo antes da pessoa concluir o próprio cadastro.
+    // (O SCORE continua usando só usuários reais — saúde de verdade.)
+    const regTeam: Record<string, { coord: number; lider: number }> = {};
+    if (campaignIds.length) {
+      const { data: invs } = await supabase.from('party_member_invites')
+        .select('"campaignId", role').in('campaignId', campaignIds).in('role', ['Coordenador', 'Líder']);
+      for (const r of invs || []) {
+        const k = (r as any).campaignId;
+        regTeam[k] = regTeam[k] || { coord: 0, lider: 0 };
+        if ((r as any).role === 'Coordenador') regTeam[k].coord++; else regTeam[k].lider++;
+      }
+    }
+
     // Comitês + contagem de check-ins por candidato (comprovação).
     const candidateIds = candidates.map((c: any) => c.id);
     const committees: Record<string, any> = {};
@@ -211,12 +226,16 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
 
     const enriched = candidates.map((c: any) => {
       const t = (c.campaignId && team[c.campaignId]) || { coord: 0, lider: 0 };
+      const rt = (c.campaignId && regTeam[c.campaignId]) || { coord: 0, lider: 0 };
+      // Meta marca pelo registrado OU usuário real (o maior).
+      const metaCoord = Math.max(t.coord, rt.coord);
+      const metaLider = Math.max(t.lider, rt.lider);
       const com = committees[c.id];
       const metas = [
         { label: 'Candidato cadastrado', done: c.status === 'active' },
         { label: 'Comitê com foto/GPS', done: !!(com && com.photo && com.lat) },
-        { label: 'Coordenador na equipe', done: t.coord >= 1 },
-        { label: '5 líderes ativos', done: t.lider >= 5 },
+        { label: 'Coordenador na equipe', done: metaCoord >= 1 },
+        { label: '5 líderes ativos', done: metaLider >= 5 },
       ];
       const score = computeScore({
         status: c.status,
