@@ -1388,6 +1388,11 @@ const PartyPresidentPage: React.FC = () => {
       {/* Modal: registrar repasse com RATEIO */}
       {repasseFor && (() => {
         const total = parseBRL(repForm.valor);
+        // Resumo do MÊS CORRENTE: soma dos repasses do mês + data do último.
+        const ym = new Date().toISOString().slice(0, 7); // YYYY-MM
+        const mesReps = repHistory.filter((r) => (r.data || '').slice(0, 7) === ym);
+        const totalMes = mesReps.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+        const ultimaDataMes = mesReps.map((r) => r.data).filter(Boolean).sort().slice(-1)[0] || null;
         return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !savingRep && setRepasseFor(null)}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -1409,9 +1414,17 @@ const PartyPresidentPage: React.FC = () => {
               Para qualquer ajuste, será necessário lançar um <b>NOVO repasse</b> (positivo para acréscimo, negativo para estorno).
             </div>
 
+            {/* Resumo do MÊS CORRENTE (somente leitura): total recebido no mês +
+                data do último repasse. Os repasses individuais ficam no histórico. */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-              <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor total recebido *" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold" />
-              <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              <div className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Recebido no mês corrente</p>
+                <p className="text-white font-bold">{brl(totalMes)}</p>
+              </div>
+              <div className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Último repasse do mês</p>
+                <p className="text-white font-bold">{ultimaDataMes ? new Date(ultimaDataMes + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</p>
+              </div>
             </div>
 
             {/* O rateio NÃO é mais preenchido pelo presidente — é prestação de
@@ -1441,9 +1454,16 @@ const PartyPresidentPage: React.FC = () => {
                     );
                   })}
                 </div>
-                <p className="text-[10px] text-slate-500 mt-1.5">Os campos acima criam um <b>novo</b> repasse — o histórico é imutável.</p>
               </div>
             )}
+
+            {/* Lançar um NOVO repasse (valor + data). O resumo acima é só leitura. */}
+            <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Lançar novo repasse</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1">
+              <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor recebido *" inputMode="decimal" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold" />
+              <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+            </div>
+            <p className="text-[10px] text-slate-500 mb-3">Cada lançamento é um repasse imutável e entra no histórico acima.</p>
 
             {/* Repasse recorrente (#147): repete sozinho até a eleição */}
             <div className={`rounded-xl border p-3 mb-3 transition-colors ${repRecurring ? 'bg-indigo-500/10 border-indigo-500/40' : 'bg-slate-950 border-white/10'}`}>
