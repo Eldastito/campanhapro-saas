@@ -1068,18 +1068,28 @@ Saída JSON estrito (sem markdown):
     const { data: committee } = await supabase.from('party_committees').select('*').eq('candidateId', cand.id).maybeSingle();
     const { data: checkins } = await supabase.from('party_checkins')
       .select('id, tipo, lat, lng, nota, "createdAt"').eq('candidateId', cand.id).order('createdAt', { ascending: false }).limit(20);
-    // metas do candidato (mesma lógica)
+    // Equipe REAL (usuários já cadastrados) — usada no SCORE (saúde de verdade).
     const t = { coord: 0, lider: 0 };
+    // Equipe REGISTRADA pelo candidato (inclui convites ainda pendentes) — usada
+    // nas METAS: assim que o candidato cadastra o coordenador/líder, a meta marca,
+    // mesmo antes da pessoa concluir o próprio cadastro.
+    const reg = { coord: 0, lider: 0 };
     if (cand.campaignId) {
       const { data: members } = await supabase.from('users').select('type').eq('campaignId', cand.campaignId).in('type', ['Coordenador', 'Líder']);
       for (const m of members || []) { if ((m as any).type === 'Coordenador') t.coord++; else t.lider++; }
+      const { data: invs } = await supabase.from('party_member_invites').select('role').eq('campaignId', cand.campaignId).in('role', ['Coordenador', 'Líder']);
+      for (const r of invs || []) { if ((r as any).role === 'Coordenador') reg.coord++; else reg.lider++; }
     }
+    // Meta conta o que foi registrado OU já é usuário (o maior) — evita zerar a
+    // meta quando o convite ainda está pendente.
+    const metaCoord = Math.max(t.coord, reg.coord);
+    const metaLider = Math.max(t.lider, reg.lider);
     const com = committee as any;
     const metas = [
       { label: 'Concluir seu cadastro', done: cand.status === 'active' },
       { label: 'Cadastrar o comitê (foto + GPS)', done: !!(com && com.photo && com.lat) },
-      { label: 'Cadastrar 1 coordenador', done: t.coord >= 1 },
-      { label: 'Cadastrar 5 líderes', done: t.lider >= 5 },
+      { label: 'Cadastrar 1 coordenador', done: metaCoord >= 1 },
+      { label: 'Cadastrar 5 líderes', done: metaLider >= 5 },
     ];
     const score = computeScore({
       status: cand.status,
@@ -1297,15 +1307,15 @@ Saída JSON estrito (sem markdown):
   });
 
   // ── CONVITE DE EQUIPE EM CADEIA (#149) ─────────────────────────────────
-  // Cada nível convida o nível abaixo, sempre dentro da MESMA campanha do
-  // candidato (mesmo campaignId), via link/WhatsApp com nome+telefone já
-  // preenchidos — o convidado só cria email+senha. Sem limite de pessoas.
-  //   Candidato de Partido → Coordenador → Líder → Apoiador (equipe)
-  const NEXT_ROLE: Record<string, string> = {
-    'Candidato de Partido': 'Coordenador',
-    'Coordenador': 'Líder',
-    'Líder': 'Apoiador',
-    'Lider': 'Apoiador',
+  // Cada nível convida o(s) papel(éis) abaixo, sempre na MESMA campanha do
+  // candidato, via link/WhatsApp com nome+telefone já preenchidos — o convidado
+  // só cria email+senha. Sem limite de pessoas.
+  //   Candidato → Coordenador e Líder · Coordenador → Líder · Líder → Apoiador
+  const ALLOWED_ROLES: Record<string, string[]> = {
+    'Candidato de Partido': ['Coordenador', 'Líder'],
+    'Coordenador': ['Líder'],
+    'Líder': ['Apoiador'],
+    'Lider': ['Apoiador'],
   };
 
   router.post('/member-invites', async (req: Request, res: Response) => {
@@ -1313,11 +1323,13 @@ Saída JSON estrito (sem markdown):
     const userType = (req as any).user?.userType;
     const campaignId = (req as any).user?.campaignId;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const role = NEXT_ROLE[userType];
-    if (!role || !campaignId) {
+    const allowed = ALLOWED_ROLES[userType];
+    if (!allowed || !allowed.length || !campaignId) {
       return res.status(403).json({ error: 'nao_pode_convidar', detail: 'Seu perfil não pode convidar membros de equipe aqui.' });
     }
-    const { displayName, phone, bairro, valorPago, dataPago } = req.body || {};
+    const { displayName, phone, bairro, valorPago, dataPago, role: roleReq } = req.body || {};
+    // Papel pedido precisa estar entre os permitidos pra quem convida; senão, o 1º.
+    const role = allowed.includes(roleReq) ? roleReq : allowed[0];
     const nome = String(displayName || '').trim().slice(0, 160);
     if (!nome) return res.status(400).json({ error: 'nome_obrigatorio' });
     const tel = String(phone || '').replace(/\D/g, '').slice(0, 20) || null;
@@ -1363,7 +1375,22 @@ Saída JSON estrito (sem markdown):
     const { data } = await supabase.from('party_member_invites')
       .select('token, "displayName", phone, role, status, bairro, "valorPago", "dataPago", "valorRecebido", "dataRecebido", "createdAt"')
       .eq('invitedBy', userId).order('createdAt', { ascending: false });
-    return res.json({ invites: data || [], canInvite: !!NEXT_ROLE[userType], nextRole: NEXT_ROLE[userType] || null });
+    const allowed = ALLOWED_ROLES[userType] || [];
+    return res.json({ invites: data || [], canInvite: allowed.length > 0, allowedRoles: allowed });
+  });
+
+  // Candidato/membro exclui um registro de equipe que ele criou.
+  router.delete('/member-invites/:token', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: inv } = await supabase.from('party_member_invites')
+      .select('id, "userId"').eq('token', req.params.token).eq('invitedBy', userId).maybeSingle();
+    if (!inv) return res.status(404).json({ error: 'not_found' });
+    // Se o membro já se cadastrou (virou usuário), NÃO apaga a conta dele — só
+    // remove o vínculo/registro de equipe. A conta é gerida pelo Supreme Admin.
+    const { error } = await supabase.from('party_member_invites').delete().eq('id', (inv as any).id);
+    if (error) return dbFail(res, error);
+    return res.json({ ok: true });
   });
 
   // Lado do MEMBRO: vê o que quem o convidou declarou pagar + declara o que recebeu.
