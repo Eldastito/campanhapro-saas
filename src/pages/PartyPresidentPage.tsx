@@ -169,7 +169,7 @@ const PartyPresidentPage: React.FC = () => {
   const [partyForm, setPartyForm] = React.useState({ name: '', numero: '' });
   const [partySaving, setPartySaving] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
-  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' });
+  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', valor: '', data: '' });
   const [adding, setAdding] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [importText, setImportText] = React.useState('');
@@ -384,7 +384,7 @@ const PartyPresidentPage: React.FC = () => {
     setAdding(true);
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
-      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' }); setAddOpen(false); await load(); showToast('Candidato adicionado ✅'); }
+      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', valor: '', data: '' }); setAddOpen(false); await load(); showToast('Candidato adicionado ✅'); }
       else await notifyFail(r, 'Não consegui adicionar o candidato');
     } catch { showToast('Falha de rede ao adicionar o candidato. Tente de novo.', 'err'); }
     finally { setAdding(false); }
@@ -1195,6 +1195,12 @@ const PartyPresidentPage: React.FC = () => {
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp) *" className={`bg-slate-950 border rounded-xl px-3 py-2 text-white ${form.phone.replace(/\D/g, '').length >= 10 ? 'border-white/10' : 'border-amber-500/40'}`} />
               </div>
               <p className="text-[11px] text-slate-500">* Nome, cidade, UF e telefone são obrigatórios (mapa + convite por WhatsApp). Cargo é opcional.</p>
+              {/* Repasse inicial (opcional) — se informado, já cria o registro e popula o histórico */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <input value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} placeholder="Valor do repasse (opcional)" inputMode="decimal" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+                <input value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" title="Data do repasse" />
+              </div>
+              <p className="text-[11px] text-slate-500">Se já houve um repasse, informe o valor e a data — entra no histórico e o candidato presta contas dele.</p>
             </div>
             <button onClick={addCandidate} disabled={adding || !form.displayName.trim() || !form.regiao.trim() || !form.estado || form.phone.replace(/\D/g, '').length < 10} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar

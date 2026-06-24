@@ -4,6 +4,7 @@ import Card from '../ui/Card';
 import { authedFetch } from '../../lib/authedFetch';
 import { captureGeo, compressImage, GEO_MESSAGES, type CapturedGeo } from '../../lib/captureUtils';
 import MemberInviteCard from './MemberInviteCard';
+import MemberPaymentDeclaration from './MemberPaymentDeclaration';
 
 /**
  * Ferramentas leves de campo do Coordenador/Líder de partido (#83).
@@ -197,6 +198,8 @@ const PartyFieldQuickCard: React.FC = () => {
         </div>
       )}
     </Card>
+    {/* Declaração de quanto o membro recebeu de quem o cadastrou */}
+    <div className="mt-4"><MemberPaymentDeclaration /></div>
     {/* Convite em cadeia: Coordenador convida Líder; Líder convida sua equipe */}
     <div className="mt-4"><MemberInviteCard /></div>
     </>

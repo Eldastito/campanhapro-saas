@@ -280,20 +280,33 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const party = await partyOf(userId);
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
-    const { displayName, cargo, regiao, estado, phone } = req.body || {};
+    const { displayName, cargo, regiao, estado, phone, valor, data } = req.body || {};
     if (!displayName?.trim()) return res.status(400).json({ error: 'displayName_obrigatorio' });
-    const { data, error } = await supabase.from('party_candidates').insert({
+    const valorInicial = parseBRL(valor);
+    const dataInicial = /^\d{4}-\d{2}-\d{2}$/.test(String(data || '')) ? data : null;
+    const { data: cand, error } = await supabase.from('party_candidates').insert({
       partyId: party.id,
       displayName: String(displayName).slice(0, 160),
-      cargo: cargo?.trim() || null,
+      cargo: normalizeCargo(cargo) || (cargo?.trim() || null),
       regiao: regiao?.trim() || null,
       estado: normalizeUF(estado),
       phone: phone?.trim() || null,
+      valorRecebido: valorInicial > 0 ? valorInicial : 0,
       status: 'pending',
       inviteToken: newToken(),
     }).select('*').single();
     if (error) return dbFail(res, error);
-    return res.json({ candidate: data });
+    // Se o presidente já informou um valor de repasse no cadastro, cria o
+    // registro em party_repasses (igual ao import) — assim o histórico nasce
+    // populado e o formulário de repasse auto-preenche depois.
+    if (valorInicial > 0) {
+      await supabase.from('party_repasses').insert({
+        partyId: party.id, candidateId: (cand as any).id, valor: valorInicial,
+        data: dataInicial, descricao: 'Repasse informado no cadastro', itens: [], createdBy: userId,
+      }).then(() => {}, () => {});
+      broadcastTelao(party.id);
+    }
+    return res.json({ candidate: cand });
   });
 
   // Import em lote (planilha do presidente). Body: { rows: [{displayName,cargo,regiao,estado,phone}] }
@@ -1304,10 +1317,12 @@ Saída JSON estrito (sem markdown):
     if (!role || !campaignId) {
       return res.status(403).json({ error: 'nao_pode_convidar', detail: 'Seu perfil não pode convidar membros de equipe aqui.' });
     }
-    const { displayName, phone } = req.body || {};
+    const { displayName, phone, bairro, valorPago, dataPago } = req.body || {};
     const nome = String(displayName || '').trim().slice(0, 160);
     if (!nome) return res.status(400).json({ error: 'nome_obrigatorio' });
     const tel = String(phone || '').replace(/\D/g, '').slice(0, 20) || null;
+    const vPago = parseBRL(valorPago);
+    const dPago = /^\d{4}-\d{2}-\d{2}$/.test(String(dataPago || '')) ? dataPago : null;
     // Contexto do candidato (mesma campanha) — pra exibir nome do candidato/partido.
     const { data: cand } = await supabase.from('party_candidates')
       .select('id, "partyId"').eq('campaignId', campaignId).maybeSingle();
@@ -1315,9 +1330,30 @@ Saída JSON estrito (sem markdown):
     const { data, error } = await supabase.from('party_member_invites').insert({
       token, campaignId, partyId: (cand as any)?.partyId ?? null, candidateId: (cand as any)?.id ?? null,
       invitedBy: userId, displayName: nome, phone: tel, role, status: 'pending',
-    }).select('token, "displayName", phone, role, status, "createdAt"').single();
+      bairro: bairro ? String(bairro).trim().slice(0, 120) : null,
+      valorPago: vPago > 0 ? vPago : null, dataPago: dPago,
+    }).select('token, "displayName", phone, role, status, bairro, "valorPago", "dataPago", "valorRecebido", "dataRecebido", "createdAt"').single();
     if (error) return dbFail(res, error);
     return res.json({ invite: data, role });
+  });
+
+  // Candidato edita os dados/pagamento de um membro que ele convidou.
+  router.patch('/member-invites/:token', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: inv } = await supabase.from('party_member_invites')
+      .select('id').eq('token', req.params.token).eq('invitedBy', userId).maybeSingle();
+    if (!inv) return res.status(404).json({ error: 'not_found' });
+    const { displayName, phone, bairro, valorPago, dataPago } = req.body || {};
+    const patch: any = { updatedAt: new Date().toISOString() };
+    if (displayName !== undefined) patch.displayName = String(displayName).trim().slice(0, 160);
+    if (phone !== undefined) patch.phone = String(phone).replace(/\D/g, '').slice(0, 20) || null;
+    if (bairro !== undefined) patch.bairro = bairro ? String(bairro).trim().slice(0, 120) : null;
+    if (valorPago !== undefined) { const v = parseBRL(valorPago); patch.valorPago = v > 0 ? v : null; }
+    if (dataPago !== undefined) patch.dataPago = /^\d{4}-\d{2}-\d{2}$/.test(String(dataPago || '')) ? dataPago : null;
+    const { error } = await supabase.from('party_member_invites').update(patch).eq('id', (inv as any).id);
+    if (error) return dbFail(res, error);
+    return res.json({ ok: true });
   });
 
   router.get('/member-invites', async (req: Request, res: Response) => {
@@ -1325,9 +1361,35 @@ Saída JSON estrito (sem markdown):
     const userType = (req as any).user?.userType;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const { data } = await supabase.from('party_member_invites')
-      .select('token, "displayName", phone, role, status, "createdAt"')
+      .select('token, "displayName", phone, role, status, bairro, "valorPago", "dataPago", "valorRecebido", "dataRecebido", "createdAt"')
       .eq('invitedBy', userId).order('createdAt', { ascending: false });
     return res.json({ invites: data || [], canInvite: !!NEXT_ROLE[userType], nextRole: NEXT_ROLE[userType] || null });
+  });
+
+  // Lado do MEMBRO: vê o que quem o convidou declarou pagar + declara o que recebeu.
+  router.get('/member/payment', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data } = await supabase.from('party_member_invites')
+      .select('role, bairro, "valorPago", "dataPago", "valorRecebido", "dataRecebido"')
+      .eq('userId', userId).order('createdAt', { ascending: false }).limit(1).maybeSingle();
+    return res.json({ payment: data || null });
+  });
+
+  router.patch('/member/payment', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: row } = await supabase.from('party_member_invites')
+      .select('id').eq('userId', userId).order('createdAt', { ascending: false }).limit(1).maybeSingle();
+    if (!row) return res.status(404).json({ error: 'sem_vinculo' });
+    const { valorRecebido, dataRecebido } = req.body || {};
+    const patch: any = { updatedAt: new Date().toISOString() };
+    const v = parseBRL(valorRecebido);
+    patch.valorRecebido = v > 0 ? v : null;
+    patch.dataRecebido = /^\d{4}-\d{2}-\d{2}$/.test(String(dataRecebido || '')) ? dataRecebido : null;
+    const { error } = await supabase.from('party_member_invites').update(patch).eq('id', (row as any).id);
+    if (error) return dbFail(res, error);
+    return res.json({ ok: true });
   });
 
   // ── EDITAR/EXCLUIR repasse ─────────────────────────────────────────────
