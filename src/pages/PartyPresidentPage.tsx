@@ -162,6 +162,10 @@ const PartyPresidentPage: React.FC = () => {
     try { localStorage.setItem('party_financial_visible', String(nv)); } catch { /* ok */ }
     return nv;
   });
+  // Mascara qualquer valor de repasse quando o sigilo financeiro está ativo
+  // (mesmo botão de olho do card "Total repassado" controla TUDO). Sem isso, o
+  // valor ficava exposto no app (#155).
+  const money = (n: number) => financialVisible ? brl(n) : 'R$ ••••••';
   const [provName, setProvName] = React.useState('');
   const [provBusy, setProvBusy] = React.useState(false);
   // Editar nome + número do partido (cabeçalho).
@@ -589,7 +593,7 @@ const PartyPresidentPage: React.FC = () => {
   const cancelRecurring = async (rec: RecurringRepasse) => {
     const ok = await askConfirm({
       title: 'Cancelar repasse automático?',
-      body: `Cancelar o repasse automático de ${brl(rec.valor)} para ${rec.candidateName || 'este candidato'}? Os repasses já lançados continuam no histórico.`,
+      body: `Cancelar o repasse automático de ${money(rec.valor)} para ${rec.candidateName || 'este candidato'}? Os repasses já lançados continuam no histórico.`,
       confirmLabel: 'Cancelar recorrência', danger: true,
     });
     if (!ok) return;
@@ -777,7 +781,7 @@ const PartyPresidentPage: React.FC = () => {
                     className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300" title="Registrar repasse">
                     <Wallet className="w-3.5 h-3.5" /> Repasse
                   </button>
-                  <span className="text-sm text-slate-300 text-right">{brl(Number(c.valorRecebido) || 0)}</span>
+                  <span className="text-sm text-slate-300 text-right">{money(Number(c.valorRecebido) || 0)}</span>
                   <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${STATUS_BADGE[c.status] || STATUS_BADGE.pending}`}>{STATUS_LABEL[c.status] || c.status}</span>
                   <button onClick={() => openEdit(c)} title="Editar" className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"><Pencil className="w-3.5 h-3.5" /></button>
                   <button onClick={() => deleteCandidate(c)} title="Excluir" className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -831,7 +835,7 @@ const PartyPresidentPage: React.FC = () => {
                 <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-emerald-300">{greens}</p><p className="text-[11px] text-slate-400">🟢 Em dia</p></div>
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-amber-300">{yellows}</p><p className="text-[11px] text-slate-400">🟡 Atenção</p></div>
                 <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-rose-300">{reds}</p><p className="text-[11px] text-slate-400">🔴 Risco</p></div>
-                <div className="bg-slate-800/60 border border-white/10 rounded-2xl p-3 text-center"><p className="text-lg font-black text-rose-300 leading-tight mt-1">{brl(aJustificar)}</p><p className="text-[11px] text-slate-400">a justificar</p></div>
+                <div className="bg-slate-800/60 border border-white/10 rounded-2xl p-3 text-center"><p className="text-lg font-black text-rose-300 leading-tight mt-1">{money(aJustificar)}</p><p className="text-[11px] text-slate-400">a justificar</p></div>
               </div>
 
               <SearchBar value={search} onChange={setSearch} placeholder="Buscar no ranking (nome, telefone, cargo, cidade, UF)…" />
@@ -869,8 +873,8 @@ const PartyPresidentPage: React.FC = () => {
                         <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</span>
                       </span>
                       <span className="text-center"><ScoreChip s={c.score} /></span>
-                      <span className="hidden sm:block text-right text-sm text-white">{brl(recebido)}</span>
-                      <span className={`hidden sm:block text-right text-sm font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? brl(restante) : '—'}</span>
+                      <span className="hidden sm:block text-right text-sm text-white">{money(recebido)}</span>
+                      <span className={`hidden sm:block text-right text-sm font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? money(restante) : '—'}</span>
                       <span className="hidden sm:flex items-center justify-center gap-1 text-[11px] text-slate-400"><Activity className="w-3 h-3" /> {lastSeen(c.lastCheckinAt)}</span>
                     </button>
                   );
@@ -893,9 +897,12 @@ const PartyPresidentPage: React.FC = () => {
           <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para registrar repasses.</div>
         ) : (
           <div className="space-y-2">
-            <p className="text-sm text-slate-400 mb-1">
-              Total repassado: <b className="text-white">{brl(totalRepassado)}</b>
-              {' · '}A justificar: <b className="text-rose-400">{brl(candidates.reduce((s, c) => s + Math.max(0, (Number(c.valorRecebido) || 0) - (Number(c.valorAlocado) || 0)), 0))}</b>
+            <p className="text-sm text-slate-400 mb-1 flex items-center gap-1.5 flex-wrap">
+              <span>Total repassado: <b className="text-white">{money(totalRepassado)}</b></span>
+              <span>· A justificar: <b className="text-rose-400">{money(candidates.reduce((s, c) => s + Math.max(0, (Number(c.valorRecebido) || 0) - (Number(c.valorAlocado) || 0)), 0))}</b></span>
+              <button onClick={toggleFinancial} className="text-slate-400 hover:text-white" title={financialVisible ? 'Ocultar valores' : 'Mostrar valores'}>
+                {financialVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              </button>
             </p>
 
             {/* Repasses automáticos (#147) — modelos recorrentes ativos/pausados */}
@@ -912,7 +919,7 @@ const PartyPresidentPage: React.FC = () => {
                           {rec.ativo && rec.pausadoPelaValvula && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">⏸️ válvula</span>}
                         </p>
                         <p className="text-[11px] text-slate-400 truncate">
-                          {brl(rec.valor)} · {FREQ_LABEL[rec.frequencia] || rec.frequencia}
+                          {money(rec.valor)} · {FREQ_LABEL[rec.frequencia] || rec.frequencia}
                           {rec.ativo ? ` · próximo ${new Date(rec.proximaData + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
                           {rec.dataFim ? ` · até ${new Date(rec.dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
                           {rec.totalLancado ? ` · ${rec.totalLancado} lançado(s)` : ''}
@@ -945,8 +952,8 @@ const PartyPresidentPage: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     <div className="text-right">
-                      <p className="text-lg font-black text-white leading-none">{brl(recebido)}</p>
-                      {recebido > 0 && <p className={`text-[11px] font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? `${brl(restante)} a justificar` : 'tudo alocado ✅'}</p>}
+                      <p className="text-lg font-black text-white leading-none">{money(recebido)}</p>
+                      {recebido > 0 && <p className={`text-[11px] font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? `${money(restante)} a justificar` : 'tudo alocado ✅'}</p>}
                     </div>
                     <button onClick={() => openRepasse(c)}
                       className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300"><Wallet className="w-3.5 h-3.5" /> Repasse</button>
@@ -1431,7 +1438,7 @@ const PartyPresidentPage: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
               <div className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-slate-500">Recebido no mês corrente</p>
-                <p className="text-white font-bold">{brl(totalMes)}</p>
+                <p className="text-white font-bold">{money(totalMes)}</p>
               </div>
               <div className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-slate-500">Último repasse do mês</p>
@@ -1448,7 +1455,7 @@ const PartyPresidentPage: React.FC = () => {
             {/* Histórico de repasses já registrados (somente leitura) */}
             {repHistory.length > 0 && (
               <div className="mb-3">
-                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Histórico de repasses ({repHistory.length}) · total {brl(repHistory.reduce((s, r) => s + (Number(r.valor) || 0), 0))}</p>
+                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Histórico de repasses ({repHistory.length}) · total {money(repHistory.reduce((s, r) => s + (Number(r.valor) || 0), 0))}</p>
                 <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
                   {repHistory.map((r) => {
                     const aplicado = Array.isArray(r.itens) ? r.itens.reduce((a, it) => a + (Number(it.valor) || 0), 0) : 0;
@@ -1456,11 +1463,11 @@ const PartyPresidentPage: React.FC = () => {
                     return (
                       <div key={r.id} className="flex items-center justify-between px-3 py-2 text-xs">
                         <div className="min-w-0">
-                          <p className="text-white font-bold">{brl(Number(r.valor) || 0)}</p>
+                          <p className="text-white font-bold">{money(Number(r.valor) || 0)}</p>
                           <p className="text-[10px] text-slate-500 truncate">{r.data ? new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'sem data'}{r.descricao ? ` · ${r.descricao}` : ''}</p>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${restante > 0.005 ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
-                          {restante > 0.005 ? `${brl(restante)} a justificar` : 'justificado ✅'}
+                          {restante > 0.005 ? `${money(restante)} a justificar` : 'justificado ✅'}
                         </span>
                       </div>
                     );
@@ -1646,11 +1653,11 @@ const PartyPresidentPage: React.FC = () => {
                         return (
                           <div key={rep.id} className="bg-[#1c2128] rounded-2xl border border-white/5 p-3">
                             <div className="flex items-center justify-between mb-1.5">
-                              <p className="text-sm font-black text-white">{brl(Number(rep.valor) || 0)}
+                              <p className="text-sm font-black text-white">{money(Number(rep.valor) || 0)}
                                 <span className="text-[10px] font-normal text-slate-500 ml-1">{rep.data ? new Date(rep.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'sem data'}</span>
                               </p>
                               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${restante > 0.005 ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
-                                {restante > 0.005 ? `${brl(restante)} a justificar` : 'tudo justificado ✅'}
+                                {restante > 0.005 ? `${money(restante)} a justificar` : 'tudo justificado ✅'}
                               </span>
                             </div>
                             {itens.length ? (
@@ -1658,7 +1665,7 @@ const PartyPresidentPage: React.FC = () => {
                                 {itens.map((it: any, i: number) => (
                                   <li key={i} className="flex justify-between text-xs text-slate-300">
                                     <span>{it.categoria}{it.descricao ? <span className="text-slate-500"> · {it.descricao}</span> : ''}</span>
-                                    <span className="text-slate-200 font-mono">{brl(Number(it.valor) || 0)}</span>
+                                    <span className="text-slate-200 font-mono">{money(Number(it.valor) || 0)}</span>
                                   </li>
                                 ))}
                               </ul>
