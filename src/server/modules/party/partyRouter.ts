@@ -1203,7 +1203,7 @@ Saída JSON estrito (sem markdown):
     }
 
     const { error } = await supabase.from('party_repasses')
-      .update({ itens, updatedAt: new Date().toISOString() }).eq('id', req.params.id);
+      .update({ itens }).eq('id', req.params.id);
     if (error) return dbFail(res, error);
 
     // Recalcula o cache valorAlocado do candidato (soma de todos os repasses).
@@ -1281,6 +1281,53 @@ Saída JSON estrito (sem markdown):
     if (error) return dbFail(res, error);
     broadcastTelao(cand.partyId);
     return res.json({ checkin: data });
+  });
+
+  // ── CONVITE DE EQUIPE EM CADEIA (#149) ─────────────────────────────────
+  // Cada nível convida o nível abaixo, sempre dentro da MESMA campanha do
+  // candidato (mesmo campaignId), via link/WhatsApp com nome+telefone já
+  // preenchidos — o convidado só cria email+senha. Sem limite de pessoas.
+  //   Candidato de Partido → Coordenador → Líder → Apoiador (equipe)
+  const NEXT_ROLE: Record<string, string> = {
+    'Candidato de Partido': 'Coordenador',
+    'Coordenador': 'Líder',
+    'Líder': 'Apoiador',
+    'Lider': 'Apoiador',
+  };
+
+  router.post('/member-invites', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    const campaignId = (req as any).user?.campaignId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const role = NEXT_ROLE[userType];
+    if (!role || !campaignId) {
+      return res.status(403).json({ error: 'nao_pode_convidar', detail: 'Seu perfil não pode convidar membros de equipe aqui.' });
+    }
+    const { displayName, phone } = req.body || {};
+    const nome = String(displayName || '').trim().slice(0, 160);
+    if (!nome) return res.status(400).json({ error: 'nome_obrigatorio' });
+    const tel = String(phone || '').replace(/\D/g, '').slice(0, 20) || null;
+    // Contexto do candidato (mesma campanha) — pra exibir nome do candidato/partido.
+    const { data: cand } = await supabase.from('party_candidates')
+      .select('id, "partyId"').eq('campaignId', campaignId).maybeSingle();
+    const token = newToken();
+    const { data, error } = await supabase.from('party_member_invites').insert({
+      token, campaignId, partyId: (cand as any)?.partyId ?? null, candidateId: (cand as any)?.id ?? null,
+      invitedBy: userId, displayName: nome, phone: tel, role, status: 'pending',
+    }).select('token, "displayName", phone, role, status, "createdAt"').single();
+    if (error) return dbFail(res, error);
+    return res.json({ invite: data, role });
+  });
+
+  router.get('/member-invites', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    const userType = (req as any).user?.userType;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data } = await supabase.from('party_member_invites')
+      .select('token, "displayName", phone, role, status, "createdAt"')
+      .eq('invitedBy', userId).order('createdAt', { ascending: false });
+    return res.json({ invites: data || [], canInvite: !!NEXT_ROLE[userType], nextRole: NEXT_ROLE[userType] || null });
   });
 
   // ── EDITAR/EXCLUIR repasse ─────────────────────────────────────────────

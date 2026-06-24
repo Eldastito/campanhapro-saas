@@ -7,6 +7,7 @@ import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import { captureGeo, compressImage, isInAppBrowser, GEO_MESSAGES, type CapturedGeo } from '../lib/captureUtils';
 import { geocode } from '../lib/geocode';
+import MemberInviteCard from '../components/party/MemberInviteCard';
 
 /**
  * Experiência ENXUTA do candidato dentro do partido: comprova que o dinheiro
@@ -328,6 +329,9 @@ const PartyCandidatePage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Minha equipe — candidato convida o(s) coordenador(es) por WhatsApp */}
+      <MemberInviteCard />
 
       {/* Metas */}
       <div className="bg-gradient-to-br from-purple-600/15 to-fuchsia-600/10 border border-white/10 rounded-3xl p-5 mb-6">

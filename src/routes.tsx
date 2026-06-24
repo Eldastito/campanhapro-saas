@@ -19,6 +19,7 @@ import ProductPage from './pages/ProductPage';
 import PartyPitchPage from './pages/PartyPitchPage';
 import PartyExecSummaryPage from './pages/PartyExecSummaryPage';
 import PublicPartyRegisterPage from './pages/PublicPartyRegisterPage';
+import PublicMemberRegisterPage from './pages/PublicMemberRegisterPage';
 import PartyTelaoPage from './pages/PartyTelaoPage';
 import PublicCallCenterRegisterPage from './pages/PublicCallCenterRegisterPage';
 import SocialOAuthCallbackPage from './pages/SocialOAuthCallbackPage';
@@ -78,6 +79,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/proposta/partido" element={<PartyPitchPage />} />
                 <Route path="/sumario/partido" element={<PartyExecSummaryPage />} />
                 <Route path="/cadastro/partido/:token" element={<PublicPartyRegisterPage />} />
+                <Route path="/cadastro/equipe/:token" element={<PublicMemberRegisterPage />} />
                 <Route path="/telao/partido/:token" element={<PartyTelaoPage />} />
                 <Route path="/cadastro/callcenter/:token" element={<PublicCallCenterRegisterPage />} />
                 <Route path="/oauth/:provider/callback" element={<SocialOAuthCallbackPage />} />

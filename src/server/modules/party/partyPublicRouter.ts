@@ -258,5 +258,60 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     return res.json({ ok: true });
   });
 
+  // ── CONVITE DE EQUIPE EM CADEIA (#149) — PÚBLICO ───────────────────────
+  // O membro convidado (Coordenador/Líder/Apoiador) abre o link, vê nome+papel
+  // travados e só cria email+senha. Entra na MESMA campanha do candidato.
+  router.get('/member-invite/:token', async (req: Request, res: Response) => {
+    const { data: inv } = await supabase.from('party_member_invites')
+      .select('"displayName", phone, role, status, "campaignId"').eq('token', req.params.token).maybeSingle();
+    if (!inv) return res.status(404).json({ error: 'invite_invalido' });
+    const { data: camp } = await supabase.from('campaigns').select('name, "candidateName"').eq('id', (inv as any).campaignId).maybeSingle();
+    return res.json({
+      displayName: (inv as any).displayName,
+      phone: (inv as any).phone || null,
+      role: (inv as any).role,
+      candidateName: (camp as any)?.candidateName || (camp as any)?.name || null,
+      alreadyRegistered: (inv as any).status === 'active',
+    });
+  });
+
+  router.post('/member-invite/:token/register', async (req: Request, res: Response) => {
+    const { email, password, phone } = req.body || {};
+    if (!email?.trim() || !password || String(password).length < 6) {
+      return res.status(400).json({ error: 'email_e_senha_min_6_obrigatorios' });
+    }
+    const { data: inv } = await supabase.from('party_member_invites')
+      .select('*').eq('token', req.params.token).maybeSingle();
+    if (!inv) return res.status(404).json({ error: 'invite_invalido' });
+    if ((inv as any).status === 'active' && (inv as any).userId) {
+      return res.status(409).json({ error: 'ja_cadastrado' });
+    }
+    const mail = String(email).trim().toLowerCase();
+    // 1) cria a identidade de auth (email pré-confirmado)
+    const { data: created, error: authErr } = await (supabase as any).auth.admin.createUser({
+      email: mail, password: String(password), email_confirm: true,
+    });
+    if (authErr || !created?.user?.id) {
+      return res.status(400).json({ error: 'falha_criar_usuario', detail: authErr?.message });
+    }
+    const uid = created.user.id;
+    // 2) perfil vinculado à MESMA campanha do candidato, com o papel do convite
+    const { error: uErr } = await supabase.from('users').insert({
+      id: uid, name: (inv as any).displayName, email: mail, type: (inv as any).role,
+      campaignId: (inv as any).campaignId, isSupremeAdmin: false,
+      phone: phone?.trim() || (inv as any).phone || null,
+    });
+    if (uErr) {
+      await (supabase as any).auth.admin.deleteUser(uid).catch(() => {}); // rollback best-effort
+      return res.status(500).json({ error: 'falha_perfil', detail: uErr.message });
+    }
+    // 3) marca o convite como usado
+    await supabase.from('party_member_invites').update({
+      status: 'active', userId: uid, updatedAt: new Date().toISOString(),
+    }).eq('id', (inv as any).id);
+
+    return res.json({ ok: true });
+  });
+
   return router;
 }
