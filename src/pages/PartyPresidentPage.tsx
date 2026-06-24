@@ -197,6 +197,8 @@ const PartyPresidentPage: React.FC = () => {
   const [repasseFor, setRepasseFor] = React.useState<Candidate | null>(null);
   const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
   const [savingRep, setSavingRep] = React.useState(false);
+  // Histórico de repasses do candidato aberto (exibido no modal, somente leitura).
+  const [repHistory, setRepHistory] = React.useState<{ id: string; valor: number; data: string | null; descricao: string | null; itens?: { categoria: string; valor: number }[] }[]>([]);
   // Repasse recorrente (#147): flag "repetir até a eleição" + frequência.
   const [repRecurring, setRepRecurring] = React.useState(false);
   const [repFreq, setRepFreq] = React.useState<'mensal' | 'quinzenal' | 'semanal'>('mensal');
@@ -317,15 +319,16 @@ const PartyPresidentPage: React.FC = () => {
     setRepasseFor(c);
     setRepForm({ valor: '', data: '', descricao: '' });
     setRepRecurring(false); setRepFreq('mensal'); setRepUntil('');
-    // Auto-fill: se o candidato tem valorRecebido no cadastro mas AINDA não
-    // tem nenhum repasse gravado, pré-preenche valor+data de hoje. Se já
-    // tem repasse, abre vazio (presidente está criando um novo).
+    setRepHistory([]);
+    // Carrega o histórico de repasses do candidato (exibido no modal) e, se ele
+    // ainda não tem nenhum repasse mas tem valorRecebido (importado), pré-preenche.
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${c.id}/repasses`);
       const j = await r.json().catch(() => ({}));
-      const hasRepasses = Array.isArray(j.repasses) && j.repasses.length > 0;
+      const reps = Array.isArray(j.repasses) ? j.repasses : [];
+      setRepHistory(reps);
       const valorImportado = Number((c as any).valorRecebido) || 0;
-      if (!hasRepasses && valorImportado > 0) {
+      if (reps.length === 0 && valorImportado > 0) {
         setRepForm({ valor: String(valorImportado), data: new Date().toISOString().slice(0, 10), descricao: 'Repasse importado via cadastro' });
       }
     } catch { /* silencioso — abre form vazio */ }
@@ -1416,6 +1419,31 @@ const PartyPresidentPage: React.FC = () => {
             <div className="rounded-xl bg-slate-950 border border-white/10 p-3 mb-3 text-xs text-slate-400 leading-relaxed">
               💡 <b className="text-slate-200">Como o dinheiro será aplicado</b> é preenchido pelo próprio <b className="text-slate-200">{repasseFor.displayName}</b> na tela de prestação de contas dele. Você acompanha (somente leitura) pela <b className="text-slate-200">comprovação</b> do candidato — não edita esses valores.
             </div>
+
+            {/* Histórico de repasses já registrados (somente leitura) */}
+            {repHistory.length > 0 && (
+              <div className="mb-3">
+                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Histórico de repasses ({repHistory.length}) · total {brl(repHistory.reduce((s, r) => s + (Number(r.valor) || 0), 0))}</p>
+                <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
+                  {repHistory.map((r) => {
+                    const aplicado = Array.isArray(r.itens) ? r.itens.reduce((a, it) => a + (Number(it.valor) || 0), 0) : 0;
+                    const restante = (Number(r.valor) || 0) - aplicado;
+                    return (
+                      <div key={r.id} className="flex items-center justify-between px-3 py-2 text-xs">
+                        <div className="min-w-0">
+                          <p className="text-white font-bold">{brl(Number(r.valor) || 0)}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{r.data ? new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'sem data'}{r.descricao ? ` · ${r.descricao}` : ''}</p>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${restante > 0.005 ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                          {restante > 0.005 ? `${brl(restante)} a justificar` : 'justificado ✅'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1.5">Os campos acima criam um <b>novo</b> repasse — o histórico é imutável.</p>
+              </div>
+            )}
 
             {/* Repasse recorrente (#147): repete sozinho até a eleição */}
             <div className={`rounded-xl border p-3 mb-3 transition-colors ${repRecurring ? 'bg-indigo-500/10 border-indigo-500/40' : 'bg-slate-950 border-white/10'}`}>
