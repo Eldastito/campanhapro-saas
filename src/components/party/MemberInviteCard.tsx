@@ -9,7 +9,7 @@
  * deriva o papel do convite pelo tipo de quem convida.
  */
 import * as React from 'react';
-import { Users, Loader2, Send, Copy, Check, Clock, CheckCircle2, Pencil, X } from 'lucide-react';
+import { Users, Loader2, Send, Copy, Check, Clock, CheckCircle2, Pencil, X, Trash2 } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
 
 interface MemberInvite {
@@ -36,7 +36,8 @@ const brl = (n: number | null) => (n && n > 0 ? n.toLocaleString('pt-BR', { styl
 const MemberInviteCard: React.FC = () => {
   const [invites, setInvites] = React.useState<MemberInvite[]>([]);
   const [canInvite, setCanInvite] = React.useState(false);
-  const [nextRole, setNextRole] = React.useState<string | null>(null);
+  const [allowedRoles, setAllowedRoles] = React.useState<string[]>([]);
+  const [selectedRole, setSelectedRole] = React.useState<string>('');
   const [loading, setLoading] = React.useState(true);
   const [novo, setNovo] = React.useState({ nome: '', tel: '', bairro: '', valor: '', data: '' });
   const [busy, setBusy] = React.useState(false);
@@ -50,13 +51,25 @@ const MemberInviteCard: React.FC = () => {
     try {
       const r = await authedFetch('/api/v1/party/member-invites');
       const j = await r.json().catch(() => ({}));
-      if (r.ok) { setInvites(j.invites || []); setCanInvite(!!j.canInvite); setNextRole(j.nextRole || null); }
+      if (r.ok) {
+        setInvites(j.invites || []);
+        setCanInvite(!!j.canInvite);
+        const roles: string[] = j.allowedRoles || [];
+        setAllowedRoles(roles);
+        setSelectedRole((cur) => (cur && roles.includes(cur)) ? cur : (roles[0] || ''));
+      }
     } catch { /* */ }
     finally { setLoading(false); }
   }, []);
   React.useEffect(() => { load(); }, [load]);
 
-  const nextLabel = nextRole ? (ROLE_LABEL[nextRole] || nextRole) : 'membro';
+  const nextLabel = selectedRole ? (ROLE_LABEL[selectedRole] || selectedRole) : 'membro';
+
+  const excluir = async (token: string) => {
+    if (!window.confirm('Excluir este registro de equipe? Se a pessoa já se cadastrou, a conta dela continua — só o vínculo aqui é removido.')) return;
+    const r = await authedFetch(`/api/v1/party/member-invites/${token}`, { method: 'DELETE' });
+    if (r.ok) setInvites((prev) => prev.filter((i) => i.token !== token));
+  };
 
   const openWhatsApp = (inv: MemberInvite) => {
     const phone = (inv.phone || '').replace(/\D/g, '');
@@ -78,7 +91,7 @@ const MemberInviteCard: React.FC = () => {
     try {
       const r = await authedFetch('/api/v1/party/member-invites', {
         method: 'POST',
-        body: JSON.stringify({ displayName: novo.nome.trim(), phone: novo.tel.trim(), bairro: novo.bairro.trim(), valorPago: novo.valor, dataPago: novo.data }),
+        body: JSON.stringify({ displayName: novo.nome.trim(), phone: novo.tel.trim(), bairro: novo.bairro.trim(), valorPago: novo.valor, dataPago: novo.data, role: selectedRole }),
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.invite) {
@@ -111,7 +124,19 @@ const MemberInviteCard: React.FC = () => {
   return (
     <div className="bg-[#1c2128] border border-white/5 rounded-3xl p-5 mb-6">
       <p className="font-bold flex items-center gap-2 mb-1"><Users className="w-5 h-5 text-emerald-300" /> Minha equipe</p>
-      <p className="text-xs text-slate-400 mb-4">Cadastre seu <b>{nextLabel}</b> (nome, WhatsApp, bairro de atuação) e informe quanto você paga a ele. O convite vai por WhatsApp/link — a pessoa só cria e-mail e senha. Sem limite.</p>
+      <p className="text-xs text-slate-400 mb-3">Cadastre seu <b>{nextLabel}</b> (nome, WhatsApp, bairro de atuação) e informe quanto você paga a ele. O convite vai por WhatsApp/link — a pessoa só cria e-mail e senha. Sem limite.</p>
+
+      {/* Seletor de papel quando há mais de uma opção (ex.: candidato → Coordenador ou Líder) */}
+      {allowedRoles.length > 1 && (
+        <div className="flex gap-1.5 mb-2">
+          {allowedRoles.map((rl) => (
+            <button key={rl} onClick={() => setSelectedRole(rl)}
+              className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-colors ${selectedRole === rl ? 'bg-emerald-600 text-white' : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800'}`}>
+              {ROLE_LABEL[rl] || rl}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Cadastro do membro */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
@@ -149,6 +174,7 @@ const MemberInviteCard: React.FC = () => {
                   <button onClick={() => openWhatsApp(inv)} title="Reenviar no WhatsApp" className="p-1.5 rounded-lg bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30"><Send className="w-3.5 h-3.5" /></button>
                   <button onClick={() => copyLink(inv.token)} title="Copiar link" className="p-1.5 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10">{copied === inv.token ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}</button>
                 </>}
+                <button onClick={() => excluir(inv.token)} title="Excluir registro" className="p-1.5 rounded-lg bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
               {editTok === inv.token && (
                 <div className="mt-2 pt-2 border-t border-white/5 grid grid-cols-1 sm:grid-cols-[1fr_110px_130px_auto_auto] gap-1.5 items-center">
