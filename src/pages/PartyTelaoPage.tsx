@@ -18,7 +18,29 @@ import { supabase } from '../lib/supabaseClient';
 const LEVEL_COLOR: Record<string, string> = { green: '#10b981', yellow: '#f59e0b', red: '#f43f5e' };
 const esc = (s: any) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] || c));
 const SAFETY_POLL_MS = 120_000; // rede de segurança caso um broadcast se perca
-const DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+// Base RASTER do Carto (as MESMAS tiles que o telão Leaflet usava e que já
+// funcionavam nesta rede) — evita depender do style.json vetorial, que pode
+// falhar silenciosamente em alguns ambientes. glyphs do Carto p/ o nº do cluster.
+const BASE_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  glyphs: 'https://tiles.basemaps.cartocdn.com/fonts/{fontstack}/{range}.pbf',
+  sources: {
+    carto: {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      attribution: '',
+    },
+  },
+  layers: [
+    { id: 'bg', type: 'background', paint: { 'background-color': '#0a0a0b' } },
+    { id: 'carto', type: 'raster', source: 'carto' },
+  ],
+};
 
 interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; noCommittee?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; photoUrl?: string | null; level: string; checkins: number; }
 interface TelaoData { partyName: string; channel?: string; points: TelaoPoint[]; checkinPoints: { lat: number; lng: number }[]; stats: { candidates: number; committees: number; checkins: number; green: number; yellow: number; red: number }; }
@@ -103,13 +125,15 @@ const PartyTelaoPage: React.FC = () => {
     if (!mapDivRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: mapDivRef.current,
-      style: DARK_STYLE,
+      style: BASE_STYLE,
       center: [-43.1729, -22.9068],
       zoom: 7,
       attributionControl: false,
     });
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    // Se algo falhar (tiles/glyphs/estilo), loga no console — diagnóstico.
+    map.on('error', (e: any) => console.error('[telao maplibre]', e?.error?.message || e?.error || e));
 
     map.on('load', () => {
       // Candidatos — fonte clusterizada. clusterProperties agrega a saúde p/ o
