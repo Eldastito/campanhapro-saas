@@ -20,7 +20,7 @@ const esc = (s: any) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;
 const SAFETY_POLL_MS = 120_000; // rede de segurança caso um broadcast se perca
 const DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 
-interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; noCommittee?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; level: string; checkins: number; }
+interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; noCommittee?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; photoUrl?: string | null; level: string; checkins: number; }
 interface TelaoData { partyName: string; channel?: string; points: TelaoPoint[]; checkinPoints: { lat: number; lng: number }[]; stats: { candidates: number; committees: number; checkins: number; green: number; yellow: number; red: number }; }
 
 const PartyTelaoPage: React.FC = () => {
@@ -28,6 +28,7 @@ const PartyTelaoPage: React.FC = () => {
   const [data, setData] = React.useState<TelaoData | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [lightbox, setLightbox] = React.useState<string | null>(null);
   const mapDivRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<maplibregl.Map | null>(null);
   const readyRef = React.useRef(false);
@@ -75,6 +76,7 @@ const PartyTelaoPage: React.FC = () => {
           level: p.level || 'red',
           checkins: p.checkins || 0,
           hasPhoto: !!p.hasPhoto,
+          photoUrl: p.photoUrl || '',
           noCommittee: !!p.noCommittee,
         },
       }));
@@ -167,8 +169,15 @@ const PartyTelaoPage: React.FC = () => {
         const p = f.properties as any;
         const color = LEVEL_COLOR[p.level] || '#94a3b8';
         const coords = (f.geometry as any).coordinates.slice();
-        const html = `<div style="min-width:170px;font-family:system-ui"><b>${esc(p.displayName)}</b>${p.sub ? `<br/><span style="opacity:.7">${esc(p.sub)}</span>` : ''}<br/><span style="color:${color}">●</span> ${p.checkins} check-in(s)${p.hasPhoto === true || p.hasPhoto === 'true' ? ' · 📸' : ''}</div>`;
+        const url = p.photoUrl && p.photoUrl !== 'null' ? String(p.photoUrl) : '';
+        const photoHtml = url
+          ? `<img src="${esc(url)}" class="telao-photo" alt="comitê" style="margin-top:8px;width:100%;height:96px;object-fit:cover;border-radius:8px;cursor:zoom-in" />`
+          : '';
+        const html = `<div style="min-width:180px;font-family:system-ui"><b>${esc(p.displayName)}</b>${p.sub ? `<br/><span style="opacity:.7">${esc(p.sub)}</span>` : ''}<br/><span style="color:${color}">●</span> ${p.checkins} check-in(s)${photoHtml}</div>`;
         popup.setLngLat(coords).setHTML(html).addTo(map);
+        // Clique na foto → abre o lightbox (expande). setLightbox é estável.
+        const img = popup.getElement()?.querySelector('.telao-photo') as HTMLImageElement | null;
+        if (img && url) img.onclick = () => setLightbox(url);
       });
 
       // Clique no cluster → expande (zoom).
@@ -225,6 +234,13 @@ const PartyTelaoPage: React.FC = () => {
           <Card v={s.red} l="🔴 Risco" c="text-rose-300" />
         </div>
       </div>
+
+      {/* Lightbox — foto do comitê expandida */}
+      {lightbox && (
+        <div className="fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="comitê" className="max-h-[90vh] max-w-[90vw] rounded-2xl shadow-2xl object-contain" />
+        </div>
+      )}
     </div>
   );
 };

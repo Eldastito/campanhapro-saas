@@ -106,6 +106,17 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
       }
     }
 
+    // Assina a foto de CAPA do comitê (TTL 1h) pra exibir no popup do telão.
+    // Só a capa — o telão é público; não expõe a galeria inteira.
+    const photoUrls: Record<string, string> = {};
+    await Promise.all(Object.entries(committees).map(async ([cid, cm]: any) => {
+      const stored = (cm as any)?.photo;
+      if (!stored || typeof stored !== 'string') return;
+      if (stored.startsWith('data:')) { photoUrls[cid] = stored; return; } // legado inline
+      const { data } = await supabase.storage.from('party-proofs').createSignedUrl(stored, 3600);
+      if (data?.signedUrl) photoUrls[cid] = data.signedUrl;
+    }));
+
     let green = 0, yellow = 0, red = 0;
     const points = candidates.map((c: any) => {
       const com = committees[c.id];
@@ -137,7 +148,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
       return {
         displayName: c.displayName,
         local, approx, noCommittee,
-        lat, lng, hasPhoto: !!com?.photo,
+        lat, lng, hasPhoto: !!com?.photo, photoUrl: photoUrls[c.id] || null,
         level: sc.level, checkins: checkinCount[c.id] || 0,
       };
     });
