@@ -242,11 +242,11 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
         checkinCount: checkinCount[c.id] || 0,
         lastCheckinAt: lastCheckinAt[c.id] || null,
-        coordCount: t.coord, leaderCount: t.lider,
+        coordCount: metaCoord, leaderCount: metaLider,
         valorRecebido: Number(c.valorRecebido) || 0, valorAlocado: Number(c.valorAlocado) || 0,
       });
       return {
-        ...c, coordCount: t.coord, leaderCount: t.lider,
+        ...c, coordCount: metaCoord, leaderCount: metaLider,
         committee: com ? { address: com.address, lat: com.lat, lng: com.lng, hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
         checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length,
@@ -1174,7 +1174,7 @@ Saída JSON estrito (sem markdown):
       committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
       checkinCount: (checkins || []).length,
       lastCheckinAt: (checkins || [])[0]?.createdAt || null,
-      coordCount: t.coord, leaderCount: t.lider,
+      coordCount: metaCoord, leaderCount: metaLider,
       valorRecebido: Number(cand.valorRecebido) || 0, valorAlocado: Number(cand.valorAlocado) || 0,
     });
     const cPhotos: string[] = Array.isArray((committee as any)?.photos) && (committee as any).photos.length
