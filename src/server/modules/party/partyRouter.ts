@@ -921,22 +921,61 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
       };
     });
 
-    const linhas = enriched.map((c, i) =>
-      `${i+1}. ${c.displayName} | cargo=${c.cargo || '?'} | regiao=${c.regiao || '?'} | recebido=R$${Number(c.valorRecebido||0).toFixed(0)} | alocado=R$${Number(c.valorAlocado||0).toFixed(0)} | comite=${c.temComite ? (c.comiteFoto ? 'sim+foto' : 'sim') : 'NÃO'} | checkins=${c.checkins}${c.diasSemCheckin != null ? ` (último há ${c.diasSemCheckin}d)` : ' (nunca)'} | score=${c.score} (${c.scoreLevel}) | status=${c.status} | valve=${c.repasseStatus||'liberado'}`
-    ).join('\n');
+    // RECONCILIAÇÃO DE PAGAMENTOS DE EQUIPE (#151): cruza o que o CANDIDATO
+    // declarou PAGAR a cada membro (valorPago) com o que o MEMBRO declarou ter
+    // RECEBIDO (valorRecebido). Os dois têm que bater. Divergências = sinal forte.
+    const { data: invs } = await supabase.from('party_member_invites')
+      .select('candidateId, displayName, role, "valorPago", "valorRecebido"').eq('partyId', (party as any).id);
+    const teamByCand: Record<string, { membros: number; divergencias: { nome: string; pago: number; recebido: number; tipo: string }[]; totalPago: number; totalConfirmado: number }> = {};
+    for (const m of invs || []) {
+      const cid = (m as any).candidateId; if (!cid) continue;
+      const pago = Number((m as any).valorPago) || 0;
+      const recebido = Number((m as any).valorRecebido) || 0;
+      const t = teamByCand[cid] || (teamByCand[cid] = { membros: 0, divergencias: [], totalPago: 0, totalConfirmado: 0 });
+      t.membros++; t.totalPago += pago; t.totalConfirmado += recebido;
+      // Tipos de divergência:
+      let tipo = '';
+      if (pago > 0 && recebido > 0 && Math.abs(pago - recebido) > 0.005) tipo = 'valores_diferentes';
+      else if (recebido > 0 && pago <= 0) tipo = 'recebeu_sem_candidato_declarar';
+      // (pago>0 && recebido==0 = só aguardando confirmação do membro — não é fraude)
+      if (tipo) t.divergencias.push({ nome: (m as any).displayName, pago, recebido, tipo });
+    }
+    // Alertas determinísticos de divergência (independem do LLM) — sempre aparecem.
+    const teamAlerts = enriched.flatMap((c: any) => {
+      const t = teamByCand[c.id]; if (!t || !t.divergencias.length) return [];
+      const det = t.divergencias.slice(0, 4).map((d) =>
+        d.tipo === 'valores_diferentes'
+          ? `${d.nome}: candidato diz pagar R$${d.pago.toFixed(0)}, membro confirma R$${d.recebido.toFixed(0)}`
+          : `${d.nome}: confirmou receber R$${d.recebido.toFixed(0)} sem o candidato ter declarado`).join('; ');
+      return [{
+        candidateId: c.id, priority: 'alta', pattern: 'divergência_equipe',
+        justification: `Pagamentos à equipe não batem (${t.divergencias.length}): ${det}`.slice(0, 240),
+        suggested_action: 'investigar — conferir valores pagos × recebidos com o candidato e a equipe',
+      }];
+    });
+
+    const linhas = enriched.map((c, i) => {
+      const t = teamByCand[c.id];
+      const equipe = t
+        ? ` | equipe=${t.membros} (pago R$${t.totalPago.toFixed(0)} × confirmado R$${t.totalConfirmado.toFixed(0)}${t.divergencias.length ? `, ${t.divergencias.length} DIVERGÊNCIA(S)` : ''})`
+        : '';
+      return `${i+1}. ${c.displayName} | cargo=${c.cargo || '?'} | regiao=${c.regiao || '?'} | recebido=R$${Number(c.valorRecebido||0).toFixed(0)} | alocado=R$${Number(c.valorAlocado||0).toFixed(0)} | comite=${c.temComite ? (c.comiteFoto ? 'sim+foto' : 'sim') : 'NÃO'} | checkins=${c.checkins}${c.diasSemCheckin != null ? ` (último há ${c.diasSemCheckin}d)` : ' (nunca)'} | score=${c.score} (${c.scoreLevel}) | status=${c.status} | valve=${c.repasseStatus||'liberado'}${equipe}`;
+    }).join('\n');
 
     const system = `Você é o Auditor Antifraude do Partido. Analise a lista de candidatos e detecte padrões SUSPEITOS:
 - "absorção": recebeu R$ mas tem comite=NÃO e/ou alocado bem abaixo do recebido (dinheiro entrando sem estrutura/justificativa).
 - "disparidade": R$ muito acima dos pares do MESMO cargo sem atividade (check-ins) proporcional.
 - "inatividade": muitos dias sem check-in (ou nunca) apesar de ter recebido repasses.
+- "divergência_equipe": o valor que o candidato declara PAGAR à equipe não bate com o que o MEMBRO declara ter RECEBIDO (campo "equipe" mostra pago × confirmado). Os dois TÊM que ser iguais — diferença = sinal forte de desvio ou caixa dois.
 
-NÃO acuse sem evidência — cite os NÚMEROS (recebido, alocado, comitê, check-ins, dias). Sinais fortes:
+NÃO acuse sem evidência — cite os NÚMEROS (recebido, alocado, comitê, check-ins, dias, pago × confirmado). Sinais fortes:
 - comite=NÃO E recebido > 0 → absorção provável.
 - score vermelho E recebido > 0 E alocado < 30% do recebido → absorção.
 - recebido > 0 E (checkins=0 ou último há >30d) → inatividade.
+- equipe com DIVERGÊNCIA (pago ≠ confirmado) → divergência_equipe.
 
 Retorne JSON estrito (sem markdown):
-{"alerts":[{"candidateId":"uuid","priority":"alta|media|baixa","pattern":"absorção|disparidade|inatividade|ok","justification":"≤200 chars com NÚMEROS","suggested_action":"segurar|reduzir|manter|investigar + frase ≤120 chars"}]}
+{"alerts":[{"candidateId":"uuid","priority":"alta|media|baixa","pattern":"absorção|disparidade|inatividade|divergência_equipe|ok","justification":"≤200 chars com NÚMEROS","suggested_action":"segurar|reduzir|manter|investigar + frase ≤120 chars"}]}
 
 Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
 
@@ -949,11 +988,17 @@ Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
       const start = cleaned.indexOf('{'); const end = cleaned.lastIndexOf('}');
       if (start >= 0 && end > start) cleaned = cleaned.slice(start, end + 1);
       const parsed = JSON.parse(cleaned);
+      const llmAlerts = Array.isArray(parsed?.alerts) ? parsed.alerts : [];
+      // Garante que as divergências de pagamento de equipe SEMPRE aparecem (não
+      // dependem do LLM): se o LLM não citou divergência_equipe pra um candidato,
+      // injeta o alerta determinístico.
+      const cobertos = new Set(llmAlerts.filter((a: any) => a?.pattern === 'divergência_equipe').map((a: any) => a.candidateId));
+      const extras = teamAlerts.filter((a) => !cobertos.has(a.candidateId));
       return res.json({
         party: party.name,
         analyzedAt: new Date().toISOString(),
         candidatesAnalyzed: enriched.length,
-        alerts: Array.isArray(parsed?.alerts) ? parsed.alerts : [],
+        alerts: [...extras, ...llmAlerts],
       });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'ai_failed' });
