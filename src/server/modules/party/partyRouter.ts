@@ -391,6 +391,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         regiao: (r.regiao || r.cidade || '').toString().trim() || null,
         estado: normalizeUF(r.estado || r.uf),
         phone: (r.phone || r.telefone || '').toString().trim() || null,
+        email: (() => { const e = String(r.email || '').trim().toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null; })(),
         valorRecebido,
         status: 'pending',
         inviteToken: newToken(),
@@ -475,47 +476,58 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       // maxOutputTokens alto: listas grandes (centenas de candidatos) precisam caber
       // INTEIRAS no JSON de saída, senão a IA "corta" no meio e some com o resto.
       const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash', generationConfig: { temperature: 0, maxOutputTokens: 65536 } });
-      const regras = `Você recebe uma lista de candidatos de um partido — pode vir como planilha colada (com cabeçalho, colunas extras tipo CPF/e-mail/observações, ordem qualquer, separadores variados) OU como um ARQUIVO (imagem/foto de uma lista, ou PDF).
+      const regras = `Você recebe uma lista de candidatos de um partido — pode vir como planilha colada (com OU SEM cabeçalho, colunas extras tipo CPF/observações, ordem qualquer, separadores variados) OU como um ARQUIVO (imagem/foto de uma lista, ou PDF).
 
-⚠️ ATENÇÃO CRÍTICA — mapeie por SEMÂNTICA, NÃO por posição da coluna ⚠️
-NÃO assuma que a 2ª coluna do JSON é a 2ª coluna da planilha. SEMPRE leia o cabeçalho e mapeie pelo SIGNIFICADO. Erros comuns que você DEVE evitar:
+⚠️ ATENÇÃO CRÍTICA — mapeie por SEMÂNTICA (conteúdo), NÃO por posição da coluna ⚠️
+NÃO assuma que a 2ª coluna do JSON é a 2ª coluna da planilha. Identifique cada campo pelo SIGNIFICADO do conteúdo. Erros comuns que você DEVE evitar:
 - ❌ Colocar VALOR (número R$) no campo "cargo" — cargo é texto (F/E/Vereador), não número
 - ❌ Colocar CARGO (F/E) no campo "regiao" — regiao é cidade
 - ❌ Colocar CIDADE no campo "estado" — estado é sigla UF de 2 letras (RJ, SP, MG…)
 
-Extraia APENAS estes campos, identificando cada um pelo CABEÇALHO da planilha:
-- displayName: nome da pessoa / "nome na urna" (obrigatório). Coluna tipo "nome", "candidato", "nome na urna eletronica".
-- cargo: o CARGO ELEITORAL (texto, NUNCA número). Coluna tipo "cargo", "função". Se vier código: "F"="Deputado Federal", "E"="Deputado Estadual". Outros: "Vereador", "Prefeito", "Senador". Se a coluna tiver NÚMERO, NÃO é cargo — é valor.
-- regiao: a CIDADE/município (texto). Coluna tipo "cidade", "município", "local". Ex.: "Niterói", "São Gonçalo", "Belford Roxo". NUNCA coloque "F"/"E" aqui — isso é cargo!
-- estado: a UF (sigla de EXATAMENTE 2 letras maiúsculas: RJ, SP, MG, RS…). Coluna tipo "UF", "estado". Se a planilha NÃO tem UF explícita mas tem cidade conhecida, INFIRA: Niterói→RJ, São Gonçalo→RJ, Belford Roxo→RJ, Caxias→RJ (Duque de Caxias), São Paulo→SP, Belo Horizonte→MG, etc. Bairros do Rio de Janeiro (Copacabana, Bangu, Pavuna, Tijuca, Jacarepaguá, Santa Cruz, Guaratiba, etc.) → estado="RJ" e regiao="Rio de Janeiro". NUNCA coloque nome de cidade em estado — só sigla de 2 letras.
+NÃO É PRECISO QUE O USUÁRIO IDENTIFIQUE/ROTULE AS COLUNAS. Se HOUVER cabeçalho, use-o. Se NÃO houver cabeçalho (ou os títulos forem confusos), IDENTIFIQUE cada campo pelo CONTEÚDO, usando estas pistas:
+- e-mail → tem "@" (ex.: joao@gmail.com)
+- telefone → sequência de 10-13 dígitos (com ou sem DDD/parênteses/traços)
+- estado/UF → exatamente 2 letras (RJ, SP, MG…)
+- valor → número/moeda (R$, "25.400", "25400,00")
+- cargo → F / E / "Vereador" / "Prefeito" / "Senador" / "Deputado…"
+- data → formato de data (DD/MM/AAAA, AAAA-MM-DD)
+- o que sobrar, em texto, que não é nenhum dos acima → é o NOME da pessoa
+
+Extraia estes campos:
+- displayName: nome da pessoa / "nome na urna" (OBRIGATÓRIO).
+- cargo: o CARGO ELEITORAL (texto, NUNCA número). "F"="Deputado Federal", "E"="Deputado Estadual"; senão "Vereador"/"Prefeito"/"Senador"/"Deputado…". Se a coluna tiver NÚMERO, NÃO é cargo — é valor.
+- regiao: a CIDADE/município (texto). Ex.: "Niterói", "São Gonçalo". NUNCA coloque "F"/"E" aqui — isso é cargo!
+- estado: a UF (EXATAMENTE 2 letras maiúsculas). Se não houver UF mas a cidade for conhecida, INFIRA (Niterói→RJ, São Gonçalo→RJ, Caxias→RJ, São Paulo→SP, Belo Horizonte→MG…). Bairros do Rio (Copacabana, Bangu, Pavuna, Tijuca, Jacarepaguá, Santa Cruz, Guaratiba…) → estado="RJ" e regiao="Rio de Janeiro". NUNCA ponha nome de cidade aqui — só sigla de 2 letras.
 - phone: telefone/WhatsApp — só os dígitos. NUNCA use valor em R$ como telefone.
-- valor: o VALOR EM REAIS repassado/pago ao candidato (colunas tipo "$", "valor", "valor repassado", "pagamento", "repasse"). Se houver VÁRIAS colunas de valor, use "Valor Repassado". Só o número (ex.: "25400" ou "25.400,00"). "" se não houver. Este é o ÚNICO campo numérico — se uma coluna tem só números, ela vai aqui, NÃO em cargo.
-- data: a DATA do repasse/pagamento. Formato YYYY-MM-DD. Se vier DD/MM/AAAA, converta. "" se não houver.
+- email: o E-MAIL da pessoa (tem "@"). "" se não houver. (CPF e RG continuam PROIBIDOS — não extraia.)
+- valor: o VALOR EM REAIS (colunas "$"/"valor"/"repasse"; se houver várias, use "Valor Repassado"). Só o número. "" se não houver. Este é o ÚNICO campo numérico — número solto vai aqui, NÃO em cargo.
+- data: a DATA do repasse/pagamento. Formato YYYY-MM-DD (converta DD/MM/AAAA). "" se não houver.
 
 Responda SOMENTE em JSON válido (nada fora do JSON):
 {
-  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "", "valor": "", "data": "" } ],
+  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "", "email": "", "valor": "", "data": "" } ],
   "colunasIgnoradas": ["nome das colunas/seções extras que você descartou"]
 }
 
 REGRAS:
-- IGNORE a linha de cabeçalho e linhas/itens vazios — cabeçalho NUNCA vira candidato.
+- IGNORE a linha de cabeçalho (quando houver) e linhas/itens vazios — cabeçalho NUNCA vira candidato.
 - Não invente dados: se um campo não existe, deixe "".
-- NÃO inclua CPF, e-mail, RG, nem qualquer dado sensível no resultado — só os campos acima.
+- NÃO inclua CPF nem RG, nem qualquer dado sensível além dos campos acima.
 - phone só com dígitos; valor só com número (pode ter vírgula decimal).
 - Liste TODAS as linhas/candidatos encontrados — MESMO que o nome se repita (homônimos e registros múltiplos são comuns em planilhas de partido). O backend trata unificação; você só extrai.
 
-EXEMPLO concreto (planilha colada):
+EXEMPLO 1 — COM cabeçalho:
 """
 nome na urna eletronica | $    | cargo | municipio
 Pastora Simone           | 25400| F     | Rio
-Cristiano Nogueira       | 14300| E     | Belford Roxo
 """
-JSON esperado:
-{ "candidatos": [
-  { "displayName": "Pastora Simone",    "cargo": "Deputado Federal",  "regiao": "Rio de Janeiro", "estado": "RJ", "phone": "", "valor": "25400", "data": "" },
-  { "displayName": "Cristiano Nogueira", "cargo": "Deputado Estadual", "regiao": "Belford Roxo",   "estado": "RJ", "phone": "", "valor": "14300", "data": "" }
-] }`;
+→ { "candidatos": [ { "displayName": "Pastora Simone", "cargo": "Deputado Federal", "regiao": "Rio de Janeiro", "estado": "RJ", "phone": "", "email": "", "valor": "25400", "data": "" } ] }
+
+EXEMPLO 2 — SEM cabeçalho (identifique pelo conteúdo):
+"""
+João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
+"""
+→ { "candidatos": [ { "displayName": "João Silva", "cargo": "Vereador", "regiao": "Niterói", "estado": "RJ", "phone": "21999990000", "email": "joao@gmail.com", "valor": "", "data": "" } ] }`;
 
       const result = isFile
         ? await model.generateContent([
@@ -579,6 +591,7 @@ JSON esperado:
           regiao: String(r?.regiao || r?.cidade || '').trim().slice(0, 80),
           estado: normalizeUF(r?.estado || r?.uf) || '',
           phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
+          email: (() => { const e = String(r?.email || '').trim().toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e.slice(0, 160) : ''; })(),
           valor: valorNum > 0 ? String(valorNum) : '',
           data: dataIso,
         };
@@ -1909,9 +1922,10 @@ COACHING (seja uma GUIA, não só executora):
 - Valores sempre em R$. Tom direto, chat.
 
 SOBRE IMPORTAR CANDIDATOS EM LOTE (oriente quando o usuário perguntar como importar / colar lista / planilha / "tenho uma lista"):
-- Há 3 formas de fornecer os dados: (1) "Colar simples" — uma linha por candidato, separando por vírgula: Nome, Cargo, Cidade, UF, Telefone; (2) "Organizar com IA" — cola a planilha do jeito que estiver (qualquer ordem de colunas, colunas extras tipo CPF/observação) que a IA acha e limpa os campos; (3) Arquivo — arrastar CSV, Excel, PDF ou uma FOTO da lista.
-- CAMPOS QUE NÃO PODEM FALTAR: o NOME é obrigatório (linha sem nome é descartada); CIDADE+UF posicionam no mapa/telão; TELEFONE permite o convite por WhatsApp. Cargo, e-mail e valores são opcionais. Cabeçalhos e linhas vazias são ignorados.
-- SEMPRE chame atenção pros campos obrigatórios pra evitar erro de importação, e lembre que aparece uma PRÉVIA editável antes de salvar (nada é gravado sem conferência). Se o usuário pedir, mostre um exemplo de linha pronto: "João Silva, Vereador, Niterói, RJ, 21999990000".
+- Há 3 formas de fornecer os dados: (1) "Colar simples" — uma linha por candidato: Nome, Cargo, Cidade, UF, Telefone, E-mail; (2) "Organizar com IA" — cola a planilha do jeito que estiver (qualquer ordem de colunas, colunas extras tipo CPF/observação) que a IA acha e limpa os campos; (3) Arquivo — arrastar CSV, Excel, PDF ou uma FOTO da lista.
+- NÃO PRECISA ROTULAR/IDENTIFICAR AS COLUNAS: a IA lê e identifica cada dado pelo CONTEÚDO, mesmo SEM cabeçalho — e-mail tem "@", telefone = sequência de dígitos, UF = 2 letras, valor = número/moeda, cargo = F/E/Vereador, e o resto é o nome. Se tiver cabeçalho, ela usa também; mas não é obrigatório.
+- CAMPOS QUE NÃO PODEM FALTAR: o NOME é obrigatório (linha sem nome é descartada); CIDADE+UF posicionam no mapa/telão; TELEFONE permite o convite por WhatsApp. Cargo, E-MAIL e valores são opcionais (a IA captura o e-mail se houver; CPF/RG são descartados por privacidade).
+- SEMPRE chame atenção pros campos obrigatórios pra evitar erro de importação, e lembre que aparece uma PRÉVIA editável antes de salvar (nada é gravado sem conferência). Se o usuário pedir, mostre um exemplo de linha pronto: "João Silva, Vereador, Niterói, RJ, 21999990000, joao@gmail.com".
 
 COMO RESPONDER CONSULTAS DE LISTA/ORDENAÇÃO (importante):
 - Quando pedirem uma lista (ex: "todos os candidatos com cadastro pendente em ordem alfabética decrescente"), INCLUA TODOS os itens que batem com o filtro — não resuma "há 1 candidato", liste de fato cada um.
@@ -1957,9 +1971,10 @@ JSON:`;
           '📊 *Consultar*: "quanto já repassei?", "lista os candidatos pendentes em ordem alfabética", "quem recebeu mais?"',
           '➕ *Cadastrar candidato*: "cadastra o João Silva, vereador, Niterói RJ, 21999990000" (preciso de nome, cidade e UF; telefone é pro convite)',
           '📥 *Importar candidatos em lote*: você tem 3 formas —',
-          '   1) *Colar simples*: uma linha por candidato, vírgula separando: Nome, Cargo, Cidade, UF, Telefone',
-          '   2) *Organizar com IA*: cola a planilha do jeito que estiver (qualquer ordem de colunas, colunas extras) que eu acho e limpo os campos',
+          '   1) *Colar simples*: uma linha por candidato, vírgula separando: Nome, Cargo, Cidade, UF, Telefone, E-mail',
+          '   2) *Organizar com IA*: cola a planilha do jeito que estiver (qualquer ordem, com ou sem cabeçalho) que eu acho e limpo os campos',
           '   3) *Arquivo*: arraste CSV, Excel, PDF ou até uma FOTO da lista — eu leio e organizo',
+          '   💡 Não precisa rotular as colunas: eu identifico cada dado pelo conteúdo (e-mail tem @, telefone = dígitos, UF = 2 letras, valor = número) mesmo sem cabeçalho.',
           '   ⚠️ O *Nome* é obrigatório (linha sem nome é descartada). *Cidade+UF* posicionam no mapa e o *Telefone* permite o convite por WhatsApp. Cargo, e-mail e valores são opcionais. Sempre mostro uma prévia pra você conferir antes de salvar.',
           '💰 *Lançar repasse*: "lança 5 mil pro João" (cada repasse é imutável; pra ajustar, lance um novo — positivo ou negativo)',
           '👤 *Excluir candidato*: "exclui o candidato João Silva"',

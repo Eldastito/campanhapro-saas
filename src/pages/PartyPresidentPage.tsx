@@ -177,7 +177,7 @@ const PartyPresidentPage: React.FC = () => {
   // Import assistido por IA (#147d): cola planilha "suja" → IA extrai → preview → confirma.
   const [importMode, setImportMode] = React.useState<'manual' | 'ia'>('manual');
   const [aiParsing, setAiParsing] = React.useState(false);
-  const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string; valor: string; data: string }[] | null>(null);
+  const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string; email: string; valor: string; data: string }[] | null>(null);
   const [aiIgnored, setAiIgnored] = React.useState<string[]>([]);
   const [aiError, setAiError] = React.useState<string | null>(null);
   // Arquivo arrastado (imagem/PDF) que vai direto pra IA multimodal; CSV/Excel
@@ -397,13 +397,16 @@ const PartyPresidentPage: React.FC = () => {
     // Formato novo: Nome, Cargo, Cidade, Estado, Telefone. Mantém compatibilidade
     // com o formato antigo (sem Estado): detecta o telefone pelo excesso de dígitos.
     const isPhone = (s?: string) => (s || '').replace(/\D/g, '').length >= 8;
+    const isEmail = (s?: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
     const rows = importText.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
-      const [displayName, cargo, regiao, p4, p5] = line.split(/[;,\t]/).map((s) => (s || '').trim());
-      let estado = '', phone = '';
-      for (const t of [p4, p5].filter(Boolean)) {
-        if (isPhone(t)) phone = t; else if (!estado) estado = t;
+      const [displayName, cargo, regiao, ...rest] = line.split(/[;,\t]/).map((s) => (s || '').trim());
+      // Classifica as colunas extras por CONTEÚDO (e-mail tem @, telefone = dígitos,
+      // o resto vira UF) — assim o e-mail pode vir em qualquer posição.
+      let estado = '', phone = '', email = '';
+      for (const t of rest.filter(Boolean)) {
+        if (isEmail(t)) email = t; else if (isPhone(t)) phone = t; else if (!estado) estado = t;
       }
-      return { displayName, cargo, regiao, estado, phone };
+      return { displayName, cargo, regiao, estado, phone, email };
     }).filter((r) => r.displayName);
     if (!rows.length) return;
     setImporting(true); setImportSummary(null);
@@ -496,7 +499,7 @@ const PartyPresidentPage: React.FC = () => {
     } finally { setImporting(false); }
   };
   // edição inline da prévia da IA (#147e)
-  const updatePreviewRow = (i: number, field: 'displayName' | 'cargo' | 'regiao' | 'estado' | 'phone' | 'valor' | 'data', value: string) => {
+  const updatePreviewRow = (i: number, field: 'displayName' | 'cargo' | 'regiao' | 'estado' | 'phone' | 'email' | 'valor' | 'data', value: string) => {
     setAiPreview((prev) => prev ? prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)) : prev);
   };
   const removePreviewRow = (i: number) => setAiPreview((prev) => (prev ? prev.filter((_, j) => j !== i) : prev));
@@ -1281,12 +1284,13 @@ const PartyPresidentPage: React.FC = () => {
 
             {/* Campos obrigatórios — vale para os dois modos, evita erro de importação */}
             <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-[11px] text-amber-100 leading-relaxed">
-              ⚠️ <b>O que não pode faltar:</b> o <b>Nome</b> é obrigatório (linha sem nome é descartada). <b>Cidade + UF</b> posicionam no mapa/telão e o <b>Telefone</b> permite o convite por WhatsApp — sem eles o candidato entra, mas incompleto. Cargo, e-mail e valores são opcionais. Cabeçalhos e linhas vazias são ignorados.
+              ⚠️ <b>O que não pode faltar:</b> o <b>Nome</b> é obrigatório (linha sem nome é descartada). <b>Cidade + UF</b> posicionam no mapa/telão e o <b>Telefone</b> permite o convite por WhatsApp — sem eles o candidato entra, mas incompleto. Cargo, e-mail e valores são opcionais.<br />
+              <span className="text-amber-200/80">Não precisa rotular as colunas: a IA identifica cada dado pelo conteúdo (e-mail tem @, telefone = dígitos, UF = 2 letras, valor = número) mesmo <b>sem cabeçalho</b>. Cabeçalhos e linhas vazias são ignorados.</span>
             </div>
 
             {importMode === 'manual' ? (
               <>
-                <p className="text-xs text-slate-400 mb-2">Cole uma linha por candidato, separando por vírgula:<br /><span className="text-slate-500">Nome, Cargo, Cidade, Estado (UF), Telefone</span></p>
+                <p className="text-xs text-slate-400 mb-2">Cole uma linha por candidato, separando por vírgula:<br /><span className="text-slate-500">Nome, Cargo, Cidade, Estado (UF), Telefone, E-mail</span><br /><span className="text-[11px] text-slate-600">A ordem das colunas extras é flexível — reconhecemos e-mail (tem @) e telefone (dígitos) automaticamente.</span></p>
                 <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={8}
                   placeholder={'João Silva, Vereador, Niterói, RJ, 21999990000\nMaria Souza, Prefeita, São Gonçalo, RJ, 21988880000'}
                   className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white text-sm font-mono" />
@@ -1297,7 +1301,7 @@ const PartyPresidentPage: React.FC = () => {
               </>
             ) : (
               <>
-                <p className="text-xs text-slate-400 mb-2">Arraste um arquivo (CSV, Excel, PDF ou foto da lista) <b>ou</b> cole a planilha do jeito que ela está. A IA acha sozinha o nome, cargo, cidade, UF e telefone, limpa o resto, e você confere antes de salvar.</p>
+                <p className="text-xs text-slate-400 mb-2">Arraste um arquivo (CSV, Excel, PDF ou foto da lista) <b>ou</b> cole a planilha do jeito que ela está — <b>com ou sem cabeçalho</b>. A IA identifica sozinha nome, cargo, cidade, UF, telefone e e-mail pelo conteúdo, limpa o resto, e você confere antes de salvar.</p>
 
                 {/* Zona de arrastar/soltar arquivo */}
                 <div
@@ -1369,6 +1373,8 @@ const PartyPresidentPage: React.FC = () => {
                             </select>
                             <input value={c.phone} onChange={(e) => updatePreviewRow(i, 'phone', e.target.value)} placeholder="Telefone"
                               className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
+                            <input value={c.email} onChange={(e) => updatePreviewRow(i, 'email', e.target.value)} placeholder="E-mail"
+                              className="col-span-2 bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
                             <input value={c.valor} onChange={(e) => updatePreviewRow(i, 'valor', e.target.value)} placeholder="Valor R$ (repasse)"
                               className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-emerald-200" />
                             <input type="date" value={c.data} onChange={(e) => updatePreviewRow(i, 'data', e.target.value)}
