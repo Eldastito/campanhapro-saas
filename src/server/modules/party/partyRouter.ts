@@ -299,7 +299,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const party = await partyOf(userId);
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
-    const { displayName, cargo, regiao, estado, phone, valor, data } = req.body || {};
+    const { displayName, cargo, regiao, estado, phone, email, valor, data } = req.body || {};
     if (!displayName?.trim()) return res.status(400).json({ error: 'displayName_obrigatorio' });
     const valorInicial = parseBRL(valor);
     const dataInicial = /^\d{4}-\d{2}-\d{2}$/.test(String(data || '')) ? data : null;
@@ -310,6 +310,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       regiao: regiao?.trim() || null,
       estado: normalizeUF(estado),
       phone: phone?.trim() || null,
+      email: email?.trim().toLowerCase() || null,
       valorRecebido: valorInicial > 0 ? valorInicial : 0,
       status: 'pending',
       inviteToken: newToken(),
@@ -1907,6 +1908,11 @@ COACHING (seja uma GUIA, não só executora):
 - Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
 - Valores sempre em R$. Tom direto, chat.
 
+SOBRE IMPORTAR CANDIDATOS EM LOTE (oriente quando o usuário perguntar como importar / colar lista / planilha / "tenho uma lista"):
+- Há 3 formas de fornecer os dados: (1) "Colar simples" — uma linha por candidato, separando por vírgula: Nome, Cargo, Cidade, UF, Telefone; (2) "Organizar com IA" — cola a planilha do jeito que estiver (qualquer ordem de colunas, colunas extras tipo CPF/observação) que a IA acha e limpa os campos; (3) Arquivo — arrastar CSV, Excel, PDF ou uma FOTO da lista.
+- CAMPOS QUE NÃO PODEM FALTAR: o NOME é obrigatório (linha sem nome é descartada); CIDADE+UF posicionam no mapa/telão; TELEFONE permite o convite por WhatsApp. Cargo, e-mail e valores são opcionais. Cabeçalhos e linhas vazias são ignorados.
+- SEMPRE chame atenção pros campos obrigatórios pra evitar erro de importação, e lembre que aparece uma PRÉVIA editável antes de salvar (nada é gravado sem conferência). Se o usuário pedir, mostre um exemplo de linha pronto: "João Silva, Vereador, Niterói, RJ, 21999990000".
+
 COMO RESPONDER CONSULTAS DE LISTA/ORDENAÇÃO (importante):
 - Quando pedirem uma lista (ex: "todos os candidatos com cadastro pendente em ordem alfabética decrescente"), INCLUA TODOS os itens que batem com o filtro — não resuma "há 1 candidato", liste de fato cada um.
 - Respeite a ordem pedida (alfabética, crescente/decrescente, por valor, etc). Se pedirem "decrescente e alfabética", ordene de Z→A.
@@ -1949,10 +1955,13 @@ JSON:`;
           'Posso te ajudar com estas tarefas — é só falar naturalmente (por texto ou voz):',
           '',
           '📊 *Consultar*: "quanto já repassei?", "lista os candidatos pendentes em ordem alfabética", "quem recebeu mais?"',
-          '➕ *Cadastrar candidato*: "cadastra o João Silva, vereador, Niterói RJ, 21999990000" (preciso de nome, cidade e UF; cargo e telefone ajudam)',
-          '💰 *Lançar repasse*: "lança 5 mil pro João, material gráfico"',
-          '✏️ *Editar repasse*: "muda o repasse do João pra 8 mil"',
-          '🗑️ *Excluir repasse*: "exclui o último repasse do João"',
+          '➕ *Cadastrar candidato*: "cadastra o João Silva, vereador, Niterói RJ, 21999990000" (preciso de nome, cidade e UF; telefone é pro convite)',
+          '📥 *Importar candidatos em lote*: você tem 3 formas —',
+          '   1) *Colar simples*: uma linha por candidato, vírgula separando: Nome, Cargo, Cidade, UF, Telefone',
+          '   2) *Organizar com IA*: cola a planilha do jeito que estiver (qualquer ordem de colunas, colunas extras) que eu acho e limpo os campos',
+          '   3) *Arquivo*: arraste CSV, Excel, PDF ou até uma FOTO da lista — eu leio e organizo',
+          '   ⚠️ O *Nome* é obrigatório (linha sem nome é descartada). *Cidade+UF* posicionam no mapa e o *Telefone* permite o convite por WhatsApp. Cargo, e-mail e valores são opcionais. Sempre mostro uma prévia pra você conferir antes de salvar.',
+          '💰 *Lançar repasse*: "lança 5 mil pro João" (cada repasse é imutável; pra ajustar, lance um novo — positivo ou negativo)',
           '👤 *Excluir candidato*: "exclui o candidato João Silva"',
           '📄 *Relatório*: "gera o relatório de repasses"',
           '',

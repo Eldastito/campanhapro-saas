@@ -169,7 +169,7 @@ const PartyPresidentPage: React.FC = () => {
   const [partyForm, setPartyForm] = React.useState({ name: '', numero: '' });
   const [partySaving, setPartySaving] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
-  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', valor: '', data: '' });
+  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', email: '', valor: '', data: '' });
   const [adding, setAdding] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [importText, setImportText] = React.useState('');
@@ -387,7 +387,7 @@ const PartyPresidentPage: React.FC = () => {
     setAdding(true);
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
-      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', valor: '', data: '' }); setAddOpen(false); await load(); showToast('Candidato adicionado ✅'); }
+      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', email: '', valor: '', data: '' }); setAddOpen(false); await load(); showToast('Candidato adicionado ✅'); }
       else await notifyFail(r, 'Não consegui adicionar o candidato');
     } catch { showToast('Falha de rede ao adicionar o candidato. Tente de novo.', 'err'); }
     finally { setAdding(false); }
@@ -1197,7 +1197,8 @@ const PartyPresidentPage: React.FC = () => {
                 </select>
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Telefone (WhatsApp) *" className={`bg-slate-950 border rounded-xl px-3 py-2 text-white ${form.phone.replace(/\D/g, '').length >= 10 ? 'border-white/10' : 'border-amber-500/40'}`} />
               </div>
-              <p className="text-[11px] text-slate-500">* Nome, cidade, UF e telefone são obrigatórios (mapa + convite por WhatsApp). Cargo é opcional.</p>
+              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} type="email" placeholder="E-mail que o candidato mais usa (opcional)" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
+              <p className="text-[11px] text-slate-500">* Nome, cidade, UF e telefone são obrigatórios (mapa + convite por WhatsApp). Cargo e e-mail são opcionais — o e-mail agiliza o contato e já vem sugerido no cadastro dele.</p>
               {/* Repasse inicial (opcional) — se informado, já cria o registro e popula o histórico */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                 <input value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} placeholder="Valor do repasse (opcional)" inputMode="decimal" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
@@ -1276,6 +1277,11 @@ const PartyPresidentPage: React.FC = () => {
                 <button key={m} onClick={() => { setImportMode(m); setAiPreview(null); setAiError(null); setAiFile(null); }}
                   className={`text-xs font-bold py-2 rounded-lg transition-colors ${importMode === m ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>{label}</button>
               ))}
+            </div>
+
+            {/* Campos obrigatórios — vale para os dois modos, evita erro de importação */}
+            <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-[11px] text-amber-100 leading-relaxed">
+              ⚠️ <b>O que não pode faltar:</b> o <b>Nome</b> é obrigatório (linha sem nome é descartada). <b>Cidade + UF</b> posicionam no mapa/telão e o <b>Telefone</b> permite o convite por WhatsApp — sem eles o candidato entra, mas incompleto. Cargo, e-mail e valores são opcionais. Cabeçalhos e linhas vazias são ignorados.
             </div>
 
             {importMode === 'manual' ? (
