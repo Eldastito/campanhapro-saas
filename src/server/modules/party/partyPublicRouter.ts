@@ -158,12 +158,12 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
   // Dados do convite — para a página de cadastro mostrar o contexto (nome travado).
   router.get('/invite/:token', async (req: Request, res: Response) => {
     const { data: cand } = await supabase.from('party_candidates')
-      .select('id, displayName, cargo, regiao, phone, status, partyId').eq('inviteToken', req.params.token).maybeSingle();
+      .select('id, displayName, cargo, regiao, phone, email, status, partyId').eq('inviteToken', req.params.token).maybeSingle();
     if (!cand) return res.status(404).json({ error: 'invite_invalido' });
     const { data: party } = await supabase.from('parties').select('name').eq('id', (cand as any).partyId).maybeSingle();
     return res.json({
       partyName: (party as any)?.name || 'Partido',
-      candidate: { displayName: (cand as any).displayName, cargo: (cand as any).cargo, regiao: (cand as any).regiao, phone: (cand as any).phone || null },
+      candidate: { displayName: (cand as any).displayName, cargo: (cand as any).cargo, regiao: (cand as any).regiao, phone: (cand as any).phone || null, email: (cand as any).email || null },
       alreadyRegistered: (cand as any).status === 'active',
     });
   });

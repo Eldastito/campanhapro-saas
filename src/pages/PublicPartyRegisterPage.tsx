@@ -8,7 +8,7 @@ import { SmokeyBackground } from '../components/ui/SmokeyBackground';
  * O nome do candidato vem do convite e fica TRAVADO — garante o vínculo e a
  * hierarquia. O convidado só define e-mail e senha.
  */
-interface Invite { partyName: string; candidate: { displayName: string; cargo?: string; regiao?: string; phone?: string | null }; alreadyRegistered: boolean; }
+interface Invite { partyName: string; candidate: { displayName: string; cargo?: string; regiao?: string; phone?: string | null; email?: string | null }; alreadyRegistered: boolean; }
 
 const INPUT_CLS = 'w-full rounded-xl border border-white/15 bg-white/5 py-3 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/30';
 
@@ -30,6 +30,7 @@ const PublicPartyRegisterPage: React.FC = () => {
         if (!r.ok) throw new Error(j.error || 'Convite inválido');
         setInvite(j);
         if (j.candidate?.phone) setForm((f) => ({ ...f, phone: j.candidate.phone }));
+        if (j.candidate?.email) setForm((f) => ({ ...f, email: j.candidate.email }));
       } catch (e: any) { setErr(e.message); }
       finally { setLoading(false); }
     })();
