@@ -66,6 +66,20 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
         const k = (m as any).campaignId; team[k] = team[k] || { coord: 0, lider: 0 };
         if ((m as any).type === 'Coordenador') team[k].coord++; else team[k].lider++;
       }
+      // Equipe REGISTRADA pelo candidato (convites, inclusive pendentes) também
+      // conta — consistente com a conferência do presidente. Pega o maior.
+      const { data: invs } = await supabase.from('party_member_invites')
+        .select('"campaignId", role').in('campaignId', campIds).in('role', ['Coordenador', 'Líder']);
+      const reg: Record<string, { coord: number; lider: number }> = {};
+      for (const r of invs || []) {
+        const k = (r as any).campaignId; reg[k] = reg[k] || { coord: 0, lider: 0 };
+        if ((r as any).role === 'Coordenador') reg[k].coord++; else reg[k].lider++;
+      }
+      for (const k of Object.keys(reg)) {
+        team[k] = team[k] || { coord: 0, lider: 0 };
+        team[k].coord = Math.max(team[k].coord, reg[k].coord);
+        team[k].lider = Math.max(team[k].lider, reg[k].lider);
+      }
     }
 
     // Posição aproximada por cidade/UF (#147f): candidatos SEM comitê com GPS
