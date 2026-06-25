@@ -663,6 +663,24 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
     return res.json({ candidate: data });
   });
 
+  // Foto (retrato) do candidato — presidente sobe pelo painel. Re-hospeda no
+  // Storage e guarda só o PATH em metadata.photoPath (banco leve). Devolve URL assinada.
+  router.post('/candidates/:id/photo', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const party = await candidateOfPresident(userId, req.params.id);
+    if (!party) return res.status(404).json({ error: 'not_found' });
+    const { dataUrl } = req.body || {};
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'foto_invalida' });
+    const path = await uploadPhoto(`candidates/${req.params.id}.jpg`, dataUrl);
+    if (!path) return res.status(500).json({ error: 'upload_falhou' });
+    const { data: row } = await supabase.from('party_candidates').select('metadata').eq('id', req.params.id).maybeSingle();
+    const meta = ((row as any)?.metadata && typeof (row as any).metadata === 'object') ? (row as any).metadata : {};
+    await supabase.from('party_candidates').update({ metadata: { ...meta, photoPath: path }, updatedAt: new Date().toISOString() }).eq('id', req.params.id);
+    broadcastTelao((party as any).id);
+    return res.json({ photoUrl: await signPhoto(path) });
+  });
+
   // Excluir um candidato. Remove os dados do partido; se já tinha conta (ativo),
   // remove também o usuário/campanha (limpeza completa).
   router.delete('/candidates/:id', async (req: Request, res: Response) => {
@@ -1079,6 +1097,22 @@ Saída JSON estrito (sem markdown):
     broadcastTelao(cand.partyId);
     const signed = await Promise.all(finalPaths.map((p) => signPhoto(p)));
     return res.json({ committee: { ...data, photos: signed.filter(Boolean), photo: signed[0] || null } });
+  });
+
+  // Foto (retrato) do próprio candidato — sobe pelo dashboard dele.
+  router.post('/candidate/photo', async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const cand = await myCandidate(userId);
+    if (!cand) return res.status(404).json({ error: 'not_found' });
+    const { dataUrl } = req.body || {};
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return res.status(400).json({ error: 'foto_invalida' });
+    const path = await uploadPhoto(`candidates/${cand.id}.jpg`, dataUrl);
+    if (!path) return res.status(500).json({ error: 'upload_falhou' });
+    const meta = (cand.metadata && typeof cand.metadata === 'object') ? cand.metadata : {};
+    await supabase.from('party_candidates').update({ metadata: { ...meta, photoPath: path }, updatedAt: new Date().toISOString() }).eq('id', cand.id);
+    broadcastTelao(cand.partyId);
+    return res.json({ photoUrl: await signPhoto(path) });
   });
 
   router.post('/candidate/checkin', async (req: Request, res: Response) => {

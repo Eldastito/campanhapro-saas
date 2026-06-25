@@ -83,6 +83,20 @@ const PartyCandidatePage: React.FC = () => {
     finally { setPhotoBusySlot(null); }
   };
 
+  const myPhotoInputRef = React.useRef<HTMLInputElement | null>(null);
+  const uploadMyPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy('photo'); setMsg(null);
+    try {
+      const dataUrl = await compressImage(file, 600, 0.7);
+      const r = await postWithTimeout('/api/v1/party/candidate/photo', { dataUrl });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) { setData((prev: any) => ({ ...prev, candidate: { ...prev.candidate, photoUrl: j.photoUrl || dataUrl } })); setMsg({ kind: 'ok', text: 'Foto atualizada ✅' }); }
+      else setMsg({ kind: 'err', text: 'Não consegui enviar a foto. Tente de novo.' });
+    } catch { setMsg({ kind: 'err', text: 'Falha ao processar a imagem. Tente outra.' }); }
+    finally { setBusy(null); if (myPhotoInputRef.current) myPhotoInputRef.current.value = ''; }
+  };
+
   const pegarGps = async () => {
     setBusy('gps'); setMsg(null);
     try {
@@ -155,7 +169,14 @@ const PartyCandidatePage: React.FC = () => {
       {/* Header */}
       <div className="flex justify-between items-start mb-6">
         <div className="flex items-center gap-3 min-w-0">
-          <CandidateAvatar name={data.candidate.displayName} url={data.candidate.photoUrl} size={56} />
+          <input ref={myPhotoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => uploadMyPhoto(e.target.files?.[0])} />
+          <button type="button" onClick={() => myPhotoInputRef.current?.click()} disabled={busy === 'photo'}
+            title="Enviar/trocar sua foto" className="relative shrink-0 rounded-full group disabled:opacity-60">
+            <CandidateAvatar name={data.candidate.displayName} url={data.candidate.photoUrl} size={56} />
+            <span className="absolute -bottom-1 -right-1 bg-indigo-600 group-hover:bg-indigo-500 rounded-full p-1 border-2 border-[#0a0a0b]">
+              {busy === 'photo' ? <Loader2 className="w-3 h-3 animate-spin text-white" /> : <Camera className="w-3 h-3 text-white" />}
+            </span>
+          </button>
           <div className="min-w-0">
             <h1 className="text-2xl font-black flex items-center gap-2 truncate"><Landmark className="text-indigo-400 w-6 h-6 shrink-0" /> {data.candidate.displayName}</h1>
             <p className="text-gray-400 text-sm">{data.partyName} · comprovação de campanha</p>

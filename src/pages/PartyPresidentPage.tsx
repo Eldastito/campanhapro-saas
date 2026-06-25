@@ -5,6 +5,7 @@ import {
   Sparkles, FileText,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
+import { compressImage } from '../lib/captureUtils';
 import { useAuth } from '../contexts/AuthContext';
 import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
 import PartyEmergencyWipe from '../components/party/PartyEmergencyWipe';
@@ -151,8 +152,11 @@ const PartyPresidentPage: React.FC = () => {
   const [editFor, setEditFor] = React.useState<Candidate | null>(null);
   const [editForm, setEditForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' });
   const [editing, setEditing] = React.useState(false);
+  const [editPhotoUrl, setEditPhotoUrl] = React.useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+  const photoInputRef = React.useRef<HTMLInputElement | null>(null);
 
-  const openEdit = (c: Candidate) => { setEditFor(c); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', estado: c.estado || '', phone: c.phone || '' }); };
+  const openEdit = (c: Candidate) => { setEditFor(c); setEditPhotoUrl(c.photoUrl || null); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', estado: c.estado || '', phone: c.phone || '' }); };
 
   // Toast: feedback leve de sucesso/erro. Antes a página usava alert() (bloqueia
   // e destoa) e vários saves fechavam o modal em silêncio. Some sozinho em ~3s.
@@ -189,6 +193,17 @@ const PartyPresidentPage: React.FC = () => {
       else await notifyFail(r, 'Não consegui salvar as alterações');
     } catch { showToast('Falha de rede ao salvar. Tente de novo.', 'err'); }
     finally { setEditing(false); }
+  };
+  const uploadCandidatePhoto = async (file: File | undefined) => {
+    if (!file || !editFor) return;
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await compressImage(file, 600, 0.7);
+      const r = await authedFetch(`/api/v1/party/candidates/${editFor.id}/photo`, { method: 'POST', body: JSON.stringify({ dataUrl }) });
+      if (r.ok) { const j = await r.json(); setEditPhotoUrl(j.photoUrl || dataUrl); await load(); showToast('Foto atualizada ✅'); }
+      else await notifyFail(r, 'Não consegui enviar a foto');
+    } catch { showToast('Falha ao processar a imagem. Tente outra.', 'err'); }
+    finally { setPhotoBusy(false); if (photoInputRef.current) photoInputRef.current.value = ''; }
   };
   const deleteCandidate = async (c: Candidate) => {
     const ok = await askConfirm({
@@ -946,6 +961,18 @@ const PartyPresidentPage: React.FC = () => {
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-bold text-white">Editar candidato</h4>
               <button onClick={() => setEditFor(null)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex items-center gap-3 mb-3">
+              <Avatar name={editForm.displayName || editFor.displayName} url={editPhotoUrl} size={64} />
+              <div>
+                <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => uploadCandidatePhoto(e.target.files?.[0])} />
+                <button type="button" onClick={() => photoInputRef.current?.click()} disabled={photoBusy}
+                  className="text-xs font-bold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 flex items-center gap-1.5 disabled:opacity-50">
+                  {photoBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {editPhotoUrl ? 'Trocar foto' : 'Enviar foto'}
+                </button>
+                <p className="text-[11px] text-slate-500 mt-1">JPG/PNG · até ~2MB</p>
+              </div>
             </div>
             <div className="space-y-2">
               <input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
