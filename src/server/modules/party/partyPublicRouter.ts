@@ -38,7 +38,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     if (!party) return res.status(404).json({ error: 'telao_invalido' });
     const partyId = (party as any).id;
     const { data: cands } = await supabase.from('party_candidates')
-      .select('id, displayName, regiao, estado, status, campaignId, valorRecebido, valorAlocado').eq('partyId', partyId);
+      .select('id, displayName, regiao, estado, status, campaignId').eq('partyId', partyId);
     const candidates = cands || [];
     const ids = candidates.map((c: any) => c.id);
     const campIds = candidates.map((c: any) => c.campaignId).filter(Boolean);
@@ -140,7 +140,6 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
         committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
         checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         coordCount: t.coord, leaderCount: t.lider,
-        valorRecebido: Number(c.valorRecebido) || 0, valorAlocado: Number(c.valorAlocado) || 0,
       });
       if (sc.level === 'green') green++; else if (sc.level === 'yellow') yellow++; else red++;
 

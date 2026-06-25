@@ -2,8 +2,8 @@
  * Convite + gestão de equipe em cadeia (#149/#150).
  *
  * Cada nível convida o nível abaixo (candidato→coordenador→líder→equipe) com
- * nome + telefone + bairro de atuação, e declara o VALOR que paga ao membro.
- * O convidado só cria email+senha (link/WhatsApp). Sem limite de pessoas.
+ * nome + telefone + bairro de atuação. O convidado só cria email+senha
+ * (link/WhatsApp). Sem limite de pessoas.
  *
  * Reutilizável: a tela do candidato e a do membro usam o mesmo card — o backend
  * deriva o papel do convite pelo tipo de quem convida.
@@ -19,10 +19,6 @@ interface MemberInvite {
   role: string;
   status: 'pending' | 'active';
   bairro: string | null;
-  valorPago: number | null;
-  dataPago: string | null;
-  valorRecebido: number | null;
-  dataRecebido: string | null;
   createdAt: string;
 }
 
@@ -31,7 +27,6 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 const inviteUrl = (token: string) => `${window.location.origin}/cadastro/equipe/${token}`;
-const brl = (n: number | null) => (n && n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—');
 
 const MemberInviteCard: React.FC = () => {
   const [invites, setInvites] = React.useState<MemberInvite[]>([]);
@@ -39,12 +34,12 @@ const MemberInviteCard: React.FC = () => {
   const [allowedRoles, setAllowedRoles] = React.useState<string[]>([]);
   const [selectedRole, setSelectedRole] = React.useState<string>('');
   const [loading, setLoading] = React.useState(true);
-  const [novo, setNovo] = React.useState({ nome: '', tel: '', bairro: '', valor: '', data: '' });
+  const [novo, setNovo] = React.useState({ nome: '', tel: '', bairro: '' });
   const [busy, setBusy] = React.useState(false);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [editTok, setEditTok] = React.useState<string | null>(null);
-  const [editForm, setEditForm] = React.useState({ bairro: '', valor: '', data: '' });
+  const [editForm, setEditForm] = React.useState({ bairro: '' });
   const [savingEdit, setSavingEdit] = React.useState(false);
 
   const load = React.useCallback(async () => {
@@ -91,11 +86,11 @@ const MemberInviteCard: React.FC = () => {
     try {
       const r = await authedFetch('/api/v1/party/member-invites', {
         method: 'POST',
-        body: JSON.stringify({ displayName: novo.nome.trim(), phone: novo.tel.trim(), bairro: novo.bairro.trim(), valorPago: novo.valor, dataPago: novo.data, role: selectedRole }),
+        body: JSON.stringify({ displayName: novo.nome.trim(), phone: novo.tel.trim(), bairro: novo.bairro.trim(), role: selectedRole }),
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.invite) {
-        setNovo({ nome: '', tel: '', bairro: '', valor: '', data: '' });
+        setNovo({ nome: '', tel: '', bairro: '' });
         setInvites((prev) => [j.invite, ...prev]);
         openWhatsApp(j.invite);
       } else setErr(j.detail || j.error || 'Não consegui gerar o convite.');
@@ -105,14 +100,14 @@ const MemberInviteCard: React.FC = () => {
 
   const startEdit = (inv: MemberInvite) => {
     setEditTok(inv.token);
-    setEditForm({ bairro: inv.bairro || '', valor: inv.valorPago ? String(inv.valorPago) : '', data: inv.dataPago || '' });
+    setEditForm({ bairro: inv.bairro || '' });
   };
   const saveEdit = async (token: string) => {
     setSavingEdit(true);
     try {
       const r = await authedFetch(`/api/v1/party/member-invites/${token}`, {
         method: 'PATCH',
-        body: JSON.stringify({ bairro: editForm.bairro.trim(), valorPago: editForm.valor, dataPago: editForm.data }),
+        body: JSON.stringify({ bairro: editForm.bairro.trim() }),
       });
       if (r.ok) { setEditTok(null); await load(); }
     } finally { setSavingEdit(false); }
@@ -124,7 +119,7 @@ const MemberInviteCard: React.FC = () => {
   return (
     <div className="bg-[#1c2128] border border-white/5 rounded-3xl p-5 mb-6">
       <p className="font-bold flex items-center gap-2 mb-1"><Users className="w-5 h-5 text-emerald-300" /> Minha equipe</p>
-      <p className="text-xs text-slate-400 mb-3">Cadastre seu <b>{nextLabel}</b> (nome, WhatsApp, bairro de atuação) e informe quanto você paga a ele. O convite vai por WhatsApp/link — a pessoa só cria e-mail e senha. Sem limite.</p>
+      <p className="text-xs text-slate-400 mb-3">Cadastre seu <b>{nextLabel}</b> (nome, WhatsApp, bairro de atuação). O convite vai por WhatsApp/link — a pessoa só cria e-mail e senha. Sem limite.</p>
 
       {/* Seletor de papel quando há mais de uma opção (ex.: candidato → Coordenador ou Líder) */}
       {allowedRoles.length > 1 && (
@@ -143,10 +138,6 @@ const MemberInviteCard: React.FC = () => {
         <input value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} placeholder={`Nome do ${nextLabel} *`} className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-sm text-white" />
         <input value={novo.tel} onChange={(e) => setNovo({ ...novo, tel: e.target.value })} placeholder="WhatsApp" inputMode="tel" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-sm text-white" />
         <input value={novo.bairro} onChange={(e) => setNovo({ ...novo, bairro: e.target.value })} placeholder="Bairro de atuação" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-sm text-white" />
-        <div className="grid grid-cols-2 gap-2">
-          <input value={novo.valor} onChange={(e) => setNovo({ ...novo, valor: e.target.value })} placeholder="R$ que paga" inputMode="decimal" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-sm text-white" />
-          <input value={novo.data} onChange={(e) => setNovo({ ...novo, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-2 py-2 text-sm text-white" title="Data do pagamento" />
-        </div>
       </div>
       {err && <p className="text-xs text-rose-400 mb-2">{err}</p>}
       <button onClick={gerar} disabled={busy || !novo.nome.trim()} className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2 text-sm">
@@ -161,10 +152,7 @@ const MemberInviteCard: React.FC = () => {
               <div className="flex items-center gap-2">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-white truncate">{inv.displayName} <span className="text-[10px] text-slate-500">· {ROLE_LABEL[inv.role] || inv.role}</span></p>
-                  <p className="text-[10px] text-slate-400">
-                    {inv.bairro ? `📍 ${inv.bairro} · ` : ''}paga {brl(inv.valorPago)}
-                    {inv.valorRecebido != null && <span className="text-emerald-300"> · recebeu {brl(inv.valorRecebido)}{inv.dataRecebido ? ` em ${new Date(inv.dataRecebido + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}</span>}
-                  </p>
+                  {inv.bairro && <p className="text-[10px] text-slate-400">📍 {inv.bairro}</p>}
                   <p className={`text-[10px] flex items-center gap-1 ${inv.status === 'active' ? 'text-emerald-300' : 'text-amber-300'}`}>
                     {inv.status === 'active' ? <><CheckCircle2 className="w-3 h-3" /> cadastrado</> : <><Clock className="w-3 h-3" /> aguardando cadastro</>}
                   </p>
@@ -177,10 +165,8 @@ const MemberInviteCard: React.FC = () => {
                 <button onClick={() => excluir(inv.token)} title="Excluir registro" className="p-1.5 rounded-lg bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
               {editTok === inv.token && (
-                <div className="mt-2 pt-2 border-t border-white/5 grid grid-cols-1 sm:grid-cols-[1fr_110px_130px_auto_auto] gap-1.5 items-center">
+                <div className="mt-2 pt-2 border-t border-white/5 grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-1.5 items-center">
                   <input value={editForm.bairro} onChange={(e) => setEditForm({ ...editForm, bairro: e.target.value })} placeholder="Bairro" className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
-                  <input value={editForm.valor} onChange={(e) => setEditForm({ ...editForm, valor: e.target.value })} placeholder="R$ paga" inputMode="decimal" className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
-                  <input value={editForm.data} onChange={(e) => setEditForm({ ...editForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white" />
                   <button onClick={() => saveEdit(inv.token)} disabled={savingEdit} className="bg-emerald-600 hover:bg-emerald-500 rounded-lg px-2 py-1.5 text-xs font-bold">{savingEdit ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Salvar'}</button>
                   <button onClick={() => setEditTok(null)} className="p-1.5 text-slate-400 hover:text-white"><X className="w-3.5 h-3.5" /></button>
                 </div>

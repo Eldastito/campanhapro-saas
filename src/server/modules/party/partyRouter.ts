@@ -14,7 +14,6 @@ import { randomBytes } from 'crypto';
 import { computeScore } from './score';
 import { callAgent } from '../../../lib/aiCallAgent';
 import { ingestArtifact, retrieveContext } from '../rag/knowledgeIngest';
-import { fireOrchestration } from '../../../lib/orchestrationTriggers';
 
 const newToken = () => `pc_${randomBytes(9).toString('hex')}`;
 
@@ -31,17 +30,6 @@ const normalizeUF = (v: any): string | null => {
 const normName = (v: any): string => String(v ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 const normPhone = (v: any): string => String(v ?? '').replace(/\D/g, '');
 
-// Converte "$"/valor (ex.: "25400", "R$ 25.400", "25.400,50") em número de reais.
-// BR: ponto = milhar, vírgula = decimal.
-const parseBRL = (v: any): number => {
-  if (v == null) return 0;
-  let s = String(v).replace(/[^\d.,-]/g, '').trim();
-  if (!s) return 0;
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
-  else s = s.replace(/\./g, '');
-  const n = Number(s);
-  return Number.isFinite(n) && n >= 0 ? n : 0;
-};
 
 // Linhas de cabeçalho que NÃO podem virar candidato (ex.: "Nome", "nome na urna...").
 const HEADER_TERMS = new Set([
@@ -243,7 +231,6 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         checkinCount: checkinCount[c.id] || 0,
         lastCheckinAt: lastCheckinAt[c.id] || null,
         coordCount: metaCoord, leaderCount: metaLider,
-        valorRecebido: Number(c.valorRecebido) || 0, valorAlocado: Number(c.valorAlocado) || 0,
       });
       return {
         ...c, coordCount: metaCoord, leaderCount: metaLider,
@@ -251,7 +238,6 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length,
         score,
-        repasseStatus: c.repasseStatus || 'liberado', valveNote: c.valveNote || null,
       };
     });
     // Não vaza dados de cobrança pro presidente (valor só no Supreme Admin).
@@ -299,10 +285,8 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const party = await partyOf(userId);
     if (!party) return res.status(409).json({ error: 'party_not_provisioned' });
-    const { displayName, cargo, regiao, estado, phone, email, valor, data } = req.body || {};
+    const { displayName, cargo, regiao, estado, phone, email } = req.body || {};
     if (!displayName?.trim()) return res.status(400).json({ error: 'displayName_obrigatorio' });
-    const valorInicial = parseBRL(valor);
-    const dataInicial = /^\d{4}-\d{2}-\d{2}$/.test(String(data || '')) ? data : null;
     const { data: cand, error } = await supabase.from('party_candidates').insert({
       partyId: party.id,
       displayName: String(displayName).slice(0, 160),
@@ -311,21 +295,10 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       estado: normalizeUF(estado),
       phone: phone?.trim() || null,
       email: email?.trim().toLowerCase() || null,
-      valorRecebido: valorInicial > 0 ? valorInicial : 0,
       status: 'pending',
       inviteToken: newToken(),
     }).select('*').single();
     if (error) return dbFail(res, error);
-    // Se o presidente já informou um valor de repasse no cadastro, cria o
-    // registro em party_repasses (igual ao import) — assim o histórico nasce
-    // populado e o formulário de repasse auto-preenche depois.
-    if (valorInicial > 0) {
-      await supabase.from('party_repasses').insert({
-        partyId: party.id, candidateId: (cand as any).id, valor: valorInicial,
-        data: dataInicial, descricao: 'Repasse informado no cadastro', itens: [], createdBy: userId,
-      }).then(() => {}, () => {});
-      broadcastTelao(party.id);
-    }
     return res.json({ candidate: cand });
   });
 
@@ -382,8 +355,6 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         if (!existByPhone.has(pk)) existByPhone.set(pk, []);
         existByPhone.get(pk)!.push(incomingCargo);
       }
-      const valorRecebido = parseBRL(r.valor ?? r.valorRecebido ?? r.repasse ?? r['$']);
-      const dataRepasse = /^\d{4}-\d{2}-\d{2}$/.test(r.data || '') ? r.data : null;
       toInsert.push({
         partyId: party.id,
         displayName,
@@ -392,38 +363,15 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         estado: normalizeUF(r.estado || r.uf),
         phone: (r.phone || r.telefone || '').toString().trim() || null,
         email: (() => { const e = String(r.email || '').trim().toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null; })(),
-        valorRecebido,
         status: 'pending',
         inviteToken: newToken(),
-        _dataRepasse: dataRepasse,
       });
     }
     if (!toInsert.length) return res.json({ created: 0, duplicates, invalid });
-    // Separa _dataRepasse antes de gravar (campo auxiliar, não existe na tabela).
-    const repasseMeta = toInsert.map((r) => ({ valor: r.valorRecebido, data: r._dataRepasse }));
-    const cleanInsert = toInsert.map(({ _dataRepasse, ...rest }) => rest);
+    const cleanInsert = toInsert;
     const { data, error } = await supabase.from('party_candidates').insert(cleanInsert).select('id');
     if (error) return dbFail(res, error);
-
-    // Cria registro de repasse (party_repasses) para cada candidato importado
-    // que tenha valor > 0 — assim o histórico financeiro fica populado desde o
-    // início, não só o campo resumo "valorRecebido".
     const inserted = data || [];
-    const repasseRows = inserted.map((row: any, i: number) => {
-      const m = repasseMeta[i];
-      if (!m || !(m.valor > 0)) return null;
-      return {
-        partyId: party.id,
-        candidateId: row.id,
-        valor: m.valor,
-        data: m.data,
-        descricao: 'Repasse importado via planilha',
-        createdBy: userId,
-      };
-    }).filter(Boolean);
-    if (repasseRows.length) {
-      await supabase.from('party_repasses').insert(repasseRows);
-    }
 
     // Pré-aquece geo_cache pras cidades dos candidatos importados em background
     // (fire-and-forget). Sem isso, o telão "esconde" candidatos sem comitê na
@@ -495,39 +443,39 @@ NÃO É PRECISO QUE O USUÁRIO IDENTIFIQUE/ROTULE AS COLUNAS. Se HOUVER cabeçal
 
 Extraia estes campos:
 - displayName: nome da pessoa / "nome na urna" (OBRIGATÓRIO).
-- cargo: o CARGO ELEITORAL (texto, NUNCA número). "F"="Deputado Federal", "E"="Deputado Estadual"; senão "Vereador"/"Prefeito"/"Senador"/"Deputado…". Se a coluna tiver NÚMERO, NÃO é cargo — é valor.
+- cargo: o CARGO ELEITORAL (texto, NUNCA número). "F"="Deputado Federal", "E"="Deputado Estadual"; senão "Vereador"/"Prefeito"/"Senador"/"Deputado…". Se a coluna tiver NÚMERO, NÃO é cargo — IGNORE o número.
 - regiao: a CIDADE/município (texto). Ex.: "Niterói", "São Gonçalo". NUNCA coloque "F"/"E" aqui — isso é cargo!
 - estado: a UF (EXATAMENTE 2 letras maiúsculas). Se não houver UF mas a cidade for conhecida, INFIRA (Niterói→RJ, São Gonçalo→RJ, Caxias→RJ, São Paulo→SP, Belo Horizonte→MG…). Bairros do Rio (Copacabana, Bangu, Pavuna, Tijuca, Jacarepaguá, Santa Cruz, Guaratiba…) → estado="RJ" e regiao="Rio de Janeiro". NUNCA ponha nome de cidade aqui — só sigla de 2 letras.
-- phone: telefone/WhatsApp — só os dígitos. NUNCA use valor em R$ como telefone.
+- phone: telefone/WhatsApp — só os dígitos.
 - email: o E-MAIL da pessoa (tem "@"). "" se não houver. (CPF e RG continuam PROIBIDOS — não extraia.)
-- valor: o VALOR EM REAIS (colunas "$"/"valor"/"repasse"; se houver várias, use "Valor Repassado"). Só o número. "" se não houver. Este é o ÚNICO campo numérico — número solto vai aqui, NÃO em cargo.
-- data: a DATA do repasse/pagamento. Formato YYYY-MM-DD (converta DD/MM/AAAA). "" se não houver.
+
+IGNORE colunas de VALOR/dinheiro (R$) e de DATA — o partido NÃO controla valores aqui. Liste-as em "colunasIgnoradas".
 
 Responda SOMENTE em JSON válido (nada fora do JSON):
 {
-  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "", "email": "", "valor": "", "data": "" } ],
-  "colunasIgnoradas": ["nome das colunas/seções extras que você descartou"]
+  "candidatos": [ { "displayName": "", "cargo": "", "regiao": "", "estado": "", "phone": "", "email": "" } ],
+  "colunasIgnoradas": ["nome das colunas/seções extras que você descartou (inclua aqui colunas de valor/dinheiro e de data)"]
 }
 
 REGRAS:
 - IGNORE a linha de cabeçalho (quando houver) e linhas/itens vazios — cabeçalho NUNCA vira candidato.
 - Não invente dados: se um campo não existe, deixe "".
-- NÃO inclua CPF nem RG, nem qualquer dado sensível além dos campos acima.
-- phone só com dígitos; valor só com número (pode ter vírgula decimal).
+- NÃO inclua CPF nem RG, nem qualquer dado sensível além dos campos acima. NÃO inclua valores em R$ nem datas.
+- phone só com dígitos.
 - Liste TODAS as linhas/candidatos encontrados — MESMO que o nome se repita (homônimos e registros múltiplos são comuns em planilhas de partido). O backend trata unificação; você só extrai.
 
-EXEMPLO 1 — COM cabeçalho:
+EXEMPLO 1 — COM cabeçalho (a coluna "$" é ignorada):
 """
 nome na urna eletronica | $    | cargo | municipio
 Pastora Simone           | 25400| F     | Rio
 """
-→ { "candidatos": [ { "displayName": "Pastora Simone", "cargo": "Deputado Federal", "regiao": "Rio de Janeiro", "estado": "RJ", "phone": "", "email": "", "valor": "25400", "data": "" } ] }
+→ { "candidatos": [ { "displayName": "Pastora Simone", "cargo": "Deputado Federal", "regiao": "Rio de Janeiro", "estado": "RJ", "phone": "", "email": "" } ], "colunasIgnoradas": ["$"] }
 
 EXEMPLO 2 — SEM cabeçalho (identifique pelo conteúdo):
 """
 João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
 """
-→ { "candidatos": [ { "displayName": "João Silva", "cargo": "Vereador", "regiao": "Niterói", "estado": "RJ", "phone": "21999990000", "email": "joao@gmail.com", "valor": "", "data": "" } ] }`;
+→ { "candidatos": [ { "displayName": "João Silva", "cargo": "Vereador", "regiao": "Niterói", "estado": "RJ", "phone": "21999990000", "email": "joao@gmail.com" } ] }`;
 
       const result = isFile
         ? await model.generateContent([
@@ -550,9 +498,9 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
       // preview, pra IA não gravar lixo no banco.
       const fixSwappedFields = (r: any): any => {
         const out = { ...r };
-        // 1. Se cargo é puramente numérico, é o VALOR mal-rotulado.
+        // 1. Se cargo é puramente numérico, é um VALOR mal-rotulado — descarta
+        // (o partido não controla valores; cargo é texto).
         if (typeof out.cargo === 'string' && /^\d+([.,]\d+)?$/.test(out.cargo.trim())) {
-          if (!out.valor || String(out.valor).trim() === '') out.valor = out.cargo.trim();
           out.cargo = '';
         }
         // 2. Se cargo está vazio mas regiao tem código de cargo (F/E/Vereador…),
@@ -580,11 +528,6 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
       };
       // Normaliza todas as linhas (sem filtrar duplicatas ainda).
       const allRows = (Array.isArray(listRaw) ? listRaw : []).map(fixSwappedFields).map((r: any) => {
-        const valorNum = parseBRL(r?.valor ?? r?.valorRecebido ?? r?.['$']);
-        const rawDate = String(r?.data || r?.dataRepasse || r?.dataPagamento || '').trim();
-        let dataIso = '';
-        if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) { dataIso = rawDate; }
-        else { const dm = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/.exec(rawDate); if (dm) dataIso = `${dm[3]}-${dm[2]}-${dm[1]}`; }
         return {
           displayName: String(r?.displayName || r?.nome || '').trim().slice(0, 160),
           cargo: (normalizeCargo(r?.cargo) || String(r?.cargo || '').trim()).slice(0, 80),
@@ -592,8 +535,6 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
           estado: normalizeUF(r?.estado || r?.uf) || '',
           phone: String(r?.phone || r?.telefone || '').replace(/\D/g, '').slice(0, 20),
           email: (() => { const e = String(r?.email || '').trim().toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e.slice(0, 160) : ''; })(),
-          valor: valorNum > 0 ? String(valorNum) : '',
-          data: dataIso,
         };
       }).filter((r: any) => r.displayName && !isHeaderName(r.displayName)).slice(0, 5000);
 
@@ -607,7 +548,7 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
       // Pass 1: linhas 100% idênticas (todos os 7 campos iguais)
       const byIdentical = new Map<string, number[]>();
       allRows.forEach((r: Row, i: number) => {
-        const k = [normName(r.displayName), normName(r.cargo), normName(r.regiao), r.estado, normPhone(r.phone), r.valor, r.data].join('|');
+        const k = [normName(r.displayName), normName(r.cargo), normName(r.regiao), r.estado, normPhone(r.phone)].join('|');
         if (!byIdentical.has(k)) byIdentical.set(k, []);
         byIdentical.get(k)!.push(i);
       });
@@ -731,8 +672,6 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
     const id = req.params.id;
     await supabase.from('party_checkins').delete().eq('candidateId', id);
     await supabase.from('party_committees').delete().eq('candidateId', id);
-    await supabase.from('party_repasses').delete().eq('candidateId', id);
-    await supabase.from('party_valve_log').delete().eq('candidateId', id);
     const { error } = await supabase.from('party_candidates').delete().eq('id', id);
     if (error) return dbFail(res, error);
     // candidato ativo: limpa conta + campanha
@@ -751,67 +690,6 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
     return res.json({ ok: true });
   });
 
-  // Repasses de um candidato.
-  router.get('/candidates/:id/repasses', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (!(await candidateOfPresident(userId, req.params.id))) return res.status(404).json({ error: 'not_found' });
-    const { data } = await supabase.from('party_repasses')
-      .select('*').eq('candidateId', req.params.id).order('data', { ascending: false, nullsFirst: false });
-    return res.json({ repasses: data ?? [] });
-  });
-
-  // Registra um repasse e atualiza o total do candidato.
-  router.post('/candidates/:id/repasses', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const party = await candidateOfPresident(userId, req.params.id);
-    if (!party) return res.status(404).json({ error: 'not_found' });
-    const { valor, data, descricao } = req.body || {};
-    const v = Number(valor);
-    if (!(v > 0)) return res.status(400).json({ error: 'valor_invalido' });
-    // O presidente lança SÓ o valor + data (imutável). O rateio ("como o
-    // dinheiro foi aplicado") é prestação de contas do CANDIDATO — ele preenche
-    // na tela dele via PATCH /candidate/repasses/:id. Por isso nasce com itens [].
-    const cleanItens: { categoria: string; valor: number }[] = [];
-    const { data: ins, error } = await supabase.from('party_repasses').insert({
-      partyId: (party as any).id, candidateId: req.params.id, valor: v,
-      data: /^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : null,
-      descricao: descricao?.trim() || null, itens: cleanItens, createdBy: userId,
-    }).select('*').single();
-    if (error) return dbFail(res, error);
-    // recalcula caches: total recebido e total alocado (soma dos itens de todos os repasses)
-    const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', req.params.id);
-    const totalRecebido = (all || []).reduce((s: number, r: any) => s + Number(r.valor || 0), 0);
-    const totalAlocado = (all || []).reduce((s: number, r: any) =>
-      s + (Array.isArray(r.itens) ? r.itens.reduce((a: number, it: any) => a + Number(it.valor || 0), 0) : 0), 0);
-    await supabase.from('party_candidates').update({
-      valorRecebido: totalRecebido, valorAlocado: totalAlocado, updatedAt: new Date().toISOString(),
-    }).eq('id', req.params.id);
-    broadcastTelao((party as any).id);
-
-    // Gatilho antifraude: se valor do repasse for "alto" OU candidato já tem
-    // score vermelho/amarelo, dispara orquestrador pro Auditor + Estrategista
-    // analisar o padrão. Threshold conservador (R$ 5k) — ajustável depois.
-    try {
-      const { data: cand } = await supabase.from('party_candidates')
-        .select('displayName, status').eq('id', req.params.id).maybeSingle();
-      const isHighValue = v >= 5000;
-      const isPending = (cand as any)?.status === 'pending';
-      if (isHighValue || isPending) {
-        fireOrchestration(supabase, {
-          campaignId: 'party:' + (party as any).id,
-          source: 'party_repasse_inserted',
-          intent: `Novo repasse de R$ ${v.toFixed(2)} para "${(cand as any)?.displayName || req.params.id}" ` +
-            `(status=${(cand as any)?.status}, total recebido=R$ ${totalRecebido.toFixed(2)}, alocado=R$ ${totalAlocado.toFixed(2)}). ` +
-            `Auditor de Fraudes avalia se há sinal de absorção/desvio; Estrategista revisa válvula de repasse atual e recomenda decisão (liberar/segurar/cortar).`,
-        });
-      }
-    } catch { /* gatilho é best-effort */ }
-
-    return res.json({ repasse: ins, total: totalRecebido, alocado: totalAlocado });
-  });
-
   // Prova visual de um candidato (presidente): comitê + check-ins COM as fotos.
   router.get('/candidates/:id/proof', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
@@ -822,9 +700,6 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
     const { data: checkins } = await supabase.from('party_checkins')
       .select('id, tipo, lat, lng, photo, nota, "createdAt"').eq('candidateId', req.params.id)
       .order('createdAt', { ascending: false }).limit(30);
-    const { data: valveLog } = await supabase.from('party_valve_log')
-      .select('decision, note, "createdAt"').eq('candidateId', req.params.id)
-      .order('createdAt', { ascending: false }).limit(10);
     // Assina as fotos (PATH no banco → URL temporária).
     const comPhotos: string[] = Array.isArray((committee as any)?.photos) && (committee as any).photos.length
       ? (committee as any).photos : ((committee as any)?.photo ? [(committee as any).photo] : []);
@@ -834,36 +709,18 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
       photos: (await Promise.all(comPhotos.map((p) => signPhoto(p)))).filter(Boolean),
     } : null;
     const checkinsSigned = await Promise.all((checkins || []).map(async (c: any) => ({ ...c, photo: await signPhoto(c.photo) })));
-    return res.json({ committee: committeeSigned, checkins: checkinsSigned, valveLog: valveLog || [] });
-  });
-
-  // Válvula de repasse: presidente libera / segura / corta + registra no log.
-  router.post('/candidates/:id/valve', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const party = await candidateOfPresident(userId, req.params.id);
-    if (!party) return res.status(404).json({ error: 'not_found' });
-    const decision = String(req.body?.decision || '');
-    if (!['liberado', 'retido', 'cortado'].includes(decision)) return res.status(400).json({ error: 'decision_invalida' });
-    const note = req.body?.note ? String(req.body.note).slice(0, 300) : null;
-    const now = new Date().toISOString();
-    await supabase.from('party_candidates').update({
-      repasseStatus: decision, valveNote: note, valveUpdatedAt: now, updatedAt: now,
-    }).eq('id', req.params.id);
-    await supabase.from('party_valve_log').insert({
-      partyId: (party as any).id, candidateId: req.params.id, decision, note, createdBy: userId,
-    });
-    return res.json({ ok: true, repasseStatus: decision });
+    return res.json({ committee: committeeSigned, checkins: checkinsSigned });
   });
 
   /**
-   * IA-Antifraude do Partido (#57). Cruza repasse + atividade + score de
-   * TODOS os candidatos do partido pra detectar padrões suspeitos:
-   *   • absorvendo recurso sem entregar (recebeu muito, score baixo, sem comitê)
-   *   • disparidade de produtividade (R$ / visita)
-   *   • inatividade prolongada apesar de repasses recentes
+   * IA-Auditoria de ESTRUTURA do Partido (#57). O partido NÃO movimenta mais
+   * dinheiro aqui — esta análise cruza ESTRUTURA (comitê) + ATIVIDADE (check-ins)
+   * + EQUIPE (coordenador/líderes) + score de TODOS os candidatos pra detectar:
+   *   • candidato sem comitê montado (recebeu o acesso mas não estruturou)
+   *   • inatividade: sem check-in há muito tempo (ou nunca)
+   *   • equipe vazia: sem coordenador/líderes
    * Saída: lista de alertas priorizada (alta/média/baixa) com justificativa
-   * e ação sugerida ao presidente (segurar, reduzir, manter).
+   * e ação sugerida ao presidente (cobrar, acompanhar, ok).
    */
   router.post('/antifraud-analysis', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
@@ -876,15 +733,14 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
     // Snapshot de cada candidato (dados QUE JÁ EXISTEM — sem precisar acumular)
     const { data: candidates, error } = await supabase
       .from('party_candidates')
-      .select('id, displayName, cargo, regiao, status, "valorRecebido", "valorAlocado", "repasseStatus", "valveNote"')
+      .select('id, displayName, cargo, regiao, status, "campaignId"')
       .eq('partyId', (party as any).id);
     if (error) return dbFail(res, error);
     if (!candidates || candidates.length === 0) {
       return res.json({ party: party.name, alerts: [], note: 'Sem candidatos pra analisar.' });
     }
 
-    // Sinais reais de ESTRUTURA (comitê) e ATIVIDADE (check-ins) — agora
-    // alimentam o score e o contexto da IA, pra pegar "recebeu mas não produz".
+    // Sinais reais de ESTRUTURA (comitê) e ATIVIDADE (check-ins).
     const candIds = candidates.map((c: any) => c.id);
     const committees: Record<string, any> = {};
     const checkinCount: Record<string, number> = {};
@@ -901,16 +757,29 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
       }
     }
 
+    // EQUIPE registrada (coordenador + líderes) por campanha — convites contam
+    // mesmo pendentes (estrutura declarada). Sem nenhum valor financeiro.
+    const campaignIds = candidates.map((c: any) => c.campaignId).filter(Boolean);
+    const teamByCamp: Record<string, { coord: number; lider: number }> = {};
+    if (campaignIds.length) {
+      const { data: invs } = await supabase.from('party_member_invites')
+        .select('"campaignId", role').in('campaignId', campaignIds).in('role', ['Coordenador', 'Líder']);
+      for (const m of invs || []) {
+        const k = (m as any).campaignId;
+        teamByCamp[k] = teamByCamp[k] || { coord: 0, lider: 0 };
+        if ((m as any).role === 'Coordenador') teamByCamp[k].coord++; else teamByCamp[k].lider++;
+      }
+    }
+
     const now = Date.now();
     const enriched = candidates.map((c: any) => {
       const com = committees[c.id];
+      const tm = (c.campaignId && teamByCamp[c.campaignId]) || { coord: 0, lider: 0 };
       const score = computeScore({
         status: c.status || 'pending',
         committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
         checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
-        coordCount: 0, leaderCount: 0,
-        valorRecebido: Number(c.valorRecebido || 0),
-        valorAlocado: Number(c.valorAlocado || 0),
+        coordCount: tm.coord, leaderCount: tm.lider,
       }, now);
       const lastCk = lastCheckinAt[c.id];
       const diasSemCheckin = lastCk ? Math.floor((now - new Date(lastCk).getTime()) / 86400000) : null;
@@ -918,69 +787,31 @@ João Silva  21999990000  joao@gmail.com  Niterói  RJ  Vereador
         ...c, score: score.score, scoreLevel: score.level, scoreReasons: score.reasons,
         temComite: !!(com && com.lat), comiteFoto: !!(com && com.photo),
         checkins: checkinCount[c.id] || 0, diasSemCheckin,
+        coord: tm.coord, lider: tm.lider,
       };
     });
 
-    // RECONCILIAÇÃO DE PAGAMENTOS DE EQUIPE (#151): cruza o que o CANDIDATO
-    // declarou PAGAR a cada membro (valorPago) com o que o MEMBRO declarou ter
-    // RECEBIDO (valorRecebido). Os dois têm que bater. Divergências = sinal forte.
-    const { data: invs } = await supabase.from('party_member_invites')
-      .select('candidateId, displayName, role, "valorPago", "valorRecebido"').eq('partyId', (party as any).id);
-    const teamByCand: Record<string, { membros: number; divergencias: { nome: string; pago: number; recebido: number; tipo: string }[]; totalPago: number; totalConfirmado: number }> = {};
-    for (const m of invs || []) {
-      const cid = (m as any).candidateId; if (!cid) continue;
-      const pago = Number((m as any).valorPago) || 0;
-      const recebido = Number((m as any).valorRecebido) || 0;
-      const t = teamByCand[cid] || (teamByCand[cid] = { membros: 0, divergencias: [], totalPago: 0, totalConfirmado: 0 });
-      t.membros++; t.totalPago += pago; t.totalConfirmado += recebido;
-      // Tipos de divergência:
-      let tipo = '';
-      if (pago > 0 && recebido > 0 && Math.abs(pago - recebido) > 0.005) tipo = 'valores_diferentes';
-      else if (recebido > 0 && pago <= 0) tipo = 'recebeu_sem_candidato_declarar';
-      // (pago>0 && recebido==0 = só aguardando confirmação do membro — não é fraude)
-      if (tipo) t.divergencias.push({ nome: (m as any).displayName, pago, recebido, tipo });
-    }
-    // Alertas determinísticos de divergência (independem do LLM) — sempre aparecem.
-    const teamAlerts = enriched.flatMap((c: any) => {
-      const t = teamByCand[c.id]; if (!t || !t.divergencias.length) return [];
-      const det = t.divergencias.slice(0, 4).map((d) =>
-        d.tipo === 'valores_diferentes'
-          ? `${d.nome}: candidato diz pagar R$${d.pago.toFixed(0)}, membro confirma R$${d.recebido.toFixed(0)}`
-          : `${d.nome}: confirmou receber R$${d.recebido.toFixed(0)} sem o candidato ter declarado`).join('; ');
-      return [{
-        candidateId: c.id, priority: 'alta', pattern: 'divergência_equipe',
-        justification: `Pagamentos à equipe não batem (${t.divergencias.length}): ${det}`.slice(0, 240),
-        suggested_action: 'investigar — conferir valores pagos × recebidos com o candidato e a equipe',
-      }];
-    });
+    const linhas = enriched.map((c, i) =>
+      `${i+1}. ${c.displayName} | cargo=${c.cargo || '?'} | regiao=${c.regiao || '?'} | comite=${c.temComite ? (c.comiteFoto ? 'sim+foto' : 'sim') : 'NÃO'} | checkins=${c.checkins}${c.diasSemCheckin != null ? ` (último há ${c.diasSemCheckin}d)` : ' (nunca)'} | equipe=coord:${c.coord}/lider:${c.lider} | score=${c.score} (${c.scoreLevel}) | status=${c.status}`
+    ).join('\n');
 
-    const linhas = enriched.map((c, i) => {
-      const t = teamByCand[c.id];
-      const equipe = t
-        ? ` | equipe=${t.membros} (pago R$${t.totalPago.toFixed(0)} × confirmado R$${t.totalConfirmado.toFixed(0)}${t.divergencias.length ? `, ${t.divergencias.length} DIVERGÊNCIA(S)` : ''})`
-        : '';
-      return `${i+1}. ${c.displayName} | cargo=${c.cargo || '?'} | regiao=${c.regiao || '?'} | recebido=R$${Number(c.valorRecebido||0).toFixed(0)} | alocado=R$${Number(c.valorAlocado||0).toFixed(0)} | comite=${c.temComite ? (c.comiteFoto ? 'sim+foto' : 'sim') : 'NÃO'} | checkins=${c.checkins}${c.diasSemCheckin != null ? ` (último há ${c.diasSemCheckin}d)` : ' (nunca)'} | score=${c.score} (${c.scoreLevel}) | status=${c.status} | valve=${c.repasseStatus||'liberado'}${equipe}`;
-    }).join('\n');
+    const system = `Você é o Auditor de Estrutura do Partido. O partido NÃO movimenta dinheiro — você avalia ESTRUTURA DE CAMPO e ATIVIDADE. Analise a lista de candidatos e detecte quem está deixando a desejar:
+- "sem_estrutura": candidato com cadastro concluído (status=active) mas comite=NÃO — recebeu o acesso e não montou o comitê.
+- "inatividade": muitos dias sem check-in (ou nunca) — estrutura parada.
+- "sem_equipe": sem coordenador (coord:0) e/ou poucos líderes — campo desmobilizado.
 
-    const system = `Você é o Auditor Antifraude do Partido. Analise a lista de candidatos e detecte padrões SUSPEITOS:
-- "absorção": recebeu R$ mas tem comite=NÃO e/ou alocado bem abaixo do recebido (dinheiro entrando sem estrutura/justificativa).
-- "disparidade": R$ muito acima dos pares do MESMO cargo sem atividade (check-ins) proporcional.
-- "inatividade": muitos dias sem check-in (ou nunca) apesar de ter recebido repasses.
-- "divergência_equipe": o valor que o candidato declara PAGAR à equipe não bate com o que o MEMBRO declara ter RECEBIDO (campo "equipe" mostra pago × confirmado). Os dois TÊM que ser iguais — diferença = sinal forte de desvio ou caixa dois.
-
-NÃO acuse sem evidência — cite os NÚMEROS (recebido, alocado, comitê, check-ins, dias, pago × confirmado). Sinais fortes:
-- comite=NÃO E recebido > 0 → absorção provável.
-- score vermelho E recebido > 0 E alocado < 30% do recebido → absorção.
-- recebido > 0 E (checkins=0 ou último há >30d) → inatividade.
-- equipe com DIVERGÊNCIA (pago ≠ confirmado) → divergência_equipe.
+NÃO acuse sem evidência — cite os NÚMEROS (comitê, check-ins, dias, coord/lider, score). Sinais fortes:
+- status=active E comite=NÃO → sem_estrutura.
+- checkins=0 ou último há >30d → inatividade.
+- coord:0 E lider:0 → sem_equipe.
 
 Retorne JSON estrito (sem markdown):
-{"alerts":[{"candidateId":"uuid","priority":"alta|media|baixa","pattern":"absorção|disparidade|inatividade|divergência_equipe|ok","justification":"≤200 chars com NÚMEROS","suggested_action":"segurar|reduzir|manter|investigar + frase ≤120 chars"}]}
+{"alerts":[{"candidateId":"uuid","priority":"alta|media|baixa","pattern":"sem_estrutura|inatividade|sem_equipe|ok","justification":"≤200 chars com NÚMEROS","suggested_action":"cobrar|acompanhar|ok + frase ≤120 chars"}]}
 
 Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
 
     try {
-      const ai = await callAgent(supabase, 'crm', `Audite estes ${enriched.length} candidatos do partido "${party.name}":\n\n${linhas}`, {
+      const ai = await callAgent(supabase, 'crm', `Audite a estrutura destes ${enriched.length} candidatos do partido "${party.name}":\n\n${linhas}`, {
         campaignId: 'party:' + party.id, // namespace pra agent_runs
         systemInstruction: system, complexity: 'balanced', maxTokens: 2000,
       });
@@ -989,16 +820,11 @@ Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
       if (start >= 0 && end > start) cleaned = cleaned.slice(start, end + 1);
       const parsed = JSON.parse(cleaned);
       const llmAlerts = Array.isArray(parsed?.alerts) ? parsed.alerts : [];
-      // Garante que as divergências de pagamento de equipe SEMPRE aparecem (não
-      // dependem do LLM): se o LLM não citou divergência_equipe pra um candidato,
-      // injeta o alerta determinístico.
-      const cobertos = new Set(llmAlerts.filter((a: any) => a?.pattern === 'divergência_equipe').map((a: any) => a.candidateId));
-      const extras = teamAlerts.filter((a) => !cobertos.has(a.candidateId));
       return res.json({
         party: party.name,
         analyzedAt: new Date().toISOString(),
         candidatesAnalyzed: enriched.length,
-        alerts: [...extras, ...llmAlerts],
+        alerts: llmAlerts,
       });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || 'ai_failed' });
@@ -1007,13 +833,12 @@ Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
 
   /**
    * Digest Semanal IA (#85). Sumário curto pro presidente com destaques
-   * da semana: movimentos do score, alertas de antifraude, sugestões. Tudo
-   * num único output JSON estruturado pra cards no painel.
+   * da semana de ESTRUTURA e ATIVIDADE (o partido não movimenta dinheiro):
+   * comitês montados, check-ins, saúde (score), quem está parado. Output JSON
+   * estruturado pra cards no painel.
    *
-   * Pra simplificar: snapshot atual + comparativo com 7 dias atrás (via
-   * valveUpdatedAt). NÃO é histórico real — apenas usa o que está no banco
-   * hoje. Funciona bem porque o presidente vai gerar 1× por semana e ver os
-   * movimentos desde a última vez que ele aprovou/segurou repasses.
+   * Snapshot atual + comparativo com o digest anterior (RAG). Funciona bem
+   * porque o presidente gera ~1× por semana e vê o que mudou na estrutura.
    */
   router.post('/digest-weekly', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
@@ -1024,7 +849,7 @@ Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
     try {
       const { data: candidates, error } = await supabase
         .from('party_candidates')
-        .select('id, displayName, cargo, regiao, status, "valorRecebido", "valorAlocado", "repasseStatus", "valveNote", "valveUpdatedAt"')
+        .select('id, displayName, cargo, regiao, status, "campaignId"')
         .eq('partyId', (party as any).id);
       if (error) throw error;
       if (!candidates || candidates.length === 0) {
@@ -1034,50 +859,81 @@ Inclua TODOS os candidatos (mesmo "ok"). Ordem decrescente por priority.`;
       const now = Date.now();
       const sevenDaysAgo = now - 7 * 86400000;
 
-      // Snapshot rule-based de cada candidato
+      // Sinais de estrutura (comitê) e atividade (check-ins).
+      const candIds = candidates.map((c: any) => c.id);
+      const committees: Record<string, any> = {};
+      const checkinCount: Record<string, number> = {};
+      const lastCheckinAt: Record<string, string> = {};
+      let checkinsSemana = 0;
+      if (candIds.length) {
+        const { data: coms } = await supabase.from('party_committees').select('candidateId, photo, lat, "geoSource"').in('candidateId', candIds);
+        for (const cm of coms || []) committees[(cm as any).candidateId] = cm;
+        const { data: cks } = await supabase.from('party_checkins').select('candidateId, "createdAt"').in('candidateId', candIds);
+        for (const ck of cks || []) {
+          const k = (ck as any).candidateId;
+          checkinCount[k] = (checkinCount[k] || 0) + 1;
+          const at = (ck as any).createdAt;
+          if (at && (!lastCheckinAt[k] || at > lastCheckinAt[k])) lastCheckinAt[k] = at;
+          if (at && new Date(at).getTime() > sevenDaysAgo) checkinsSemana++;
+        }
+      }
+
+      // Equipe registrada (coord/líderes) por campanha — convites contam.
+      const campaignIds = candidates.map((c: any) => c.campaignId).filter(Boolean);
+      const teamByCamp: Record<string, { coord: number; lider: number }> = {};
+      if (campaignIds.length) {
+        const { data: invs } = await supabase.from('party_member_invites')
+          .select('"campaignId", role').in('campaignId', campaignIds).in('role', ['Coordenador', 'Líder']);
+        for (const m of invs || []) {
+          const k = (m as any).campaignId;
+          teamByCamp[k] = teamByCamp[k] || { coord: 0, lider: 0 };
+          if ((m as any).role === 'Coordenador') teamByCamp[k].coord++; else teamByCamp[k].lider++;
+        }
+      }
+
+      // Snapshot rule-based de cada candidato (estrutura + atividade)
       const snap = candidates.map((c: any) => {
+        const com = committees[c.id];
+        const tm = (c.campaignId && teamByCamp[c.campaignId]) || { coord: 0, lider: 0 };
         const score = computeScore({
           status: c.status || 'pending',
-          committee: null, checkinCount: 0, lastCheckinAt: null,
-          coordCount: 0, leaderCount: 0,
-          valorRecebido: Number(c.valorRecebido || 0),
-          valorAlocado: Number(c.valorAlocado || 0),
+          committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
+          checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
+          coordCount: tm.coord, leaderCount: tm.lider,
         }, now);
-        const valveMexidaEstaSemana = c.valveUpdatedAt && new Date(c.valveUpdatedAt).getTime() > sevenDaysAgo;
+        const lastCk = lastCheckinAt[c.id];
+        const diasSemCheckin = lastCk ? Math.floor((now - new Date(lastCk).getTime()) / 86400000) : null;
         return {
           id: c.id, nome: c.displayName, cargo: c.cargo, regiao: c.regiao,
           status: c.status, score: score.score, level: score.level,
-          recebido: Number(c.valorRecebido || 0), alocado: Number(c.valorAlocado || 0),
-          repasse: c.repasseStatus || 'liberado',
-          valveSemanal: valveMexidaEstaSemana,
+          temComite: !!(com && com.lat), checkins: checkinCount[c.id] || 0, diasSemCheckin,
+          coord: tm.coord, lider: tm.lider,
         };
       });
 
       // Estatísticas pra contexto da IA (não joga snapshot bruto)
-      const totalReceived = snap.reduce((s, c) => s + c.recebido, 0);
-      const totalAllocated = snap.reduce((s, c) => s + c.alocado, 0);
       const greens = snap.filter((c) => c.level === 'green').length;
       const reds = snap.filter((c) => c.level === 'red').length;
-      const retidos = snap.filter((c) => c.repasse === 'retido').length;
-      const cortados = snap.filter((c) => c.repasse === 'cortado').length;
+      const comComite = snap.filter((c) => c.temComite).length;
+      const semComite = snap.filter((c) => c.status === 'active' && !c.temComite).length;
+      const inativos = snap.filter((c) => c.diasSemCheckin == null || (c.diasSemCheckin ?? 0) > 30).length;
 
       const linhas = snap.map((c, i) =>
-        `${i+1}. ${c.nome} (${c.cargo || '?'} | ${c.regiao || '?'}) | score=${c.score}/${c.level} | recebido=R$${c.recebido.toFixed(0)} | alocado=R$${c.alocado.toFixed(0)} | repasse=${c.repasse}${c.valveSemanal ? ' [decidido esta semana]' : ''}`
+        `${i+1}. ${c.nome} (${c.cargo || '?'} | ${c.regiao || '?'}) | score=${c.score}/${c.level} | comite=${c.temComite ? 'sim' : 'NÃO'} | checkins=${c.checkins}${c.diasSemCheckin != null ? ` (último há ${c.diasSemCheckin}d)` : ' (nunca)'} | equipe=coord:${c.coord}/lider:${c.lider}`
       ).join('\n');
 
-      const system = `Você é o Estrategista do Partido. Faça um DIGEST SEMANAL CURTO pro presidente.
+      const system = `Você é o Estrategista do Partido. Faça um DIGEST SEMANAL CURTO pro presidente sobre ESTRUTURA DE CAMPO e ATIVIDADE (o partido NÃO movimenta dinheiro — nunca cite valores em R$).
 
 CONTEXTO DA SEMANA:
-- ${snap.length} candidatos · ${greens} 🟢 · ${reds} 🔴 · ${retidos} retidos · ${cortados} cortados
-- R$ recebido total: R$${totalReceived.toFixed(0)} · alocado: R$${totalAllocated.toFixed(0)}
+- ${snap.length} candidatos · ${greens} 🟢 · ${reds} 🔴 · ${comComite} com comitê · ${semComite} sem comitê (já ativos) · ${inativos} parados · ${checkinsSemana} check-ins nos últimos 7 dias
 
 REGRAS:
-- summary: 2-3 frases. Tom executivo, direto. Diga o que mudou e o que importa.
+- summary: 2-3 frases. Tom executivo, direto. Diga o que mudou na estrutura e o que importa.
 - highlights: 3-6 cards de destaque (positivo OU negativo). Verbo no início, ≤140 chars. Tipos:
-  * 'subiu': candidato com score positivo notável
-  * 'caiu': candidato com problema (score vermelho, retido recente)
-  * 'risco': padrão de fraude potencial (recebeu muito, alocou pouco)
-  * 'destaque': multiplicador, marco superado, etc.
+  * 'subiu': candidato que avançou (montou comitê, voltou a fazer check-in, score subiu)
+  * 'caiu': candidato com problema (score vermelho, parou de fazer check-in)
+  * 'risco': sem estrutura (ativo sem comitê, sem equipe, sumido)
+  * 'destaque': marco superado, campo forte, etc.
 - actions: 2-4 ações concretas pro presidente FAZER essa semana. Verbo + objeto, ≤140 chars.
 
 Saída JSON estrito (sem markdown):
@@ -1086,7 +942,7 @@ Saída JSON estrito (sem markdown):
       // Busca o digest anterior no RAG pra IA poder COMPARAR (subiu/caiu desde
       // a última semana) em vez de gerar do zero. Namespace 'party:<id>'.
       const partyNs = 'party:' + (party as any).id;
-      const memoria = await retrieveContext(supabase, partyNs, 'digest semanal anterior estatísticas highlights');
+      const memoria = await retrieveContext(supabase, partyNs, 'digest semanal anterior estrutura highlights');
 
       const ai = await callAgent(supabase, 'strategist',
         `Candidatos do partido "${party.name}" (snapshot atual):\n\n${linhas}` +
@@ -1104,8 +960,7 @@ Saída JSON estrito (sem markdown):
       const result = {
         party: party.name,
         analyzedAt: new Date().toISOString(),
-        stats: { total: snap.length, greens, reds, retidos, cortados,
-                 totalReceived, totalAllocated },
+        stats: { total: snap.length, greens, reds, comComite, semComite, inativos, checkinsSemana },
         summary: typeof parsed?.summary === 'string' ? parsed.summary.slice(0, 500) : '',
         highlights: Array.isArray(parsed?.highlights) ? parsed.highlights.slice(0, 6) : [],
         actions: Array.isArray(parsed?.actions) ? parsed.actions.slice(0, 4) : [],
@@ -1113,7 +968,7 @@ Saída JSON estrito (sem markdown):
 
       // Persiste no RAG pra próxima execução comparar. Fire-and-forget.
       const digestText = `Digest ${result.analyzedAt}\n${result.summary}\n` +
-        `Stats: ${result.stats.greens} verdes, ${result.stats.reds} vermelhos, ${result.stats.retidos} retidos, ${result.stats.cortados} cortados.\n` +
+        `Stats: ${result.stats.greens} verdes, ${result.stats.reds} vermelhos, ${result.stats.comComite} com comitê, ${result.stats.semComite} sem comitê, ${result.stats.inativos} parados.\n` +
         `Highlights:\n${result.highlights.map((h: any) => `- [${h.type}] ${h.title}: ${h.body}`).join('\n')}\n` +
         `Ações sugeridas:\n${result.actions.map((a: any) => `- ${a}`).join('\n')}`;
       ingestArtifact(supabase, {
@@ -1175,7 +1030,6 @@ Saída JSON estrito (sem markdown):
       checkinCount: (checkins || []).length,
       lastCheckinAt: (checkins || [])[0]?.createdAt || null,
       coordCount: metaCoord, leaderCount: metaLider,
-      valorRecebido: Number(cand.valorRecebido) || 0, valorAlocado: Number(cand.valorAlocado) || 0,
     });
     const cPhotos: string[] = Array.isArray((committee as any)?.photos) && (committee as any).photos.length
       ? (committee as any).photos : ((committee as any)?.photo ? [(committee as any).photo] : []);
@@ -1250,72 +1104,6 @@ Saída JSON estrito (sem markdown):
     if (error) return dbFail(res, error);
     broadcastTelao(cand.partyId);
     return res.json({ checkin: data });
-  });
-
-  // ---- PRESTAÇÃO DE CONTAS DO CANDIDATO (#148) -------------------------------
-  // O candidato (e só ele) presta contas de COMO aplicou cada repasse que
-  // recebeu. O valor + data do repasse são do presidente e IMUTÁVEIS — aqui o
-  // candidato só preenche/edita o rateio (itens). O presidente vê isso em modo
-  // leitura no Centro de Comando, sem poder alterar.
-  const repasseAlocado = (r: any): number =>
-    Array.isArray(r?.itens) ? r.itens.reduce((a: number, it: any) => a + Number(it.valor || 0), 0) : 0;
-
-  // Lista os repasses recebidos pelo candidato logado (pra ele prestar contas).
-  router.get('/candidate/repasses', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const cand = await myCandidate(userId);
-    if (!cand) return res.status(404).json({ error: 'not_found' });
-    const { data } = await supabase.from('party_repasses')
-      .select('id, valor, data, descricao, itens, "createdAt"')
-      .eq('candidateId', cand.id).order('data', { ascending: false, nullsFirst: false });
-    const repasses = (data || []).map((r: any) => {
-      const alocado = repasseAlocado(r);
-      return { ...r, alocado, restante: Math.max(0, Number(r.valor || 0) - alocado) };
-    });
-    return res.json({ repasses });
-  });
-
-  // O candidato define/edita o rateio de UM repasse que recebeu. Sobrescreve a
-  // lista inteira de itens (o front gerencia add/editar/excluir e manda o array
-  // final). Valor e data do repasse NÃO são tocados aqui.
-  router.patch('/candidate/repasses/:id', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const cand = await myCandidate(userId);
-    if (!cand) return res.status(404).json({ error: 'not_found' });
-    // Garante que o repasse é deste candidato (escopo + posse).
-    const { data: rep } = await supabase.from('party_repasses')
-      .select('id, valor').eq('id', req.params.id).eq('candidateId', cand.id).maybeSingle();
-    if (!rep) return res.status(404).json({ error: 'repasse_nao_encontrado' });
-
-    const itensRaw = (req.body || {}).itens;
-    const itens = Array.isArray(itensRaw)
-      ? itensRaw.map((i: any) => ({
-          categoria: String(i.categoria || '').slice(0, 60),
-          valor: Number(i.valor) || 0,
-          descricao: i.descricao ? String(i.descricao).slice(0, 200) : undefined,
-        })).filter((i: any) => i.categoria && i.valor > 0)
-      : [];
-    // Trava de sanidade: o aplicado não pode exceder o valor recebido.
-    const totalItens = itens.reduce((s: number, it: any) => s + it.valor, 0);
-    if (totalItens > Number((rep as any).valor) + 0.005) {
-      return res.status(400).json({ error: 'aplicado_excede_recebido', detail: 'A soma da aplicação não pode passar do valor recebido neste repasse.' });
-    }
-
-    const { error } = await supabase.from('party_repasses')
-      .update({ itens }).eq('id', req.params.id);
-    if (error) return dbFail(res, error);
-
-    // Recalcula o cache valorAlocado do candidato (soma de todos os repasses).
-    const { data: all } = await supabase.from('party_repasses').select('valor, itens').eq('candidateId', cand.id);
-    const totalAlocado = (all || []).reduce((s: number, r: any) => s + repasseAlocado(r), 0);
-    await supabase.from('party_candidates')
-      .update({ valorAlocado: totalAlocado, updatedAt: new Date().toISOString() }).eq('id', cand.id);
-    broadcastTelao(cand.partyId);
-
-    const alocado = totalItens;
-    return res.json({ ok: true, itens, alocado, restante: Math.max(0, Number((rep as any).valor) - alocado) });
   });
 
   // ---- Lado do COORDENADOR / LÍDER (ferramentas leves de campo, #83) ----
@@ -1405,14 +1193,12 @@ Saída JSON estrito (sem markdown):
     if (!allowed || !allowed.length || !campaignId) {
       return res.status(403).json({ error: 'nao_pode_convidar', detail: 'Seu perfil não pode convidar membros de equipe aqui.' });
     }
-    const { displayName, phone, bairro, valorPago, dataPago, role: roleReq } = req.body || {};
+    const { displayName, phone, bairro, role: roleReq } = req.body || {};
     // Papel pedido precisa estar entre os permitidos pra quem convida; senão, o 1º.
     const role = allowed.includes(roleReq) ? roleReq : allowed[0];
     const nome = String(displayName || '').trim().slice(0, 160);
     if (!nome) return res.status(400).json({ error: 'nome_obrigatorio' });
     const tel = String(phone || '').replace(/\D/g, '').slice(0, 20) || null;
-    const vPago = parseBRL(valorPago);
-    const dPago = /^\d{4}-\d{2}-\d{2}$/.test(String(dataPago || '')) ? dataPago : null;
     // Contexto do candidato (mesma campanha) — pra exibir nome do candidato/partido.
     const { data: cand } = await supabase.from('party_candidates')
       .select('id, "partyId"').eq('campaignId', campaignId).maybeSingle();
@@ -1421,26 +1207,23 @@ Saída JSON estrito (sem markdown):
       token, campaignId, partyId: (cand as any)?.partyId ?? null, candidateId: (cand as any)?.id ?? null,
       invitedBy: userId, displayName: nome, phone: tel, role, status: 'pending',
       bairro: bairro ? String(bairro).trim().slice(0, 120) : null,
-      valorPago: vPago > 0 ? vPago : null, dataPago: dPago,
-    }).select('token, "displayName", phone, role, status, bairro, "valorPago", "dataPago", "valorRecebido", "dataRecebido", "createdAt"').single();
+    }).select('token, "displayName", phone, role, status, bairro, "createdAt"').single();
     if (error) return dbFail(res, error);
     return res.json({ invite: data, role });
   });
 
-  // Candidato edita os dados/pagamento de um membro que ele convidou.
+  // Candidato edita os dados de um membro que ele convidou.
   router.patch('/member-invites/:token', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const { data: inv } = await supabase.from('party_member_invites')
       .select('id').eq('token', req.params.token).eq('invitedBy', userId).maybeSingle();
     if (!inv) return res.status(404).json({ error: 'not_found' });
-    const { displayName, phone, bairro, valorPago, dataPago } = req.body || {};
+    const { displayName, phone, bairro } = req.body || {};
     const patch: any = { updatedAt: new Date().toISOString() };
     if (displayName !== undefined) patch.displayName = String(displayName).trim().slice(0, 160);
     if (phone !== undefined) patch.phone = String(phone).replace(/\D/g, '').slice(0, 20) || null;
     if (bairro !== undefined) patch.bairro = bairro ? String(bairro).trim().slice(0, 120) : null;
-    if (valorPago !== undefined) { const v = parseBRL(valorPago); patch.valorPago = v > 0 ? v : null; }
-    if (dataPago !== undefined) patch.dataPago = /^\d{4}-\d{2}-\d{2}$/.test(String(dataPago || '')) ? dataPago : null;
     const { error } = await supabase.from('party_member_invites').update(patch).eq('id', (inv as any).id);
     if (error) return dbFail(res, error);
     return res.json({ ok: true });
@@ -1451,7 +1234,7 @@ Saída JSON estrito (sem markdown):
     const userType = (req as any).user?.userType;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const { data } = await supabase.from('party_member_invites')
-      .select('token, "displayName", phone, role, status, bairro, "valorPago", "dataPago", "valorRecebido", "dataRecebido", "createdAt"')
+      .select('token, "displayName", phone, role, status, bairro, "createdAt"')
       .eq('invitedBy', userId).order('createdAt', { ascending: false });
     const allowed = ALLOWED_ROLES[userType] || [];
     return res.json({ invites: data || [], canInvite: allowed.length > 0, allowedRoles: allowed });
@@ -1469,156 +1252,6 @@ Saída JSON estrito (sem markdown):
     const { error } = await supabase.from('party_member_invites').delete().eq('id', (inv as any).id);
     if (error) return dbFail(res, error);
     return res.json({ ok: true });
-  });
-
-  // Lado do MEMBRO: vê o que quem o convidou declarou pagar + declara o que recebeu.
-  router.get('/member/payment', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const { data } = await supabase.from('party_member_invites')
-      .select('role, bairro, "valorPago", "dataPago", "valorRecebido", "dataRecebido"')
-      .eq('userId', userId).order('createdAt', { ascending: false }).limit(1).maybeSingle();
-    return res.json({ payment: data || null });
-  });
-
-  router.patch('/member/payment', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const { data: row } = await supabase.from('party_member_invites')
-      .select('id').eq('userId', userId).order('createdAt', { ascending: false }).limit(1).maybeSingle();
-    if (!row) return res.status(404).json({ error: 'sem_vinculo' });
-    const { valorRecebido, dataRecebido } = req.body || {};
-    const patch: any = { updatedAt: new Date().toISOString() };
-    const v = parseBRL(valorRecebido);
-    patch.valorRecebido = v > 0 ? v : null;
-    patch.dataRecebido = /^\d{4}-\d{2}-\d{2}$/.test(String(dataRecebido || '')) ? dataRecebido : null;
-    const { error } = await supabase.from('party_member_invites').update(patch).eq('id', (row as any).id);
-    if (error) return dbFail(res, error);
-    return res.json({ ok: true });
-  });
-
-  // ── EDITAR/EXCLUIR repasse ─────────────────────────────────────────────
-  // IMUTABILIDADE: uma vez registrado, repasse NÃO pode ser editado nem
-  // excluído. Para acerto contábil, presidente cria um NOVO repasse (positivo
-  // ou negativo). Trava no banco preserva integridade da prestação de contas.
-  router.patch('/repasses/:id', async (_req: Request, res: Response) => {
-    return res.status(403).json({
-      error: 'repasse_imutavel',
-      detail: 'Repasse registrado não pode ser editado. Crie um NOVO repasse de ajuste (valor positivo ou negativo) — fica no histórico.',
-    });
-  });
-
-  router.delete('/repasses/:id', async (_req: Request, res: Response) => {
-    return res.status(403).json({
-      error: 'repasse_imutavel',
-      detail: 'Repasse registrado não pode ser excluído. Para anular, lance um NOVO repasse com valor negativo de mesmo montante.',
-    });
-  });
-
-  // ── REPASSE RECORRENTE (#147) ──────────────────────────────────────────
-  // POST cria um modelo recorrente (em vez de lançar 1 repasse só).
-  router.post('/candidates/:id/recurring-repasses', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const party = await candidateOfPresident(userId, req.params.id);
-    if (!party) return res.status(404).json({ error: 'not_found' });
-
-    const { valor, descricao, frequencia, proximaData, dataFim } = req.body || {};
-    const v = Number(valor);
-    if (!(v > 0)) return res.status(400).json({ error: 'valor_invalido' });
-    const freq = ['mensal', 'quinzenal', 'semanal'].includes(frequencia) ? frequencia : 'mensal';
-    const prox = /^\d{4}-\d{2}-\d{2}$/.test(proximaData || '') ? proximaData : new Date().toISOString().slice(0, 10);
-
-    const { data, error } = await supabase.from('party_recurring_repasses').insert({
-      partyId: (party as any).id, candidateId: req.params.id, valor: v,
-      descricao: descricao?.trim() || null, frequencia: freq,
-      proximaData: prox, dataFim: /^\d{4}-\d{2}-\d{2}$/.test(dataFim || '') ? dataFim : null,
-      ativo: true, createdBy: userId,
-    }).select('*').single();
-    if (error) return dbFail(res, error);
-    return res.json({ recurring: data });
-  });
-
-  // GET lista os recorrentes do partido (com nome do candidato).
-  router.get('/recurring-repasses', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const party = await partyOf(userId);
-    if (!party) return res.json({ recurring: [] });
-    const { data: recs } = await supabase.from('party_recurring_repasses')
-      .select('*').eq('partyId', party.id).order('createdAt', { ascending: false });
-    const { data: cands } = await supabase.from('party_candidates')
-      .select('id, displayName').eq('partyId', party.id);
-    const nameById: Record<string, string> = {};
-    (cands || []).forEach((c: any) => { nameById[c.id] = c.displayName; });
-    const recurring = (recs || []).map((r: any) => ({ ...r, candidateName: nameById[r.candidateId] || '—' }));
-    return res.json({ recurring });
-  });
-
-  // PATCH pausar/reativar; DELETE cancelar.
-  router.patch('/recurring-repasses/:id', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const party = await partyOf(userId);
-    if (!party) return res.status(404).json({ error: 'not_found' });
-    const patch: any = { updatedAt: new Date().toISOString() };
-    if (typeof (req.body || {}).ativo === 'boolean') patch.ativo = (req.body as any).ativo;
-    if ((req.body || {}).valor !== undefined) { const v = Number((req.body as any).valor); if (v > 0) patch.valor = v; }
-    const { error } = await supabase.from('party_recurring_repasses')
-      .update(patch).eq('id', req.params.id).eq('partyId', party.id);
-    if (error) return dbFail(res, error);
-    return res.json({ ok: true });
-  });
-
-  router.delete('/recurring-repasses/:id', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const party = await partyOf(userId);
-    if (!party) return res.status(404).json({ error: 'not_found' });
-    await supabase.from('party_recurring_repasses').delete().eq('id', req.params.id).eq('partyId', party.id);
-    return res.json({ ok: true });
-  });
-
-  // ── RELATÓRIO DE REPASSES (#144) — agregado do partido pra impressão ──
-  router.get('/repasses-report', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    const userType = (req as any).user?.userType;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
-      return res.status(403).json({ error: 'apenas_presidente' });
-    }
-    const party = await partyOf(userId);
-    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
-
-    const { data: cands } = await supabase.from('party_candidates')
-      .select('id, displayName, cargo, regiao, estado').eq('partyId', party.id);
-    const candMap: Record<string, any> = {};
-    (cands || []).forEach((c: any) => { candMap[c.id] = c; });
-
-    const { data: reps } = await supabase.from('party_repasses')
-      .select('valor, data, descricao, candidateId, itens')
-      .eq('partyId', party.id).order('data', { ascending: false, nullsFirst: false });
-
-    const items = (reps || []).map((r: any) => {
-      const c = candMap[r.candidateId] || {};
-      return {
-        candidato: c.displayName || '—',
-        cargo: c.cargo || '',
-        regiao: [c.regiao, c.estado].filter(Boolean).join('/'),
-        valor: Number(r.valor) || 0,
-        data: r.data || null,
-        descricao: r.descricao || '',
-      };
-    });
-    const totalGeral = items.reduce((s: number, i: any) => s + i.valor, 0);
-
-    return res.json({
-      partyName: party.name,
-      geradoEm: new Date().toISOString(),
-      totalGeral,
-      totalRepasses: items.length,
-      items,
-    });
   });
 
   // ── BACKUP EM UNIDADE EXTERNA (#147c) ──────────────────────────────────
@@ -1641,34 +1274,25 @@ Saída JSON estrito (sem markdown):
     const candIds = (candidates || []).map((c: any) => c.id);
     const inIds = candIds.length ? candIds : ['00000000-0000-0000-0000-000000000000'];
 
-    const [repassesQ, recurringQ, committeesQ, checkinsQ, valveLogQ] = await Promise.all([
-      supabase.from('party_repasses').select('*').eq('partyId', party.id),
-      supabase.from('party_recurring_repasses').select('*').eq('partyId', party.id),
+    const [committeesQ, checkinsQ] = await Promise.all([
       supabase.from('party_committees').select('*').in('candidateId', inIds),
       supabase.from('party_checkins').select('*').in('candidateId', inIds),
-      supabase.from('party_valve_log').select('*').in('candidateId', inIds),
     ]);
 
     const payload = {
       schema: 'campanhapro.party-backup',
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       party: { id: party.id, name: party.name },
       counts: {
         candidatos: (candidates || []).length,
-        repasses: (repassesQ.data || []).length,
-        recorrentes: (recurringQ.data || []).length,
         comites: (committeesQ.data || []).length,
         checkins: (checkinsQ.data || []).length,
-        valvula: (valveLogQ.data || []).length,
       },
       data: {
         candidatos: candidates || [],
-        repasses: repassesQ.data || [],
-        repassesRecorrentes: recurringQ.data || [],
         comites: committeesQ.data || [],
         checkins: checkinsQ.data || [],
-        valvulaLog: valveLogQ.data || [],
       },
     };
     return res.json(payload);
@@ -1704,36 +1328,19 @@ Saída JSON estrito (sem markdown):
       return out;
     };
     const now = new Date().toISOString();
-    const restored = { candidatos: 0, repasses: 0, recorrentes: 0, comites: 0, checkins: 0, valvula: 0 };
+    const restored = { candidatos: 0, comites: 0, checkins: 0 };
 
     try {
       // Candidatos — remapeia pro partido atual, restaura como pendente (sem conta).
       const candidatos = cap(d.candidatos).map((c: any) => ({
         ...pick(c, ['id', 'displayName', 'cargo', 'regiao', 'estado', 'phone',
-          'valorRecebido', 'valorAlocado', 'repasseStatus', 'valveNote', 'metadata', 'createdAt']),
+          'metadata', 'createdAt']),
         partyId: party.id, status: 'pending', userId: null, campaignId: null,
         inviteToken: newToken(), updatedAt: now,
       }));
       if (candidatos.length) {
         const { data } = await supabase.from('party_candidates').upsert(candidatos, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.candidatos = (data || []).length;
-      }
-      const repasses = cap(d.repasses).map((r: any) => ({
-        ...pick(r, ['id', 'candidateId', 'valor', 'data', 'destino', 'descricao', 'itens', 'createdAt']),
-        partyId: party.id, createdBy: userId,
-      }));
-      if (repasses.length) {
-        const { data } = await supabase.from('party_repasses').upsert(repasses, { onConflict: 'id', ignoreDuplicates: true }).select('id');
-        restored.repasses = (data || []).length;
-      }
-      const recorrentes = cap(d.repassesRecorrentes).map((r: any) => ({
-        ...pick(r, ['id', 'candidateId', 'valor', 'descricao', 'frequencia', 'proximaData',
-          'dataFim', 'ativo', 'pausadoPelaValvula', 'lastRunAt', 'totalLancado', 'createdAt']),
-        partyId: party.id, createdBy: userId,
-      }));
-      if (recorrentes.length) {
-        const { data } = await supabase.from('party_recurring_repasses').upsert(recorrentes, { onConflict: 'id', ignoreDuplicates: true }).select('id');
-        restored.recorrentes = (data || []).length;
       }
       const comites = cap(d.comites).map((c: any) => ({
         ...pick(c, ['id', 'candidateId', 'address', 'lat', 'lng', 'photo', 'photos', 'geoSource', 'createdAt', 'updatedAt']),
@@ -1751,14 +1358,6 @@ Saída JSON estrito (sem markdown):
         const { data } = await supabase.from('party_checkins').upsert(checkins, { onConflict: 'id', ignoreDuplicates: true }).select('id');
         restored.checkins = (data || []).length;
       }
-      const valvula = cap(d.valvulaLog).map((v: any) => ({
-        ...pick(v, ['id', 'candidateId', 'decision', 'note', 'createdAt']),
-        partyId: party.id, createdBy: userId,
-      }));
-      if (valvula.length) {
-        const { data } = await supabase.from('party_valve_log').upsert(valvula, { onConflict: 'id', ignoreDuplicates: true }).select('id');
-        restored.valvula = (data || []).length;
-      }
       return res.json({ ok: true, restored });
     } catch (err: any) {
       console.error('[party] restore:', err);
@@ -1766,49 +1365,7 @@ Saída JSON estrito (sem markdown):
     }
   });
 
-  // ── ORB CONVERSACIONAL (#142) — IA consultiva (só LEITURA nesta fase) ──
-  // Lançamento em lote: cria registros de repasse para candidatos que têm
-  // valorRecebido > 0 mas nenhum registro em party_repasses (backfill de
-  // candidatos importados antes da criação automática de repasses).
-  router.post('/batch-repasses', async (req: Request, res: Response) => {
-    const userId = (req as any).user?.id;
-    const userType = (req as any).user?.userType;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (userType !== 'Presidente de Partido' && !(req as any).user?.isSupremeAdmin) {
-      return res.status(403).json({ error: 'apenas_presidente' });
-    }
-    const party = await partyOf(userId);
-    if (!party) return res.status(404).json({ error: 'partido_nao_encontrado' });
-
-    const { data: allCands } = await supabase.from('party_candidates')
-      .select('id, displayName, valorRecebido').eq('partyId', party.id);
-    const withValor = (allCands || []).filter((c: any) => Number(c.valorRecebido) > 0);
-    if (!withValor.length) return res.json({ created: 0, totalValue: 0 });
-
-    const ids = withValor.map((c: any) => c.id);
-    const { data: existingRepasses } = await supabase.from('party_repasses')
-      .select('candidateId').in('candidateId', ids);
-    const idsWithRepasse = new Set((existingRepasses || []).map((r: any) => r.candidateId));
-    const pending = withValor.filter((c: any) => !idsWithRepasse.has(c.id));
-    if (!pending.length) return res.json({ created: 0, totalValue: 0 });
-
-    const hojeIso = new Date().toISOString().slice(0, 10);
-    const rows = pending.map((c: any) => ({
-      partyId: party.id,
-      candidateId: c.id,
-      valor: Number(c.valorRecebido),
-      data: hojeIso,
-      descricao: 'Repasse registrado em lote (backfill)',
-      createdBy: userId,
-    }));
-    const { error } = await supabase.from('party_repasses').insert(rows);
-    if (error) return dbFail(res, error);
-
-    const totalValue = rows.reduce((s, r) => s + r.valor, 0);
-    return res.json({ created: rows.length, totalValue });
-  });
-
-  //
+  // ── ORB CONVERSACIONAL (#142) — IA consultiva (só LEITURA) ──
   // Histórico de mensagens da IA — carrega as últimas N pro chat não zerar no refresh.
   router.get('/ai/messages', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id;
@@ -1851,63 +1408,42 @@ Saída JSON estrito (sem markdown):
       const nomePresidente = String((presidente as any)?.name || '').trim();
       const primeiroNome = nomePresidente.split(/\s+/)[0] || '';
 
-      // 1. Snapshot determinístico do partido (escopado por partyId)
+      // 1. Snapshot determinístico do partido (escopado por partyId). SEM dinheiro:
+      // o partido não movimenta valores — o foco é estrutura de campo.
       const { data: cands } = await supabase.from('party_candidates')
-        .select('id, displayName, cargo, regiao, estado, status, valorRecebido, repasseStatus')
-        .eq('partyId', party.id).order('valorRecebido', { ascending: false });
+        .select('id, displayName, cargo, regiao, estado, status')
+        .eq('partyId', party.id).order('displayName', { ascending: true });
       const candidates = cands || [];
-      const totalRepassado = candidates.reduce((s: number, c: any) => s + (Number(c.valorRecebido) || 0), 0);
       const cadastrados = candidates.filter((c: any) => c.status === 'active').length;
       const pendentes = candidates.filter((c: any) => c.status === 'pending').length;
 
-      // Conta repasses por candidato (pra IA identificar quem tem múltiplos
-      // formulários de prestação de contas). Repasses são imutáveis — múltiplos
-      // = histórico de acertos contábeis legítimos.
-      const { data: allRepasses } = await supabase.from('party_repasses')
-        .select('candidateId').eq('partyId', party.id);
-      const countByCand: Record<string, number> = {};
-      for (const r of allRepasses || []) {
-        const id = (r as any).candidateId;
-        if (id) countByCand[id] = (countByCand[id] || 0) + 1;
+      // Sinais de ESTRUTURA: comitê montado + nº de check-ins por candidato.
+      const candIds = candidates.map((c: any) => c.id);
+      const temComite: Record<string, boolean> = {};
+      const checkinsByCand: Record<string, number> = {};
+      if (candIds.length) {
+        const { data: coms } = await supabase.from('party_committees').select('candidateId, lat').in('candidateId', candIds);
+        for (const cm of coms || []) if ((cm as any).lat) temComite[(cm as any).candidateId] = true;
+        const { data: cks } = await supabase.from('party_checkins').select('candidateId').in('candidateId', candIds);
+        for (const ck of cks || []) {
+          const id = (ck as any).candidateId;
+          if (id) checkinsByCand[id] = (checkinsByCand[id] || 0) + 1;
+        }
       }
+      const comComite = Object.keys(temComite).length;
 
-      const { data: repasses } = await supabase.from('party_repasses')
-        .select('valor, data, descricao, candidateId')
-        .eq('partyId', party.id).order('data', { ascending: false }).limit(15);
-
-      const candById: Record<string, string> = {};
-      candidates.forEach((c: any, i: number) => { candById[i] = c.displayName; });
-      const candNameByRepasse = async () => {
-        // mapeia candidateId → nome (1 query extra leve)
-        const ids = [...new Set((repasses || []).map((r: any) => r.candidateId).filter(Boolean))];
-        if (!ids.length) return {} as Record<string, string>;
-        const { data } = await supabase.from('party_candidates').select('id, displayName').in('id', ids);
-        const m: Record<string, string> = {};
-        (data || []).forEach((c: any) => { m[c.id] = c.displayName; });
-        return m;
-      };
-      const repMap = await candNameByRepasse();
-
-      const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
       const statusLabel = (s: string) => s === 'active' ? 'cadastro concluído' : s === 'pending' ? 'cadastro pendente' : (s || '—');
       const local = (c: any) => [c.regiao, c.estado].filter(Boolean).join('/') || 's/local';
       const snapshot = [
         `PARTIDO: ${party.name}`,
         `Candidatos: ${candidates.length} (${cadastrados} com cadastro concluído, ${pendentes} com cadastro pendente)`,
-        `Total repassado: ${brl(totalRepassado)}`,
+        `Estrutura: ${comComite} com comitê montado`,
         ``,
         `LEGENDA DE STATUS: "active" = cadastro concluído (já criou acesso/senha); "pending" = cadastro pendente (ainda não concluiu — o convite foi enviado mas ele não criou o acesso).`,
         ``,
-        `CANDIDATOS (nome | cargo | cidade/UF | status | valor recebido | nº repasses):`,
-        ...candidates.slice(0, 120).map((c: any) => {
-          const n = countByCand[c.id] || 0;
-          const repColumn = n > 1 ? `${n} repasses (múltiplos formulários)` : `${n} repasse`;
-          return `- ${c.displayName} | ${c.cargo || 's/cargo'} | ${local(c)} | ${statusLabel(c.status)} | ${brl(Number(c.valorRecebido) || 0)} | ${repColumn}`;
-        }),
-        ``,
-        `REPASSES RECENTES (data · valor · candidato · descrição):`,
-        ...(repasses || []).map((r: any) =>
-          `- ${r.data} · ${brl(Number(r.valor) || 0)} · ${repMap[r.candidateId] || '?'} · ${r.descricao || 's/descrição'}`),
+        `CANDIDATOS (nome | cargo | cidade/UF | status | comitê | check-ins):`,
+        ...candidates.slice(0, 120).map((c: any) =>
+          `- ${c.displayName} | ${c.cargo || 's/cargo'} | ${local(c)} | ${statusLabel(c.status)} | comitê: ${temComite[c.id] ? 'sim' : 'NÃO'} | ${checkinsByCand[c.id] || 0} check-in(s)`),
       ].join('\n');
 
       // 1b. Carrega o histórico recente de conversas pra dar contexto ao Gemini
@@ -1917,10 +1453,10 @@ Saída JSON estrito (sem markdown):
       const historyLines = (recentMsgs || []).reverse().map((m: any) =>
         `${m.role === 'user' ? 'PRESIDENTE' : 'ASSISTENTE'}: ${String(m.text).slice(0, 400)}`);
 
-      // 2. Gemini interpreta — retorna JSON estruturado (consulta OU intenção de lançar repasse)
+      // 2. Gemini interpreta — retorna JSON estruturado (consulta OU ação de candidato)
       const geminiKey = process.env.GEMINI_API_KEY;
       if (!geminiKey) {
-        return res.json({ intent: 'consulta', message: 'A IA está temporariamente indisponível. Total repassado: ' + brl(totalRepassado) + ' entre ' + candidates.length + ' candidatos.', draft: null });
+        return res.json({ intent: 'consulta', message: `A IA está temporariamente indisponível. ${candidates.length} candidatos cadastrados (${comComite} com comitê).`, draft: null });
       }
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(geminiKey);
@@ -1935,41 +1471,35 @@ Saída JSON estrito (sem markdown):
       const hojeIso = new Date().toISOString().slice(0, 10);
       const prompt = `Você é o assistente do Centro de Comando do partido, falando com o PRESIDENTE${primeiroNome ? ` (nome: ${primeiroNome})` : ''}.
 
-VOCÊ EXECUTA AÇÕES — não é só consulta. Você consegue, COM CONFIRMAÇÃO do presidente: lançar repasse (individual ou em lote), cadastrar/excluir candidato e gerar relatório. NUNCA diga que "não consegue abrir formulário", "não consegue preencher valores" ou "use os botões" para essas tarefas — você FAZ. O "formulário de repasse" de um candidato você preenche através da intenção "lancar_repasse". ATENÇÃO: repasse já registrado é IMUTÁVEL — você NÃO edita nem exclui repasse; para ajustar, oriente o presidente a lançar um NOVO repasse (positivo para acréscimo, negativo para estorno).
+VOCÊ EXECUTA AÇÕES — não é só consulta. Você consegue, COM CONFIRMAÇÃO do presidente: cadastrar e excluir candidato. NUNCA diga que "não consegue cadastrar" ou "use os botões" para essas tarefas — você FAZ. IMPORTANTE: este partido NÃO movimenta dinheiro — não existe repasse, valor, prestação de contas nem relatório financeiro. Se o presidente pedir qualquer coisa de dinheiro (lançar/repassar valor, repasse, prestação de contas, relatório de repasses), use intent="acao_nao_suportada" e explique gentilmente que o módulo do partido não controla valores — o foco é estrutura de campo (comitês, equipe, check-ins).
 
 ${primeiroNome ? `PERSONALIZAÇÃO: chame o presidente pelo primeiro nome ("${primeiroNome}") de forma natural — na saudação e em confirmações. Não repita o nome em toda frase; soe humano, não robótico.\n` : ''}
 Responda SEMPRE em JSON válido (nada fora do JSON):
 {
-  "intent": "consulta" | "lancar_repasse" | "lancar_repasse_lote" | "editar_repasse" | "excluir_repasse" | "criar_candidato" | "excluir_candidato" | "gerar_relatorio" | "ajuda" | "acao_nao_suportada",
+  "intent": "consulta" | "criar_candidato" | "excluir_candidato" | "ajuda" | "acao_nao_suportada",
   "message": "texto curto pro presidente",
-  "draft": null OU { "candidateName": "nome citado", "valor": numero_em_reais, "descricao": "finalidade", "cargo": "cargo se citado", "regiao": "cidade se citada", "estado": "UF se citada", "phone": "telefone se citado" }
+  "draft": null OU { "candidateName": "nome citado", "cargo": "cargo se citado", "regiao": "cidade se citada", "estado": "UF se citada", "phone": "telefone se citado" }
 }
 
 REGRAS:
-- "consulta": o presidente pergunta/pede pra ORGANIZAR, LISTAR, FILTRAR ou ORDENAR dados. Responda em "message" usando APENAS o snapshot abaixo (nunca invente valor/nome/data). draft = null.
-- "lancar_repasse": LANÇAR/ADICIONAR/REPASSAR/REGISTRAR um valor a um candidato — INCLUINDO quando o presidente disser "abre/preenche o formulário de repasse do Fulano com X", "registra o repasse de X pro Fulano", "coloca o valor de X no repasse do Fulano". Tudo isso é lancar_repasse. Extraia candidateName, valor, descricao e data (se citada; formato YYYY-MM-DD). Se faltar valor ou candidato, use "consulta" e peça o que falta com um exemplo.
-- "lancar_repasse_lote": LANÇAR REPASSES EM LOTE / pra TODOS / pra vários candidatos / "lança os repasses dos importados" / "preenche os repasses de todos". Quando o presidente pedir algo em massa (todos os candidatos, os que já têm valor, os importados), use esta intenção. draft = null. A mensagem deve pedir confirmação com o total de candidatos e valor.
-- "editar_repasse": IGNORE essa intenção — repasses registrados são IMUTÁVEIS por compliance. Se o presidente pedir pra editar/alterar/corrigir um repasse, use intent="acao_nao_suportada" e message="Repasse já registrado não pode ser editado (regra de prestação de contas). Pra ajustar, lance um NOVO repasse — pode ser positivo (acréscimo) ou negativo (estorno) — e ele entra no histórico."
-- "excluir_repasse": IGNORE essa intenção — repasses registrados são IMUTÁVEIS. Se o presidente pedir pra excluir/apagar/remover/cancelar um repasse, use intent="acao_nao_suportada" e message="Repasse registrado não pode ser excluído (regra de prestação de contas). Pra anular, lance um NOVO repasse com valor NEGATIVO de mesmo montante — fica como estorno no histórico."
+- "consulta": o presidente pergunta/pede pra ORGANIZAR, LISTAR, FILTRAR ou ORDENAR dados. Responda em "message" usando APENAS o snapshot abaixo (nunca invente nome/cidade/dado). draft = null.
 - "criar_candidato": CRIAR/CADASTRAR/ADICIONAR um novo CANDIDATO/pessoa (ex: "cadastra a candidata Ana Maria Braga, vereadora, Niterói RJ"). Extraia candidateName (obrigatório) e, se citados, cargo, regiao (cidade), estado (UF), phone. Se não vier nome, use "consulta" e peça o nome.
   O campo "cargo" DEVE ser exatamente um destes: "Presidente", "Senador", "Deputado Federal", "Deputado Estadual", "Prefeito", "Vereador". Mapeie variações pro valor da lista (ex: "vereadora"→"Vereador", "prefeita"→"Prefeito", "deputada estadual"→"Deputado Estadual"). Se o cargo citado não for nenhum desses, deixe cargo vazio.
-- "excluir_candidato": EXCLUIR/APAGAR/REMOVER um CANDIDATO inteiro (a pessoa, não um repasse). Extraia candidateName.
-- "gerar_relatorio": GERAR/IMPRIMIR/BAIXAR RELATÓRIO de repasses. message = "Gerei o relatório, abrindo aqui." draft = null.
-- "ajuda": o usuário pergunta COMO fazer algo, o que você faz, pede ajuda/instruções, ou está claramente perdido (ex: "como cadastro um candidato?", "o que você consegue fazer?", "me ajuda", "não sei como lançar repasse"). draft = null. (O texto de ajuda é montado pelo sistema.)
-- "acao_nao_suportada": SÓ para escritas que você realmente não faz (mexer em metas, comitê, válvula). NÃO use para repasse, candidato ou relatório — esses você FAZ. message explica que ainda não executa ESSA ação específica e orienta usar os botões. NUNCA finja que fez.
+- "excluir_candidato": EXCLUIR/APAGAR/REMOVER um CANDIDATO inteiro (a pessoa). Extraia candidateName.
+- "ajuda": o usuário pergunta COMO fazer algo, o que você faz, pede ajuda/instruções, ou está claramente perdido (ex: "como cadastro um candidato?", "o que você consegue fazer?", "me ajuda"). draft = null. (O texto de ajuda é montado pelo sistema.)
+- "acao_nao_suportada": para escritas que você não faz (mexer em metas, comitê, check-in) E para QUALQUER pedido envolvendo dinheiro/repasse/valor (o partido não controla valores). NÃO use para cadastrar/excluir candidato — esses você FAZ. message explica gentilmente. NUNCA finja que fez.
 
 COACHING (seja uma GUIA, não só executora):
-- Sempre que faltar um dado, o comando estiver ambíguo, ou você não encontrar o candidato, NÃO responda seco — ENSINE com um EXEMPLO de comando pronto pro usuário copiar. Ex: 'Não achei "Maria". Pra lançar, tente: "lança 5 mil pra Maria Silva, material gráfico".'
+- Sempre que faltar um dado, o comando estiver ambíguo, ou você não encontrar o candidato, NÃO responda seco — ENSINE com um EXEMPLO de comando pronto pro usuário copiar. Ex: 'Não achei "Maria". Pra cadastrar, tente: "cadastra a Maria Silva, vereadora, Niterói RJ, 21999990000".'
 - Quando o usuário parecer não saber usar, ofereça o jeito certo de falar o comando.
-- DISTINÇÃO IMPORTANTE: "repasse" = dinheiro/valor pra um candidato; "candidato" = a pessoa. "criar usuário/candidato/pessoa" = criar_candidato (NÃO é repasse).
-- "valor" sempre número (ex: "8 mil"=8000).
+- "criar usuário/candidato/pessoa" = criar_candidato.
 - Compliance: se perguntarem se é IA, message = "Sim, sou o assistente automatizado do seu Centro de Comando."
-- Valores sempre em R$. Tom direto, chat.
+- Este partido NÃO movimenta dinheiro — NUNCA cite valores em R$. Tom direto, chat.
 
 SOBRE IMPORTAR CANDIDATOS EM LOTE (oriente quando o usuário perguntar como importar / colar lista / planilha / "tenho uma lista"):
-- Há 3 formas de fornecer os dados: (1) "Colar simples" — uma linha por candidato: Nome, Cargo, Cidade, UF, Telefone, E-mail; (2) "Organizar com IA" — cola a planilha do jeito que estiver (qualquer ordem de colunas, colunas extras tipo CPF/observação) que a IA acha e limpa os campos; (3) Arquivo — arrastar CSV, Excel, PDF ou uma FOTO da lista.
-- NÃO PRECISA ROTULAR/IDENTIFICAR AS COLUNAS: a IA lê e identifica cada dado pelo CONTEÚDO, mesmo SEM cabeçalho — e-mail tem "@", telefone = sequência de dígitos, UF = 2 letras, valor = número/moeda, cargo = F/E/Vereador, e o resto é o nome. Se tiver cabeçalho, ela usa também; mas não é obrigatório.
-- CAMPOS QUE NÃO PODEM FALTAR: o NOME é obrigatório (linha sem nome é descartada); CIDADE+UF posicionam no mapa/telão; TELEFONE permite o convite por WhatsApp. Cargo, E-MAIL e valores são opcionais (a IA captura o e-mail se houver; CPF/RG são descartados por privacidade).
+- Há 3 formas de fornecer os dados: (1) "Colar simples" — uma linha por candidato: Nome, Cargo, Cidade, UF, Telefone, E-mail; (2) "Organizar com IA" — cola a planilha do jeito que estiver (qualquer ordem de colunas, colunas extras) que a IA acha e limpa os campos; (3) Arquivo — arrastar CSV, Excel, PDF ou uma FOTO da lista.
+- NÃO PRECISA ROTULAR/IDENTIFICAR AS COLUNAS: a IA lê e identifica cada dado pelo CONTEÚDO, mesmo SEM cabeçalho — e-mail tem "@", telefone = sequência de dígitos, UF = 2 letras, cargo = F/E/Vereador, e o resto é o nome. Colunas de valor/dinheiro e de data são IGNORADAS (o partido não controla valores). Se tiver cabeçalho, ela usa também; mas não é obrigatório.
+- CAMPOS QUE NÃO PODEM FALTAR: o NOME é obrigatório (linha sem nome é descartada); CIDADE+UF posicionam no mapa/telão; TELEFONE permite o convite por WhatsApp. Cargo e E-MAIL são opcionais (a IA captura o e-mail se houver; CPF/RG são descartados por privacidade).
 - SEMPRE chame atenção pros campos obrigatórios pra evitar erro de importação, e lembre que aparece uma PRÉVIA editável antes de salvar (nada é gravado sem conferência). Se o usuário pedir, mostre um exemplo de linha pronto: "João Silva, Vereador, Niterói, RJ, 21999990000, joao@gmail.com".
 
 COMO RESPONDER CONSULTAS DE LISTA/ORDENAÇÃO (importante):
@@ -2004,7 +1534,7 @@ JSON:`;
         return res.json({ intent: 'consulta', draft: null, message: msg || 'Não consegui formatar a resposta. Pode reformular a pergunta?' });
       }
 
-      const intent = ['consulta', 'lancar_repasse', 'lancar_repasse_lote', 'editar_repasse', 'excluir_repasse', 'criar_candidato', 'excluir_candidato', 'gerar_relatorio', 'ajuda', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
+      const intent = ['consulta', 'criar_candidato', 'excluir_candidato', 'ajuda', 'acao_nao_suportada'].includes(parsed.intent) ? parsed.intent : 'consulta';
       let message = String(parsed.message || '').slice(0, 2000);
       let draft: any = null;
 
@@ -2013,77 +1543,19 @@ JSON:`;
         message = [
           'Posso te ajudar com estas tarefas — é só falar naturalmente (por texto ou voz):',
           '',
-          '📊 *Consultar*: "quanto já repassei?", "lista os candidatos pendentes em ordem alfabética", "quem recebeu mais?"',
+          '📊 *Consultar*: "lista os candidatos pendentes em ordem alfabética", "quem ainda não montou comitê?", "quantos candidatos por cidade?"',
           '➕ *Cadastrar candidato*: "cadastra o João Silva, vereador, Niterói RJ, 21999990000" (preciso de nome, cidade e UF; telefone é pro convite)',
           '📥 *Importar candidatos em lote*: você tem 3 formas —',
           '   1) *Colar simples*: uma linha por candidato, vírgula separando: Nome, Cargo, Cidade, UF, Telefone, E-mail',
           '   2) *Organizar com IA*: cola a planilha do jeito que estiver (qualquer ordem, com ou sem cabeçalho) que eu acho e limpo os campos',
           '   3) *Arquivo*: arraste CSV, Excel, PDF ou até uma FOTO da lista — eu leio e organizo',
-          '   💡 Não precisa rotular as colunas: eu identifico cada dado pelo conteúdo (e-mail tem @, telefone = dígitos, UF = 2 letras, valor = número) mesmo sem cabeçalho.',
-          '   ⚠️ O *Nome* é obrigatório (linha sem nome é descartada). *Cidade+UF* posicionam no mapa e o *Telefone* permite o convite por WhatsApp. Cargo, e-mail e valores são opcionais. Sempre mostro uma prévia pra você conferir antes de salvar.',
-          '💰 *Lançar repasse*: "lança 5 mil pro João" (cada repasse é imutável; pra ajustar, lance um novo — positivo ou negativo)',
+          '   💡 Não precisa rotular as colunas: eu identifico cada dado pelo conteúdo (e-mail tem @, telefone = dígitos, UF = 2 letras) mesmo sem cabeçalho. Colunas de valor/dinheiro são ignoradas.',
+          '   ⚠️ O *Nome* é obrigatório (linha sem nome é descartada). *Cidade+UF* posicionam no mapa e o *Telefone* permite o convite por WhatsApp. Cargo e e-mail são opcionais. Sempre mostro uma prévia pra você conferir antes de salvar.',
           '👤 *Excluir candidato*: "exclui o candidato João Silva"',
-          '📄 *Relatório*: "gera o relatório de repasses"',
           '',
+          'Este módulo do partido NÃO controla dinheiro — foco em estrutura de campo (comitês, equipe, check-ins).',
           'Antes de salvar qualquer coisa eu sempre mostro um resumo e peço sua confirmação.',
         ].join('\n');
-      }
-
-      // 3. Se for lançar repasse: resolve candidato + valida (backend manda no draft)
-      if (intent === 'lancar_repasse' && parsed.draft) {
-        const wantName = String(parsed.draft.candidateName || '').trim().toLowerCase();
-        const valor = Number(parsed.draft.valor) || 0;
-        const descricao = String(parsed.draft.descricao || '').slice(0, 300);
-        // Data citada pelo presidente (ex: "lança 5 mil pro João no dia 10/03"); senão hoje.
-        const dataRepasse = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.draft.data || '')) ? parsed.draft.data : hojeIso;
-
-        const { data: allCands } = await supabase.from('party_candidates')
-          .select('id, displayName').eq('partyId', party.id);
-        const matches = (allCands || []).filter((c: any) =>
-          c.displayName.toLowerCase().includes(wantName) || wantName.includes(c.displayName.toLowerCase()));
-
-        if (!wantName || valor <= 0) {
-          message = 'Pra lançar um repasse eu preciso do nome do candidato e do valor. Pode repetir? Ex: "lance 5 mil pra Maria, material gráfico".';
-        } else if (matches.length === 0) {
-          message = `Não encontrei nenhum candidato chamado "${parsed.draft.candidateName}". Confira o nome na lista de candidatos.`;
-        } else if (matches.length > 1) {
-          message = `Há mais de um candidato parecido com "${parsed.draft.candidateName}": ${matches.map((c: any) => c.displayName).join(', ')}. Qual deles?`;
-        } else {
-          const cand = matches[0];
-          draft = {
-            type: 'create_repasse',
-            candidateId: cand.id,
-            candidateName: cand.displayName,
-            valor, descricao, data: dataRepasse,
-          };
-          const dataTxt = dataRepasse !== hojeIso ? ` em ${new Date(dataRepasse + 'T00:00:00').toLocaleDateString('pt-BR')}` : '';
-          message = `${primeiroNome ? primeiroNome + ', vou' : 'Vou'} lançar um repasse de ${brl(valor)} para ${cand.displayName}${descricao ? ` (${descricao})` : ''}${dataTxt}. Confirma?`;
-        }
-      }
-
-      // LANÇAMENTO EM LOTE: cria registros de repasse para candidatos que têm
-      // valorRecebido > 0 mas nenhum registro em party_repasses (ex: importados
-      // antes da correção que criava repasses automaticamente).
-      if (intent === 'lancar_repasse_lote') {
-        const { data: allCands } = await supabase.from('party_candidates')
-          .select('id, displayName, valorRecebido').eq('partyId', party.id);
-        const withValor = (allCands || []).filter((c: any) => Number(c.valorRecebido) > 0);
-        if (!withValor.length) {
-          message = 'Nenhum candidato tem valor de repasse cadastrado. Importe com valores ou lance individualmente.';
-        } else {
-          const ids = withValor.map((c: any) => c.id);
-          const { data: existingRepasses } = await supabase.from('party_repasses')
-            .select('candidateId').in('candidateId', ids);
-          const idsWithRepasse = new Set((existingRepasses || []).map((r: any) => r.candidateId));
-          const pending = withValor.filter((c: any) => !idsWithRepasse.has(c.id));
-          if (!pending.length) {
-            message = `${primeiroNome ? primeiroNome + ', todos' : 'Todos'} os ${withValor.length} candidatos com valor já têm registro de repasse no histórico. Nada a fazer.`;
-          } else {
-            const totalLote = pending.reduce((s: number, c: any) => s + Number(c.valorRecebido), 0);
-            draft = { type: 'batch_repasse', count: pending.length, total: totalLote };
-            message = `${primeiroNome ? primeiroNome + ', encontrei' : 'Encontrei'} ${pending.length} candidato${pending.length > 1 ? 's' : ''} com valor (${brl(totalLote)} no total) mas sem registro no histórico de repasses. Vou criar um registro de repasse pra cada um com a data de hoje. Confirma?`;
-          }
-        }
       }
 
       // CRIAR candidato (a pessoa). Confirma antes de gravar (regra de ouro).
@@ -2128,76 +1600,15 @@ JSON:`;
         else {
           const cand = matches[0];
           draft = { type: 'delete_candidate', candidateId: cand.id, candidateName: cand.displayName };
-          message = `⚠️ Vou EXCLUIR o candidato ${cand.displayName} e TODOS os dados dele (repasses, comitê, check-ins). Não pode ser desfeito. Confirma?`;
+          message = `⚠️ Vou EXCLUIR o candidato ${cand.displayName} e TODOS os dados dele (comitê, check-ins). Não pode ser desfeito. Confirma?`;
         }
       }
 
-      // EDITAR ou EXCLUIR repasse: resolve candidato → 1 repasse (direto) OU vários (lista pra escolher)
-      let options: any = null;       // lista de repasses quando o candidato tem vários
-      let pendingAction: any = null; // ação a aplicar quando o presidente escolher na lista
-      if ((intent === 'editar_repasse' || intent === 'excluir_repasse') && parsed.draft) {
-        const isEdit = intent === 'editar_repasse';
-        const wantName = String(parsed.draft.candidateName || '').trim().toLowerCase();
-        const novoValor = Number(parsed.draft.valor) || 0;
-        const { data: allCands } = await supabase.from('party_candidates')
-          .select('id, displayName').eq('partyId', party.id);
-        const candMatches = (allCands || []).filter((c: any) =>
-          c.displayName.toLowerCase().includes(wantName) || (wantName && wantName.includes(c.displayName.toLowerCase())));
-
-        if (!wantName) {
-          message = 'De qual candidato é o repasse? Me diga o nome.';
-        } else if (candMatches.length === 0) {
-          message = `Não encontrei candidato "${parsed.draft.candidateName}". Confira na lista.`;
-        } else if (candMatches.length > 1) {
-          message = `Há mais de um parecido com "${parsed.draft.candidateName}": ${candMatches.map((c: any) => c.displayName).join(', ')}. Qual deles?`;
-        } else if (isEdit && novoValor <= 0) {
-          message = `Qual o novo valor do repasse de ${candMatches[0].displayName}?`;
-        } else {
-          const cand = candMatches[0];
-          const { data: reps } = await supabase.from('party_repasses')
-            .select('id, valor, data, descricao').eq('candidateId', cand.id)
-            .order('data', { ascending: false, nullsFirst: false });
-          const list = (reps || []) as any[];
-
-          if (list.length === 0) {
-            message = `${cand.displayName} não tem repasses pra ${isEdit ? 'editar' : 'excluir'}.`;
-          } else if (list.length === 1) {
-            // Um só → confirmação direta
-            const rep = list[0];
-            if (isEdit) {
-              draft = { type: 'edit_repasse', repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
-                valorAntigo: Number(rep.valor) || 0, valor: novoValor,
-                descricao: parsed.draft.descricao ? String(parsed.draft.descricao).slice(0, 300) : (rep.descricao || ''), data: rep.data };
-              message = `Vou alterar o repasse de ${cand.displayName} de ${brl(Number(rep.valor) || 0)} para ${brl(novoValor)}. Confirma?`;
-            } else {
-              draft = { type: 'delete_repasse', repasseId: rep.id, candidateId: cand.id, candidateName: cand.displayName,
-                valor: Number(rep.valor) || 0, descricao: rep.descricao || '', data: rep.data };
-              message = `⚠️ Vou EXCLUIR o repasse de ${cand.displayName}: ${brl(Number(rep.valor) || 0)}${rep.descricao ? ` (${rep.descricao})` : ''}. Não pode ser desfeito. Confirma?`;
-            }
-          } else {
-            // Vários → destaca o MAIS RECENTE como sugestão (#147) e mostra a lista.
-            // A lista já vem ordenada por data desc, então list[0] é o mais recente.
-            options = list.map((r: any, idx: number) => ({
-              repasseId: r.id, candidateId: cand.id, candidateName: cand.displayName,
-              valor: Number(r.valor) || 0, descricao: r.descricao || '', data: r.data,
-              suggested: idx === 0, // o mais recente
-            }));
-            pendingAction = isEdit ? { type: 'edit_repasse', valor: novoValor } : { type: 'delete_repasse' };
-            const recente = list[0];
-            const recenteData = recente.data ? new Date(recente.data).toLocaleDateString('pt-BR') : 'sem data';
-            message = `${cand.displayName} tem ${list.length} repasses. O mais recente é ${brl(Number(recente.valor) || 0)} de ${recenteData}`
-              + `${recente.descricao ? ` (${recente.descricao})` : ''} — é esse que você quer ${isEdit ? `alterar para ${brl(novoValor)}` : 'excluir'}? `
-              + 'Se for outro, toque na lista abaixo.';
-          }
-        }
-      }
-
-      // Se montou lista de escolha, o intent vira 'escolher_repasse' pro front
-      const finalIntent = options ? 'escolher_repasse' : intent;
+      const finalIntent = intent;
 
       await supabase.from('party_ai_command_logs').insert({
         partyId: party.id, userId, inputType: (req.body || {}).inputType || 'text',
-        userCommand: text.slice(0, 500), detectedIntent: finalIntent, actionStatus: draft ? 'draft' : (options ? 'choosing' : 'ok'),
+        userCommand: text.slice(0, 500), detectedIntent: finalIntent, actionStatus: draft ? 'draft' : 'ok',
       }).then(() => {}, () => {});
 
       // Persiste mensagens (user + assistant) pra histórico sobreviver refresh
@@ -2207,7 +1618,7 @@ JSON:`;
         { partyId: party.id, userId, role: 'assistant', text: message.slice(0, 2000), intent: finalIntent, createdAt: new Date(Date.now() + 1).toISOString() },
       ]).then(() => {}, () => {});
 
-      return res.json({ intent: finalIntent, message, draft, options, pendingAction });
+      return res.json({ intent: finalIntent, message, draft });
     } catch (err: any) {
       console.error('[party] ai/command:', err);
       return res.status(500).json({ error: err?.message || 'ai_failed', message: 'Não consegui processar agora. Tente reformular.' });
@@ -2216,8 +1627,8 @@ JSON:`;
 
   // ── BOTÃO DE EMERGÊNCIA (#141) — zera dados OPERACIONAIS do partido ────
   //
-  // Apaga repasses, candidatos, comitês, check-ins e log da válvula + fotos do
-  // storage. NÃO apaga: a conta `parties`, o usuário presidente, plano/assinatura.
+  // Apaga candidatos, comitês e check-ins + fotos do storage. NÃO apaga: a
+  // conta `parties`, o usuário presidente, plano/assinatura.
   //
   // Segurança em camadas:
   //   1. Sessão autenticada (requireAuth já validou o JWT antes daqui)
@@ -2277,10 +1688,8 @@ JSON:`;
         const { count } = await supabase.from(table).delete({ count: 'exact' }).eq(col, val);
         return count || 0;
       };
-      summary.repasses = await delCount('party_repasses', 'partyId', party.id);
       summary.committees = await delCount('party_committees', 'partyId', party.id);
       summary.checkins = await delCount('party_checkins', 'partyId', party.id);
-      summary.valveLog = await delCount('party_valve_log', 'partyId', party.id);
       summary.candidatesDeleted = await delCount('party_candidates', 'partyId', party.id);
 
       // 3. Auditoria (resumo quantitativo, sem conteúdo sensível)
