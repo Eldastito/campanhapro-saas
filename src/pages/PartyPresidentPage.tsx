@@ -12,6 +12,7 @@ import PartyBackup from '../components/party/PartyBackup';
 import PartyRestore from '../components/party/PartyRestore';
 import DuplicateResolutionCard from '../components/party/DuplicateResolutionCard';
 import PartyAIOrb from '../components/party/PartyAIOrb';
+import Avatar from '../components/party/CandidateAvatar';
 
 /**
  * Centro de Comando do Presidente de Partido (produto PARTIDO).
@@ -20,7 +21,7 @@ import PartyAIOrb from '../components/party/PartyAIOrb';
  */
 interface Candidate {
   id: string; displayName: string; cargo?: string | null; regiao?: string | null; estado?: string | null; phone?: string | null;
-  status: string; campaignId?: string | null; inviteToken?: string | null;
+  status: string; campaignId?: string | null; inviteToken?: string | null; photoUrl?: string | null;
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
   coordCount?: number; leaderCount?: number;
   committee?: { address?: string; lat?: number; lng?: number; hasPhoto?: boolean; geoSource?: string | null } | null;
@@ -568,9 +569,12 @@ const PartyPresidentPage: React.FC = () => {
             <p className="text-xs text-slate-500 mb-1">{filtered.length} de {candidates.length} candidato(s)</p>
             {filtered.map((c) => (
               <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-bold text-white truncate">{c.displayName}</p>
-                  <p className="text-xs text-slate-400 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</p>
+                <div className="flex items-center gap-3 min-w-0">
+                  <Avatar name={c.displayName} url={c.photoUrl} size={44} />
+                  <div className="min-w-0">
+                    <p className="font-bold text-white truncate">{c.displayName}</p>
+                    <p className="text-xs text-slate-400 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</p>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <ScoreChip s={c.score} />
@@ -653,9 +657,12 @@ const PartyPresidentPage: React.FC = () => {
                   <p className="text-xs font-bold uppercase tracking-wider text-indigo-300 mb-3 flex items-center gap-1.5"><Trophy className="w-4 h-4" /> Destaques do partido</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {ranked.slice(0, 3).map((c, i) => (
-                      <button key={c.id} onClick={() => openProof(c)} className="text-center bg-[#1c2128] rounded-2xl border border-white/5 hover:border-white/20 p-3 transition-colors">
-                        <div className="text-2xl">{medal(i)}</div>
-                        <p className="text-sm font-bold text-white truncate mt-1">{c.displayName}</p>
+                      <button key={c.id} onClick={() => openProof(c)} className="text-center bg-[#1c2128] rounded-2xl border border-white/5 hover:border-white/20 p-3 transition-colors flex flex-col items-center">
+                        <div className="relative">
+                          <Avatar name={c.displayName} url={c.photoUrl} size={56} />
+                          <span className="absolute -top-1 -right-1 text-lg">{medal(i)}</span>
+                        </div>
+                        <p className="text-sm font-bold text-white truncate mt-1 max-w-full">{c.displayName}</p>
                         <ScoreChip s={c.score} />
                       </button>
                     ))}
@@ -672,9 +679,12 @@ const PartyPresidentPage: React.FC = () => {
                     <button key={c.id} onClick={() => openProof(c)}
                       className="w-full grid grid-cols-[2rem_1fr_5rem] sm:grid-cols-[2rem_1fr_5rem_5rem] gap-2 px-4 py-3 items-center text-left hover:bg-white/5 border-b border-white/5 last:border-0 transition-colors">
                       <span className="font-black text-slate-400">{medal(idx)}</span>
-                      <span className="min-w-0">
-                        <span className="font-bold text-white truncate block">{c.displayName}</span>
-                        <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</span>
+                      <span className="min-w-0 flex items-center gap-2">
+                        <Avatar name={c.displayName} url={c.photoUrl} size={34} />
+                        <span className="min-w-0">
+                          <span className="font-bold text-white truncate block">{c.displayName}</span>
+                          <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</span>
+                        </span>
                       </span>
                       <span className="text-center"><ScoreChip s={c.score} /></span>
                       <span className="hidden sm:flex items-center justify-center gap-1 text-[11px] text-slate-400"><Activity className="w-3 h-3" /> {lastSeen(c.lastCheckinAt)}</span>

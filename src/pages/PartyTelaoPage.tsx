@@ -19,7 +19,7 @@ const LEVEL_COLOR: Record<string, string> = { green: '#10b981', yellow: '#f59e0b
 const esc = (s: any) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] || c));
 const SAFETY_POLL_MS = 120_000; // rede de segurança caso um broadcast se perca
 
-interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; noCommittee?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; photoUrl?: string | null; level: string; checkins: number; }
+interface TelaoPoint { displayName: string; local: string | null; approx?: boolean; noCommittee?: boolean; lat: number | null; lng: number | null; hasPhoto: boolean; photoUrl?: string | null; candidatePhotoUrl?: string | null; level: string; checkins: number; }
 interface TelaoData { partyName: string; channel?: string; points: TelaoPoint[]; checkinPoints: { lat: number; lng: number }[]; stats: { candidates: number; committees: number; checkins: number; green: number; yellow: number; red: number }; }
 
 const PartyTelaoPage: React.FC = () => {
@@ -98,7 +98,12 @@ const PartyTelaoPage: React.FC = () => {
       const fotoHtml = url
         ? `<img src="${esc(url)}" class="telao-foto" alt="comitê" style="margin-top:6px;width:100%;height:90px;object-fit:cover;border-radius:8px;cursor:zoom-in" />`
         : '';
-      mk.bindPopup(`<div style="min-width:180px"><b>${esc(p.displayName)}</b>${sub ? `<br/><span style="opacity:.7">${sub}</span>` : ''}<br/><span style="color:${color}">●</span> ${p.checkins} check-in(s)${fotoHtml}</div>`);
+      // Retrato do candidato (avatar redondo) ao lado do nome.
+      const cpu = p.candidatePhotoUrl || '';
+      const avatarHtml = cpu
+        ? `<img src="${esc(cpu)}" alt="" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:1px solid rgba(255,255,255,.25);flex:0 0 auto" />`
+        : '';
+      mk.bindPopup(`<div style="min-width:180px"><div style="display:flex;align-items:center;gap:8px">${avatarHtml}<b>${esc(p.displayName)}</b></div>${sub ? `<span style="opacity:.7">${sub}</span><br/>` : ''}<span style="color:${color}">●</span> ${p.checkins} check-in(s)${fotoHtml}</div>`);
       if (url) {
         mk.on('popupopen', (e: any) => {
           const img = e.popup.getElement()?.querySelector('.telao-foto') as HTMLImageElement | null;

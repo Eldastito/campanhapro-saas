@@ -212,7 +212,7 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
       }
     }
 
-    const enriched = candidates.map((c: any) => {
+    const enriched = await Promise.all(candidates.map(async (c: any) => {
       const t = (c.campaignId && team[c.campaignId]) || { coord: 0, lider: 0 };
       const rt = (c.campaignId && regTeam[c.campaignId]) || { coord: 0, lider: 0 };
       // Meta marca pelo registrado OU usuário real (o maior).
@@ -238,8 +238,10 @@ export function createPartyRouter(supabase: SupabaseClient): Router {
         checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         metas, metasDone: metas.filter((m) => m.done).length, metasTotal: metas.length,
         score,
+        // Retrato do candidato (re-hospedado no Storage). URL assinada p/ exibição.
+        photoUrl: await signPhoto(c.metadata?.photoPath),
       };
-    });
+    }));
     // Não vaza dados de cobrança pro presidente (valor só no Supreme Admin).
     const { billingNote, ...partySafe } = party as any;
     return res.json({ party: partySafe, candidates: enriched });
@@ -1038,7 +1040,8 @@ Saída JSON estrito (sem markdown):
       photo: await signPhoto((committee as any).photo),
       photos: (await Promise.all(cPhotos.map((p) => signPhoto(p)))).filter(Boolean),
     } : null;
-    return res.json({ candidate: cand, partyName: (party as any)?.name, committee: committeeSigned, checkins: checkins || [], metas, score });
+    const photoUrl = await signPhoto((cand as any).metadata?.photoPath);
+    return res.json({ candidate: { ...cand, photoUrl }, partyName: (party as any)?.name, committee: committeeSigned, checkins: checkins || [], metas, score });
   });
 
   router.post('/candidate/committee', async (req: Request, res: Response) => {

@@ -7,6 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { captureGeo, compressImage, isInAppBrowser, GEO_MESSAGES, type CapturedGeo } from '../lib/captureUtils';
 import { geocode } from '../lib/geocode';
 import MemberInviteCard from '../components/party/MemberInviteCard';
+import CandidateAvatar from '../components/party/CandidateAvatar';
 
 /**
  * Experiência ENXUTA do candidato dentro do partido: comprova que o dinheiro
@@ -153,9 +154,12 @@ const PartyCandidatePage: React.FC = () => {
     <div className="p-5 bg-[#0a0a0b] min-h-screen text-white font-sans max-w-2xl mx-auto">
       {/* Header */}
       <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-2xl font-black flex items-center gap-2"><Landmark className="text-indigo-400 w-6 h-6" /> {data.candidate.displayName}</h1>
-          <p className="text-gray-400 text-sm">{data.partyName} · comprovação de campanha</p>
+        <div className="flex items-center gap-3 min-w-0">
+          <CandidateAvatar name={data.candidate.displayName} url={data.candidate.photoUrl} size={56} />
+          <div className="min-w-0">
+            <h1 className="text-2xl font-black flex items-center gap-2 truncate"><Landmark className="text-indigo-400 w-6 h-6 shrink-0" /> {data.candidate.displayName}</h1>
+            <p className="text-gray-400 text-sm">{data.partyName} · comprovação de campanha</p>
+          </div>
         </div>
         <button onClick={() => logout?.()} className="bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl text-slate-300 flex items-center gap-2 text-sm"><LogOut className="w-4 h-4" /> Sair</button>
       </div>
