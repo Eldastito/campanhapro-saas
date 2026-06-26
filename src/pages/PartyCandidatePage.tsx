@@ -1,13 +1,13 @@
 import * as React from 'react';
 import {
   Landmark, MapPin, Camera, CheckCircle2, Loader2, LogOut, Target, Building2, Navigation, Sparkles, ArrowRight,
-  Wallet, Plus, X,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
 import { useAuth } from '../contexts/AuthContext';
 import { captureGeo, compressImage, isInAppBrowser, GEO_MESSAGES, type CapturedGeo } from '../lib/captureUtils';
 import { geocode } from '../lib/geocode';
 import MemberInviteCard from '../components/party/MemberInviteCard';
+import CandidateAvatar from '../components/party/CandidateAvatar';
 
 /**
  * Experiência ENXUTA do candidato dentro do partido: comprova que o dinheiro
@@ -36,23 +36,6 @@ const PartyCandidatePage: React.FC = () => {
   const [photos, setPhotos] = React.useState<(string | null)[]>([null, null, null, null]);
   const [photoBusySlot, setPhotoBusySlot] = React.useState<number | null>(null);
   const inApp = React.useMemo(() => isInAppBrowser(), []);
-  // Prestação de contas (#148): repasses recebidos + rateio editável pelo candidato.
-  type RatItem = { categoria: string; valor: string; descricao?: string };
-  type RepasseRow = { id: string; valor: number; data: string | null; descricao: string | null; itens: RatItem[]; createdAt?: string };
-  const [repasses, setRepasses] = React.useState<RepasseRow[]>([]);
-  const [savingRepId, setSavingRepId] = React.useState<string | null>(null);
-
-  // Sugestões de categoria (chips) pra acelerar o preenchimento do candidato.
-  const CAT_SUGESTOES = ['Coordenador', 'Líder', 'Aluguel de comitê', 'Aluguel de carro', 'Combustível', 'Gráfica', 'Material de campanha', 'Alimentação'];
-  const brlFmt = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const parseValor = (v: string): number => {
-    let s = String(v).replace(/[^\d.,-]/g, '').trim();
-    if (!s) return 0;
-    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.'); else s = s.replace(/\./g, '');
-    const n = Number(s);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-  };
-  const somaItens = (itens: RatItem[]) => itens.reduce((s, it) => s + parseValor(it.valor), 0);
 
   const load = React.useCallback(async () => {
     try {
@@ -63,18 +46,6 @@ const PartyCandidatePage: React.FC = () => {
         if (j.committee?.lat) { setGeo({ lat: j.committee.lat, lng: j.committee.lng }); setGeoStatus('ok'); }
         const loaded = j.committee?.photos || [];
         setPhotos([0, 1, 2, 3].map((i) => loaded[i] || null));
-      }
-      // Repasses recebidos (pra prestação de contas) — valores viram string p/ editar.
-      const rr = await authedFetch('/api/v1/party/candidate/repasses');
-      const rj = await rr.json().catch(() => ({}));
-      if (rr.ok && Array.isArray(rj.repasses)) {
-        setRepasses(rj.repasses.map((r: any) => ({
-          id: r.id, valor: Number(r.valor) || 0, data: r.data || null, descricao: r.descricao || null,
-          createdAt: r.createdAt,
-          itens: Array.isArray(r.itens) ? r.itens.map((it: any) => ({
-            categoria: String(it.categoria || ''), valor: String(it.valor ?? ''), descricao: it.descricao || '',
-          })) : [],
-        })));
       }
     } catch { /* */ }
     finally { setLoading(false); }
@@ -110,6 +81,20 @@ const PartyCandidatePage: React.FC = () => {
       setMsg({ kind: 'ok', text: `Foto "${COMMITTEE_SLOTS[i].label}" pronta ✅ — toque em salvar quando terminar as 4.` });
     } catch { setMsg({ kind: 'err', text: 'Não consegui processar a foto. Tente tirar de novo.' }); }
     finally { setPhotoBusySlot(null); }
+  };
+
+  const myPhotoInputRef = React.useRef<HTMLInputElement | null>(null);
+  const uploadMyPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy('photo'); setMsg(null);
+    try {
+      const dataUrl = await compressImage(file, 600, 0.7);
+      const r = await postWithTimeout('/api/v1/party/candidate/photo', { dataUrl });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) { setData((prev: any) => ({ ...prev, candidate: { ...prev.candidate, photoUrl: j.photoUrl || dataUrl } })); setMsg({ kind: 'ok', text: 'Foto atualizada ✅' }); }
+      else setMsg({ kind: 'err', text: 'Não consegui enviar a foto. Tente de novo.' });
+    } catch { setMsg({ kind: 'err', text: 'Falha ao processar a imagem. Tente outra.' }); }
+    finally { setBusy(null); if (myPhotoInputRef.current) myPhotoInputRef.current.value = ''; }
   };
 
   const pegarGps = async () => {
@@ -179,41 +164,23 @@ const PartyCandidatePage: React.FC = () => {
   const metas = data.metas || [];
   const metasDone = metas.filter((m: any) => m.done).length;
 
-  // ---- Prestação de contas: edição do rateio de um repasse ----
-  const patchRepasse = (id: string, fn: (r: RepasseRow) => RepasseRow) =>
-    setRepasses((prev) => prev.map((r) => (r.id === id ? fn(r) : r)));
-  const addRatItem = (id: string, categoria = '') =>
-    patchRepasse(id, (r) => ({ ...r, itens: [...r.itens, { categoria, valor: '', descricao: '' }] }));
-  const updateRatItem = (id: string, idx: number, field: keyof RatItem, value: string) =>
-    patchRepasse(id, (r) => ({ ...r, itens: r.itens.map((it, j) => (j === idx ? { ...it, [field]: value } : it)) }));
-  const removeRatItem = (id: string, idx: number) =>
-    patchRepasse(id, (r) => ({ ...r, itens: r.itens.filter((_, j) => j !== idx) }));
-  const saveRateio = async (rep: RepasseRow) => {
-    const itens = rep.itens
-      .map((it) => ({ categoria: it.categoria.trim(), valor: parseValor(it.valor), descricao: (it.descricao || '').trim() || undefined }))
-      .filter((it) => it.categoria && it.valor > 0);
-    if (somaItens(rep.itens) > rep.valor + 0.005) {
-      setMsg({ kind: 'err', text: 'A soma da aplicação passou do valor recebido neste repasse. Ajuste os valores.' });
-      return;
-    }
-    setSavingRepId(rep.id);
-    try {
-      const r = await authedFetch(`/api/v1/party/candidate/repasses/${rep.id}`, {
-        method: 'PATCH', body: JSON.stringify({ itens }),
-      });
-      if (r.ok) { setMsg({ kind: 'ok', text: 'Prestação de contas salva ✅' }); await load(); }
-      else { const j = await r.json().catch(() => ({})); setMsg({ kind: 'err', text: j.detail || j.error || 'Não consegui salvar.' }); }
-    } catch { setMsg({ kind: 'err', text: 'Falha de rede ao salvar.' }); }
-    finally { setSavingRepId(null); }
-  };
-
   return (
     <div className="p-5 bg-[#0a0a0b] min-h-screen text-white font-sans max-w-2xl mx-auto">
       {/* Header */}
       <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-2xl font-black flex items-center gap-2"><Landmark className="text-indigo-400 w-6 h-6" /> {data.candidate.displayName}</h1>
-          <p className="text-gray-400 text-sm">{data.partyName} · comprovação de campanha</p>
+        <div className="flex items-center gap-3 min-w-0">
+          <input ref={myPhotoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => uploadMyPhoto(e.target.files?.[0])} />
+          <button type="button" onClick={() => myPhotoInputRef.current?.click()} disabled={busy === 'photo'}
+            title="Enviar/trocar sua foto" className="relative shrink-0 rounded-full group disabled:opacity-60">
+            <CandidateAvatar name={data.candidate.displayName} url={data.candidate.photoUrl} size={56} />
+            <span className="absolute -bottom-1 -right-1 bg-indigo-600 group-hover:bg-indigo-500 rounded-full p-1 border-2 border-[#0a0a0b]">
+              {busy === 'photo' ? <Loader2 className="w-3 h-3 animate-spin text-white" /> : <Camera className="w-3 h-3 text-white" />}
+            </span>
+          </button>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-black flex items-center gap-2 truncate"><Landmark className="text-indigo-400 w-6 h-6 shrink-0" /> {data.candidate.displayName}</h1>
+            <p className="text-gray-400 text-sm">{data.partyName} · comprovação de campanha</p>
+          </div>
         </div>
         <button onClick={() => logout?.()} className="bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl text-slate-300 flex items-center gap-2 text-sm"><LogOut className="w-4 h-4" /> Sair</button>
       </div>
@@ -262,70 +229,6 @@ const PartyCandidatePage: React.FC = () => {
             {data.score.reasons?.length
               ? <p className="text-xs text-slate-300 mt-0.5">Para melhorar: {data.score.reasons.slice(0, 2).join(' · ')}</p>
               : <p className="text-xs text-emerald-300 mt-0.5">Tudo em dia! Continue fazendo check-ins.</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Prestação de contas — o candidato declara COMO aplicou cada repasse */}
-      {repasses.length > 0 && (
-        <div className="bg-[#1c2128] border border-white/5 rounded-3xl p-5 mb-6">
-          <p className="font-bold flex items-center gap-2 mb-1"><Wallet className="w-5 h-5 text-amber-300" /> Prestação de contas</p>
-          <p className="text-xs text-slate-400 mb-4">Para cada repasse que você recebeu, declare <b>como o dinheiro foi aplicado</b>. O presidente vê isso, mas só você preenche. O valor e a data do repasse são fixos.</p>
-
-          <div className="space-y-4">
-            {repasses.map((rep) => {
-              const aplicado = somaItens(rep.itens);
-              const restante = rep.valor - aplicado;
-              const excede = restante < -0.005;
-              return (
-                <div key={rep.id} className="rounded-2xl border border-white/10 bg-slate-950/60 p-3">
-                  {/* Cabeçalho do repasse (fixo) */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className="text-sm font-black text-white">{brlFmt(rep.valor)} <span className="text-[10px] font-normal text-slate-500">recebido</span></p>
-                      <p className="text-[11px] text-slate-500">{rep.data ? new Date(rep.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'sem data'}{rep.descricao ? ` · ${rep.descricao}` : ''}</p>
-                    </div>
-                    <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${restante > 0.005 ? 'bg-rose-500/15 text-rose-300' : excede ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
-                      {excede ? 'Excede!' : restante > 0.005 ? `${brlFmt(restante)} a justificar` : 'tudo justificado ✅'}
-                    </span>
-                  </div>
-
-                  {/* Itens do rateio (editáveis) */}
-                  <div className="space-y-1.5 mb-2">
-                    {rep.itens.map((it, i) => (
-                      <div key={i} className="flex items-center gap-1.5">
-                        <input value={it.categoria} onChange={(e) => updateRatItem(rep.id, i, 'categoria', e.target.value)}
-                          placeholder="Onde aplicou (ex: Combustível)" className="flex-1 bg-slate-950 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-slate-200" />
-                        <input value={it.valor} onChange={(e) => updateRatItem(rep.id, i, 'valor', e.target.value)}
-                          placeholder="R$" inputMode="decimal" className="w-24 bg-slate-950 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-white text-right" />
-                        <button onClick={() => removeRatItem(rep.id, i)} className="text-slate-500 hover:text-rose-400 shrink-0"><X className="w-4 h-4" /></button>
-                      </div>
-                    ))}
-                    {rep.itens.length === 0 && <p className="text-[11px] text-slate-500">Nenhum item ainda. Adicione abaixo onde o dinheiro foi aplicado.</p>}
-                  </div>
-
-                  {/* Chips de categoria sugerida */}
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {CAT_SUGESTOES.map((c) => (
-                      <button key={c} onClick={() => addRatItem(rep.id, c)} className="text-[10px] bg-white/5 hover:bg-white/10 text-slate-300 rounded-full px-2 py-0.5 flex items-center gap-1">
-                        <Plus className="w-2.5 h-2.5" /> {c}
-                      </button>
-                    ))}
-                    <button onClick={() => addRatItem(rep.id)} className="text-[10px] bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 rounded-full px-2 py-0.5 flex items-center gap-1">
-                      <Plus className="w-2.5 h-2.5" /> Outro
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
-                    <p className="text-[11px] text-slate-400">Aplicado: <b className="text-slate-200">{brlFmt(aplicado)}</b> de {brlFmt(rep.valor)}</p>
-                    <button onClick={() => saveRateio(rep)} disabled={savingRepId === rep.id || excede}
-                      className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl px-4 py-1.5 text-sm font-bold flex items-center gap-2">
-                      {savingRepId === rep.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />} Salvar
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
           </div>
         </div>
       )}

@@ -38,7 +38,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
     if (!party) return res.status(404).json({ error: 'telao_invalido' });
     const partyId = (party as any).id;
     const { data: cands } = await supabase.from('party_candidates')
-      .select('id, displayName, regiao, estado, status, campaignId, valorRecebido, valorAlocado').eq('partyId', partyId);
+      .select('id, displayName, regiao, estado, status, campaignId, metadata').eq('partyId', partyId);
     const candidates = cands || [];
     const ids = candidates.map((c: any) => c.id);
     const campIds = candidates.map((c: any) => c.campaignId).filter(Boolean);
@@ -131,6 +131,15 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
       if (data?.signedUrl) photoUrls[cid] = data.signedUrl;
     }));
 
+    // Retrato do candidato (metadata.photoPath) — assina p/ exibir no pino/popup.
+    const candPhotoUrls: Record<string, string> = {};
+    await Promise.all(candidates.map(async (c: any) => {
+      const stored = c?.metadata?.photoPath;
+      if (!stored || typeof stored !== 'string') return;
+      const { data } = await supabase.storage.from('party-proofs').createSignedUrl(stored, 3600);
+      if (data?.signedUrl) candPhotoUrls[c.id] = data.signedUrl;
+    }));
+
     let green = 0, yellow = 0, red = 0;
     const points = candidates.map((c: any) => {
       const com = committees[c.id];
@@ -140,7 +149,6 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
         committee: com ? { hasPhoto: !!com.photo, geoSource: com.geoSource } : null,
         checkinCount: checkinCount[c.id] || 0, lastCheckinAt: lastCheckinAt[c.id] || null,
         coordCount: t.coord, leaderCount: t.lider,
-        valorRecebido: Number(c.valorRecebido) || 0, valorAlocado: Number(c.valorAlocado) || 0,
       });
       if (sc.level === 'green') green++; else if (sc.level === 'yellow') yellow++; else red++;
 
@@ -163,6 +171,7 @@ export function createPartyPublicRouter(supabase: SupabaseClient): Router {
         displayName: c.displayName,
         local, approx, noCommittee,
         lat, lng, hasPhoto: !!com?.photo, photoUrl: photoUrls[c.id] || null,
+        candidatePhotoUrl: candPhotoUrls[c.id] || null,
         level: sc.level, checkins: checkinCount[c.id] || 0,
       };
     });

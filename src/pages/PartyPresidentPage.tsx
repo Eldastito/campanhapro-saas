@@ -1,10 +1,11 @@
 import * as React from 'react';
 import {
-  Landmark, Users, Wallet, Target, Plus, MapPinned,
+  Landmark, Users, Target, Plus, MapPinned,
   Loader2, LogOut, X, CheckCircle2, Upload, Link2, Check, Trophy, Activity, MessageCircle, Search, Pencil, Trash2,
-  Eye, EyeOff, Sparkles, FileText,
+  Sparkles, FileText,
 } from 'lucide-react';
 import { authedFetch } from '../lib/authedFetch';
+import { compressImage } from '../lib/captureUtils';
 import { useAuth } from '../contexts/AuthContext';
 import WeeklyDigestCard from '../components/party/WeeklyDigestCard';
 import PartyEmergencyWipe from '../components/party/PartyEmergencyWipe';
@@ -12,6 +13,7 @@ import PartyBackup from '../components/party/PartyBackup';
 import PartyRestore from '../components/party/PartyRestore';
 import DuplicateResolutionCard from '../components/party/DuplicateResolutionCard';
 import PartyAIOrb from '../components/party/PartyAIOrb';
+import Avatar from '../components/party/CandidateAvatar';
 
 /**
  * Centro de Comando do Presidente de Partido (produto PARTIDO).
@@ -20,13 +22,12 @@ import PartyAIOrb from '../components/party/PartyAIOrb';
  */
 interface Candidate {
   id: string; displayName: string; cargo?: string | null; regiao?: string | null; estado?: string | null; phone?: string | null;
-  status: string; valorRecebido?: number; campaignId?: string | null; inviteToken?: string | null;
+  status: string; campaignId?: string | null; inviteToken?: string | null; photoUrl?: string | null;
   metas?: { label: string; done: boolean }[]; metasDone?: number; metasTotal?: number;
-  coordCount?: number; leaderCount?: number; valorAlocado?: number;
+  coordCount?: number; leaderCount?: number;
   committee?: { address?: string; lat?: number; lng?: number; hasPhoto?: boolean; geoSource?: string | null } | null;
   checkinCount?: number; lastCheckinAt?: string | null;
   score?: ScoreInfo;
-  repasseStatus?: string; valveNote?: string | null;
 }
 interface ScoreInfo {
   score: number; level: 'green' | 'yellow' | 'red'; emoji: string; reasons: string[];
@@ -35,39 +36,17 @@ interface ScoreInfo {
 interface ProofData {
   committee?: { address?: string | null; lat?: number | null; lng?: number | null; photo?: string | null; photos?: string[]; geoSource?: string | null; updatedAt?: string | null } | null;
   checkins?: { id: string; tipo?: string; lat?: number | null; lng?: number | null; photo?: string | null; nota?: string | null; createdAt?: string }[];
-  valveLog?: { decision: string; note?: string | null; createdAt: string }[];
 }
 
 // 27 UFs do Brasil (preparação nacional #147b). Seletor evita "rj"/"Rio de Janeiro" misturados.
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 // Cargos eletivos (lista fixa pra escolher no formulário e pra IA mapear).
 const CARGOS = ['Presidente', 'Senador', 'Deputado Federal', 'Deputado Estadual', 'Prefeito', 'Vereador'];
-const parseBRL = (s: string) => Number(String(s || '').replace(/\./g, '').replace(',', '.')) || 0;
 // Busca tolerante: ignora maiúsc/minúsc E acentos (usuário não lembra se
 // cadastrou "João" ou "joao"). NFD separa o acento do caractere e o range
 // ̀-ͯ remove os diacríticos.
 const normalizeText = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 interface Party { id: string; name: string; numero?: string | null; telaoToken?: string | null; plan?: string | null; }
-interface RecurringRepasse {
-  id: string; candidateId: string; candidateName?: string; valor: number;
-  descricao?: string | null; frequencia: 'mensal' | 'quinzenal' | 'semanal';
-  proximaData: string; dataFim?: string | null; ativo: boolean;
-  pausadoPelaValvula?: boolean; totalLancado?: number; lastRunAt?: string | null;
-}
-
-// Cálculo da próxima ocorrência — espelha o motor do backend (recurringRepasses.ts)
-// pra exibir/agendar coerente sem ida ao servidor.
-const addDaysISO = (iso: string, days: number) => {
-  const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10);
-};
-const addMonthsISO = (iso: string, months: number) => {
-  const d = new Date(iso + 'T00:00:00Z'); const day = d.getUTCDate();
-  d.setUTCMonth(d.getUTCMonth() + months); if (d.getUTCDate() < day) d.setUTCDate(0);
-  return d.toISOString().slice(0, 10);
-};
-const nextOccurrence = (iso: string, freq: string) =>
-  freq === 'semanal' ? addDaysISO(iso, 7) : freq === 'quinzenal' ? addDaysISO(iso, 14) : addMonthsISO(iso, 1);
-const FREQ_LABEL: Record<string, string> = { mensal: 'Mensal', quinzenal: 'Quinzenal (a cada 15 dias)', semanal: 'Semanal' };
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
@@ -76,28 +55,17 @@ const STATUS_BADGE: Record<string, string> = {
 };
 const STATUS_LABEL: Record<string, string> = { pending: 'Aguardando cadastro', active: 'Cadastrado', concluded: 'Concluído' };
 
-const TABS = ['Candidatos', 'Ranking', 'Repasses', 'Comprovação', 'Telão', 'Segurança'];
+const TABS = ['Candidatos', 'Ranking', 'Comprovação', 'Telão', 'Segurança'];
 
 const Stat: React.FC<{
   icon: any; label: string; value: React.ReactNode; from: string; to: string;
-  // Campo sensível (#141): mostra olho + render condicional (valor real NÃO vai pro DOM quando oculto).
-  sensitive?: boolean; hidden?: boolean; onToggleHidden?: () => void;
-}> = ({ icon: Icon, label, value, from, to, sensitive, hidden, onToggleHidden }) => (
+}> = ({ icon: Icon, label, value, from, to }) => (
   <div className={`bg-gradient-to-br ${from} ${to} p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-white/10`}>
     <div className="flex items-center justify-between gap-2">
       <p className="text-[10px] sm:text-xs text-slate-300 font-bold uppercase tracking-wider truncate">{label}</p>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {sensitive && (
-          <button onClick={onToggleHidden} className="text-white/60 hover:text-white transition-colors" title={hidden ? 'Mostrar valor' : 'Ocultar valor'}>
-            {hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        )}
-        <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white/70" />
-      </div>
+      <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white/70 shrink-0" />
     </div>
-    <p className="text-xl sm:text-3xl font-black text-white mt-1 sm:mt-2 break-words leading-tight">
-      {sensitive && hidden ? 'R$ ••••••' : value}
-    </p>
+    <p className="text-xl sm:text-3xl font-black text-white mt-1 sm:mt-2 break-words leading-tight">{value}</p>
   </div>
 );
 
@@ -106,17 +74,6 @@ const SCORE_CLS: Record<string, string> = {
   yellow: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
   red: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
 };
-const VALVE_META: Record<string, { label: string; cls: string; emoji: string }> = {
-  liberado: { label: 'Repasse liberado', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', emoji: '✅' },
-  retido: { label: 'Repasse segurado', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30', emoji: '⏸️' },
-  cortado: { label: 'Repasse cortado', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30', emoji: '⛔' },
-};
-const ValveChip: React.FC<{ status?: string }> = ({ status }) => {
-  if (!status || status === 'liberado') return null;
-  const m = VALVE_META[status]; if (!m) return null;
-  return <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${m.cls}`}>{m.emoji} {status === 'retido' ? 'Segurado' : 'Cortado'}</span>;
-};
-
 const ScoreChip: React.FC<{ s?: ScoreInfo; size?: 'sm' | 'md' }> = ({ s, size = 'sm' }) => {
   if (!s) return null;
   const tip = s.reasons.length ? s.reasons.map((r) => `• ${r}`).join('\n') : 'Tudo em dia ✅';
@@ -153,19 +110,6 @@ const PartyPresidentPage: React.FC = () => {
   const [party, setParty] = React.useState<Party | null>(null);
   const [candidates, setCandidates] = React.useState<Candidate[]>([]);
   const [tab, setTab] = React.useState('Candidatos');
-  // Sigilo financeiro (#141): oculto por padrão, preferência por navegador.
-  const [financialVisible, setFinancialVisible] = React.useState<boolean>(() => {
-    try { return localStorage.getItem('party_financial_visible') === 'true'; } catch { return false; }
-  });
-  const toggleFinancial = () => setFinancialVisible((v) => {
-    const nv = !v;
-    try { localStorage.setItem('party_financial_visible', String(nv)); } catch { /* ok */ }
-    return nv;
-  });
-  // Mascara qualquer valor de repasse quando o sigilo financeiro está ativo
-  // (mesmo botão de olho do card "Total repassado" controla TUDO). Sem isso, o
-  // valor ficava exposto no app (#155).
-  const money = (n: number) => financialVisible ? brl(n) : 'R$ ••••••';
   const [provName, setProvName] = React.useState('');
   const [provBusy, setProvBusy] = React.useState(false);
   // Editar nome + número do partido (cabeçalho).
@@ -173,7 +117,7 @@ const PartyPresidentPage: React.FC = () => {
   const [partyForm, setPartyForm] = React.useState({ name: '', numero: '' });
   const [partySaving, setPartySaving] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
-  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', email: '', valor: '', data: '' });
+  const [form, setForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', email: '' });
   const [adding, setAdding] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [importText, setImportText] = React.useState('');
@@ -181,7 +125,7 @@ const PartyPresidentPage: React.FC = () => {
   // Import assistido por IA (#147d): cola planilha "suja" → IA extrai → preview → confirma.
   const [importMode, setImportMode] = React.useState<'manual' | 'ia'>('manual');
   const [aiParsing, setAiParsing] = React.useState(false);
-  const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string; email: string; valor: string; data: string }[] | null>(null);
+  const [aiPreview, setAiPreview] = React.useState<{ displayName: string; cargo: string; regiao: string; estado: string; phone: string; email: string }[] | null>(null);
   const [aiIgnored, setAiIgnored] = React.useState<string[]>([]);
   const [aiError, setAiError] = React.useState<string | null>(null);
   // Arquivo arrastado (imagem/PDF) que vai direto pra IA multimodal; CSV/Excel
@@ -198,32 +142,21 @@ const PartyPresidentPage: React.FC = () => {
   const [copied, setCopied] = React.useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = React.useState(false);
   const [copiedAll, setCopiedAll] = React.useState(false);
-  const [repasseFor, setRepasseFor] = React.useState<Candidate | null>(null);
-  const [repForm, setRepForm] = React.useState({ valor: '', data: '', descricao: '' });
-  const [savingRep, setSavingRep] = React.useState(false);
-  // Histórico de repasses do candidato aberto (exibido no modal, somente leitura).
-  const [repHistory, setRepHistory] = React.useState<{ id: string; valor: number; data: string | null; descricao: string | null; itens?: { categoria: string; valor: number }[] }[]>([]);
-  // Repasse recorrente (#147): flag "repetir até a eleição" + frequência.
-  const [repRecurring, setRepRecurring] = React.useState(false);
-  const [repFreq, setRepFreq] = React.useState<'mensal' | 'quinzenal' | 'semanal'>('mensal');
-  const [repUntil, setRepUntil] = React.useState('');
-  const [recurring, setRecurring] = React.useState<RecurringRepasse[]>([]);
-  const [recBusy, setRecBusy] = React.useState<string | null>(null);
   const [proofFor, setProofFor] = React.useState<Candidate | null>(null);
   const [proofData, setProofData] = React.useState<ProofData | null>(null);
   const [proofLoading, setProofLoading] = React.useState(false);
-  // Prestação de contas do candidato vista pelo presidente (#148) — SOMENTE LEITURA.
-  const [proofRepasses, setProofRepasses] = React.useState<any[]>([]);
   const [lightbox, setLightbox] = React.useState<string | null>(null);
-  const [valveBusy, setValveBusy] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<'all' | 'green' | 'yellow' | 'red' | 'pending'>('all');
   const [estadoFilter, setEstadoFilter] = React.useState<string>('all');
   const [editFor, setEditFor] = React.useState<Candidate | null>(null);
   const [editForm, setEditForm] = React.useState({ displayName: '', cargo: '', regiao: '', estado: '', phone: '' });
   const [editing, setEditing] = React.useState(false);
+  const [editPhotoUrl, setEditPhotoUrl] = React.useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = React.useState(false);
+  const photoInputRef = React.useRef<HTMLInputElement | null>(null);
 
-  const openEdit = (c: Candidate) => { setEditFor(c); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', estado: c.estado || '', phone: c.phone || '' }); };
+  const openEdit = (c: Candidate) => { setEditFor(c); setEditPhotoUrl(c.photoUrl || null); setEditForm({ displayName: c.displayName, cargo: c.cargo || '', regiao: c.regiao || '', estado: c.estado || '', phone: c.phone || '' }); };
 
   // Toast: feedback leve de sucesso/erro. Antes a página usava alert() (bloqueia
   // e destoa) e vários saves fechavam o modal em silêncio. Some sozinho em ~3s.
@@ -261,10 +194,21 @@ const PartyPresidentPage: React.FC = () => {
     } catch { showToast('Falha de rede ao salvar. Tente de novo.', 'err'); }
     finally { setEditing(false); }
   };
+  const uploadCandidatePhoto = async (file: File | undefined) => {
+    if (!file || !editFor) return;
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await compressImage(file, 600, 0.7);
+      const r = await authedFetch(`/api/v1/party/candidates/${editFor.id}/photo`, { method: 'POST', body: JSON.stringify({ dataUrl }) });
+      if (r.ok) { const j = await r.json(); setEditPhotoUrl(j.photoUrl || dataUrl); await load(); showToast('Foto atualizada ✅'); }
+      else await notifyFail(r, 'Não consegui enviar a foto');
+    } catch { showToast('Falha ao processar a imagem. Tente outra.', 'err'); }
+    finally { setPhotoBusy(false); if (photoInputRef.current) photoInputRef.current.value = ''; }
+  };
   const deleteCandidate = async (c: Candidate) => {
     const ok = await askConfirm({
       title: `Excluir "${c.displayName}"?`,
-      body: `Isso remove o candidato e todos os dados dele (comitê, check-ins, repasses).${c.status === 'active' ? ' A conta de acesso dele também será apagada.' : ''}`,
+      body: `Isso remove o candidato e todos os dados dele (comitê, check-ins).${c.status === 'active' ? ' A conta de acesso dele também será apagada.' : ''}`,
       confirmLabel: 'Excluir', danger: true,
     });
     if (!ok) return;
@@ -285,66 +229,15 @@ const PartyPresidentPage: React.FC = () => {
     }
   };
 
-  // Válvula de repasse — funciona tanto no modal de prova quanto inline (aba Repasses).
-  const setValve = async (decision: 'liberado' | 'retido' | 'cortado', cand?: Candidate) => {
-    const target = cand || proofFor;
-    if (!target) return;
-    let note: string | null = null;
-    if (decision !== 'liberado') {
-      note = window.prompt(decision === 'retido' ? 'Motivo para SEGURAR o repasse (opcional):' : 'Motivo para CORTAR o repasse (opcional):') || null;
-    }
-    setValveBusy(target.id);
-    try {
-      const r = await authedFetch(`/api/v1/party/candidates/${target.id}/valve`, { method: 'POST', body: JSON.stringify({ decision, note }) });
-      if (r.ok) {
-        setCandidates((prev) => prev.map((c) => (c.id === target.id ? { ...c, repasseStatus: decision, valveNote: note } : c)));
-        if (proofFor && proofFor.id === target.id) { setProofFor({ ...proofFor, repasseStatus: decision, valveNote: note }); await openProof({ ...proofFor, repasseStatus: decision }); }
-        showToast(decision === 'liberado' ? 'Repasse liberado ✅' : decision === 'retido' ? 'Repasse segurado ⏸️' : 'Repasse cortado ⛔');
-      } else await notifyFail(r, 'Não consegui atualizar a válvula');
-    } catch { showToast('Falha de rede ao atualizar a válvula. Tente de novo.', 'err'); }
-    finally { setValveBusy(null); }
-  };
-
   const openProof = async (c: Candidate) => {
-    setProofFor(c); setProofData(null); setProofRepasses([]); setProofLoading(true);
+    setProofFor(c); setProofData(null); setProofLoading(true);
     try {
       const r = await authedFetch(`/api/v1/party/candidates/${c.id}/proof`);
       const j = await r.json();
       if (r.ok) setProofData(j);
-      // Repasses + rateio (preenchido pelo candidato) — presidente só lê.
-      const rr = await authedFetch(`/api/v1/party/candidates/${c.id}/repasses`);
-      const rj = await rr.json().catch(() => ({}));
-      if (rr.ok && Array.isArray(rj.repasses)) setProofRepasses(rj.repasses);
     } catch { /* */ }
     finally { setProofLoading(false); }
   };
-
-  const openRepasse = async (c: Candidate) => {
-    setRepasseFor(c);
-    setRepForm({ valor: '', data: '', descricao: '' });
-    setRepRecurring(false); setRepFreq('mensal'); setRepUntil('');
-    setRepHistory([]);
-    // Carrega o histórico de repasses do candidato (exibido no modal) e, se ele
-    // ainda não tem nenhum repasse mas tem valorRecebido (importado), pré-preenche.
-    try {
-      const r = await authedFetch(`/api/v1/party/candidates/${c.id}/repasses`);
-      const j = await r.json().catch(() => ({}));
-      const reps = Array.isArray(j.repasses) ? j.repasses : [];
-      setRepHistory(reps);
-      const valorImportado = Number((c as any).valorRecebido) || 0;
-      if (reps.length === 0 && valorImportado > 0) {
-        setRepForm({ valor: String(valorImportado), data: new Date().toISOString().slice(0, 10), descricao: 'Repasse importado via cadastro' });
-      }
-    } catch { /* silencioso — abre form vazio */ }
-  };
-
-  const loadRecurring = React.useCallback(async () => {
-    try {
-      const r = await authedFetch('/api/v1/party/recurring-repasses');
-      const j = await r.json();
-      if (r.ok) setRecurring(j.recurring || []);
-    } catch { /* */ }
-  }, []);
 
   // silent=true: atualiza os dados SEM trocar a página inteira pelo spinner
   // (evita o "flash/loop" e não desmonta o ORB/modais durante refresh pós-ação).
@@ -357,10 +250,9 @@ const PartyPresidentPage: React.FC = () => {
       if (r.status === 401) { setAuthExpired(true); return; }
       const j = await r.json();
       if (r.ok) { setAuthExpired(false); setParty(j.party); setCandidates(j.candidates || []); }
-      await loadRecurring();
     } catch { /* rede instável: mantém estado atual */ }
     finally { if (!silent) setLoading(false); }
-  }, [loadRecurring]);
+  }, []);
   React.useEffect(() => { load(); }, [load]);
 
   const provision = async () => {
@@ -391,7 +283,7 @@ const PartyPresidentPage: React.FC = () => {
     setAdding(true);
     try {
       const r = await authedFetch('/api/v1/party/candidates', { method: 'POST', body: JSON.stringify(form) });
-      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', email: '', valor: '', data: '' }); setAddOpen(false); await load(); showToast('Candidato adicionado ✅'); }
+      if (r.ok) { setForm({ displayName: '', cargo: '', regiao: '', estado: '', phone: '', email: '' }); setAddOpen(false); await load(); showToast('Candidato adicionado ✅'); }
       else await notifyFail(r, 'Não consegui adicionar o candidato');
     } catch { showToast('Falha de rede ao adicionar o candidato. Tente de novo.', 'err'); }
     finally { setAdding(false); }
@@ -503,7 +395,7 @@ const PartyPresidentPage: React.FC = () => {
     } finally { setImporting(false); }
   };
   // edição inline da prévia da IA (#147e)
-  const updatePreviewRow = (i: number, field: 'displayName' | 'cargo' | 'regiao' | 'estado' | 'phone' | 'email' | 'valor' | 'data', value: string) => {
+  const updatePreviewRow = (i: number, field: 'displayName' | 'cargo' | 'regiao' | 'estado' | 'phone' | 'email', value: string) => {
     setAiPreview((prev) => prev ? prev.map((r, j) => (j === i ? { ...r, [field]: value } : r)) : prev);
   };
   const removePreviewRow = (i: number) => setAiPreview((prev) => (prev ? prev.filter((_, j) => j !== i) : prev));
@@ -548,69 +440,9 @@ const PartyPresidentPage: React.FC = () => {
     navigator.clipboard?.writeText(txt).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1800); }, () => {});
   };
 
-  const saveRepasse = async () => {
-    if (!repasseFor) return;
-    const v = parseBRL(repForm.valor);
-    if (!(v > 0)) return;
-    // O presidente lança só valor+data. O rateio (como o dinheiro foi aplicado)
-    // é prestação de contas do candidato — ele preenche na tela dele.
-    setSavingRep(true);
-    try {
-      const r = await authedFetch(`/api/v1/party/candidates/${repasseFor.id}/repasses`, {
-        method: 'POST', body: JSON.stringify({ valor: v, data: repForm.data, descricao: repForm.descricao }),
-      });
-      if (r.ok) {
-        // Flag "repetir até a eleição": cria o modelo recorrente. O repasse de
-        // HOJE já foi lançado acima — o recorrente agenda a PRÓXIMA ocorrência
-        // (data base avançada uma vez) pra não duplicar neste período.
-        if (repRecurring) {
-          const base = /^\d{4}-\d{2}-\d{2}$/.test(repForm.data) ? repForm.data : new Date().toISOString().slice(0, 10);
-          await authedFetch(`/api/v1/party/candidates/${repasseFor.id}/recurring-repasses`, {
-            method: 'POST',
-            body: JSON.stringify({
-              valor: v, descricao: repForm.descricao, frequencia: repFreq,
-              proximaData: nextOccurrence(base, repFreq),
-              dataFim: repUntil || undefined,
-            }),
-          });
-        }
-        setRepasseFor(null); await load(); showToast(repRecurring ? 'Repasse lançado e recorrência criada ✅' : 'Repasse lançado ✅');
-      } else await notifyFail(r, 'Não consegui lançar o repasse');
-    } catch { showToast('Falha de rede ao lançar o repasse. Tente de novo.', 'err'); }
-    finally { setSavingRep(false); }
-  };
-
-  // Pausar/reativar/cancelar recorrente (#147).
-  const toggleRecurring = async (rec: RecurringRepasse) => {
-    setRecBusy(rec.id);
-    try {
-      const r = await authedFetch(`/api/v1/party/recurring-repasses/${rec.id}`, { method: 'PATCH', body: JSON.stringify({ ativo: !rec.ativo }) });
-      if (r.ok) { await loadRecurring(); showToast(rec.ativo ? 'Recorrência pausada.' : 'Recorrência retomada.'); }
-      else await notifyFail(r, 'Não consegui atualizar a recorrência');
-    } catch { showToast('Falha de rede. Tente de novo.', 'err'); }
-    finally { setRecBusy(null); }
-  };
-  const cancelRecurring = async (rec: RecurringRepasse) => {
-    const ok = await askConfirm({
-      title: 'Cancelar repasse automático?',
-      body: `Cancelar o repasse automático de ${money(rec.valor)} para ${rec.candidateName || 'este candidato'}? Os repasses já lançados continuam no histórico.`,
-      confirmLabel: 'Cancelar recorrência', danger: true,
-    });
-    if (!ok) return;
-    setRecBusy(rec.id);
-    try {
-      const r = await authedFetch(`/api/v1/party/recurring-repasses/${rec.id}`, { method: 'DELETE' });
-      if (r.ok) { await loadRecurring(); showToast('Recorrência cancelada.'); }
-      else await notifyFail(r, 'Não consegui cancelar a recorrência');
-    } catch { showToast('Falha de rede. Tente de novo.', 'err'); }
-    finally { setRecBusy(null); }
-  };
-
-  const totalRepassado = candidates.reduce((s, c) => s + (Number(c.valorRecebido) || 0), 0);
   const cadastrados = candidates.filter((c) => c.status === 'active').length;
   const metasDoneTotal = candidates.reduce((s, c) => s + (c.metasDone || 0), 0);
   const metasTotalTotal = candidates.reduce((s, c) => s + (c.metasTotal || 0), 0);
-  const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   // Cidade/UF combinados (ex: "Niterói/RJ"). Preparado pra todo o Brasil (#147b).
   const localOf = (c: Candidate) => [c.regiao, c.estado].filter(Boolean).join('/');
 
@@ -680,11 +512,9 @@ const PartyPresidentPage: React.FC = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-6 sm:mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6 mb-6 sm:mb-8">
         <Stat icon={Users} label="Candidatos" value={candidates.length} from="from-indigo-600/20" to="to-blue-600/10" />
         <Stat icon={CheckCircle2} label="Já cadastrados" value={cadastrados} from="from-emerald-600/20" to="to-teal-600/10" />
-        <Stat icon={Wallet} label="Total repassado" value={brl(totalRepassado)} from="from-amber-600/20" to="to-orange-600/10"
-          sensitive hidden={!financialVisible} onToggleHidden={toggleFinancial} />
         <Stat icon={Target} label="Metas cumpridas" value={`${metasDoneTotal}/${metasTotalTotal || 0}`} from="from-purple-600/20" to="to-fuchsia-600/10" />
       </div>
 
@@ -754,9 +584,12 @@ const PartyPresidentPage: React.FC = () => {
             <p className="text-xs text-slate-500 mb-1">{filtered.length} de {candidates.length} candidato(s)</p>
             {filtered.map((c) => (
               <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-bold text-white truncate">{c.displayName}</p>
-                  <p className="text-xs text-slate-400 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</p>
+                <div className="flex items-center gap-3 min-w-0">
+                  <Avatar name={c.displayName} url={c.photoUrl} size={44} />
+                  <div className="min-w-0">
+                    <p className="font-bold text-white truncate">{c.displayName}</p>
+                    <p className="text-xs text-slate-400 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</p>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <ScoreChip s={c.score} />
@@ -777,11 +610,6 @@ const PartyPresidentPage: React.FC = () => {
                       {copied === c.inviteToken ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> Copiado</> : <><Link2 className="w-3.5 h-3.5" /> Link</>}
                     </button>
                   )}
-                  <button onClick={() => openRepasse(c)}
-                    className="text-xs flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300" title="Registrar repasse">
-                    <Wallet className="w-3.5 h-3.5" /> Repasse
-                  </button>
-                  <span className="text-sm text-slate-300 text-right">{money(Number(c.valorRecebido) || 0)}</span>
                   <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${STATUS_BADGE[c.status] || STATUS_BADGE.pending}`}>{STATUS_LABEL[c.status] || c.status}</span>
                   <button onClick={() => openEdit(c)} title="Editar" className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white"><Pencil className="w-3.5 h-3.5" /></button>
                   <button onClick={() => deleteCandidate(c)} title="Excluir" className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -815,7 +643,6 @@ const PartyPresidentPage: React.FC = () => {
           const greens = candidates.filter((c) => c.score?.level === 'green').length;
           const yellows = candidates.filter((c) => c.score?.level === 'yellow').length;
           const reds = candidates.filter((c) => c.score?.level === 'red').length;
-          const aJustificar = candidates.reduce((s, c) => s + Math.max(0, (Number(c.valorRecebido) || 0) - (Number(c.valorAlocado) || 0)), 0);
           const medal = (i: number) => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}º`);
           const lastSeen = (iso?: string | null) => {
             if (!iso) return 'nunca';
@@ -831,11 +658,10 @@ const PartyPresidentPage: React.FC = () => {
           return (
             <div className="space-y-4">
               {/* Resumo do partido */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-emerald-300">{greens}</p><p className="text-[11px] text-slate-400">🟢 Em dia</p></div>
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-amber-300">{yellows}</p><p className="text-[11px] text-slate-400">🟡 Atenção</p></div>
                 <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 text-center"><p className="text-2xl font-black text-rose-300">{reds}</p><p className="text-[11px] text-slate-400">🔴 Risco</p></div>
-                <div className="bg-slate-800/60 border border-white/10 rounded-2xl p-3 text-center"><p className="text-lg font-black text-rose-300 leading-tight mt-1">{money(aJustificar)}</p><p className="text-[11px] text-slate-400">a justificar</p></div>
               </div>
 
               <SearchBar value={search} onChange={setSearch} placeholder="Buscar no ranking (nome, telefone, cargo, cidade, UF)…" />
@@ -846,9 +672,12 @@ const PartyPresidentPage: React.FC = () => {
                   <p className="text-xs font-bold uppercase tracking-wider text-indigo-300 mb-3 flex items-center gap-1.5"><Trophy className="w-4 h-4" /> Destaques do partido</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {ranked.slice(0, 3).map((c, i) => (
-                      <button key={c.id} onClick={() => openProof(c)} className="text-center bg-[#1c2128] rounded-2xl border border-white/5 hover:border-white/20 p-3 transition-colors">
-                        <div className="text-2xl">{medal(i)}</div>
-                        <p className="text-sm font-bold text-white truncate mt-1">{c.displayName}</p>
+                      <button key={c.id} onClick={() => openProof(c)} className="text-center bg-[#1c2128] rounded-2xl border border-white/5 hover:border-white/20 p-3 transition-colors flex flex-col items-center">
+                        <div className="relative">
+                          <Avatar name={c.displayName} url={c.photoUrl} size={56} />
+                          <span className="absolute -top-1 -right-1 text-lg">{medal(i)}</span>
+                        </div>
+                        <p className="text-sm font-bold text-white truncate mt-1 max-w-full">{c.displayName}</p>
                         <ScoreChip s={c.score} />
                       </button>
                     ))}
@@ -856,29 +685,26 @@ const PartyPresidentPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Tabela lado a lado: recebeu × entregou × score */}
+              {/* Tabela: posição × candidato × score × atividade */}
               <div className="bg-[#1c2128] border border-white/5 rounded-3xl overflow-hidden">
-                <div className="hidden sm:grid grid-cols-[2rem_1fr_5rem_6rem_6rem_5rem] gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-white/5">
-                  <span>#</span><span>Candidato</span><span className="text-center">Score</span><span className="text-right">Recebeu</span><span className="text-right">A justificar</span><span className="text-center">Ativo</span>
+                <div className="hidden sm:grid grid-cols-[2rem_1fr_5rem_5rem] gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-white/5">
+                  <span>#</span><span>Candidato</span><span className="text-center">Score</span><span className="text-center">Ativo</span>
                 </div>
-                {shownRanked.map(({ c, idx }) => {
-                  const recebido = Number(c.valorRecebido) || 0;
-                  const restante = recebido - (Number(c.valorAlocado) || 0);
-                  return (
+                {shownRanked.map(({ c, idx }) => (
                     <button key={c.id} onClick={() => openProof(c)}
-                      className="w-full grid grid-cols-[2rem_1fr_5rem] sm:grid-cols-[2rem_1fr_5rem_6rem_6rem_5rem] gap-2 px-4 py-3 items-center text-left hover:bg-white/5 border-b border-white/5 last:border-0 transition-colors">
+                      className="w-full grid grid-cols-[2rem_1fr_5rem] sm:grid-cols-[2rem_1fr_5rem_5rem] gap-2 px-4 py-3 items-center text-left hover:bg-white/5 border-b border-white/5 last:border-0 transition-colors">
                       <span className="font-black text-slate-400">{medal(idx)}</span>
-                      <span className="min-w-0">
-                        <span className="flex items-center gap-1.5"><span className="font-bold text-white truncate">{c.displayName}</span><ValveChip status={c.repasseStatus} /></span>
-                        <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</span>
+                      <span className="min-w-0 flex items-center gap-2">
+                        <Avatar name={c.displayName} url={c.photoUrl} size={34} />
+                        <span className="min-w-0">
+                          <span className="font-bold text-white truncate block">{c.displayName}</span>
+                          <span className="block text-[11px] text-slate-500 truncate">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'}</span>
+                        </span>
                       </span>
                       <span className="text-center"><ScoreChip s={c.score} /></span>
-                      <span className="hidden sm:block text-right text-sm text-white">{money(recebido)}</span>
-                      <span className={`hidden sm:block text-right text-sm font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? money(restante) : '—'}</span>
                       <span className="hidden sm:flex items-center justify-center gap-1 text-[11px] text-slate-400"><Activity className="w-3 h-3" /> {lastSeen(c.lastCheckinAt)}</span>
                     </button>
-                  );
-                })}
+                ))}
                 {shownRanked.length === 0 && (
                   <div className="text-center py-10 px-4">
                     <p className="text-slate-400 text-sm">Nenhum candidato encontrado para "<b className="text-slate-300">{search}</b>".</p>
@@ -890,94 +716,6 @@ const PartyPresidentPage: React.FC = () => {
           );
         })()}
         </>)
-      )}
-
-      {tab === 'Repasses' && (
-        candidates.length === 0 ? (
-          <div className="text-center py-16 border border-dashed border-white/10 rounded-3xl text-slate-500">Cadastre candidatos para registrar repasses.</div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-sm text-slate-400 mb-1 flex items-center gap-1.5 flex-wrap">
-              <span>Total repassado: <b className="text-white">{money(totalRepassado)}</b></span>
-              <span>· A justificar: <b className="text-rose-400">{money(candidates.reduce((s, c) => s + Math.max(0, (Number(c.valorRecebido) || 0) - (Number(c.valorAlocado) || 0)), 0))}</b></span>
-              <button onClick={toggleFinancial} className="text-slate-400 hover:text-white" title={financialVisible ? 'Ocultar valores' : 'Mostrar valores'}>
-                {financialVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              </button>
-            </p>
-
-            {/* Repasses automáticos (#147) — modelos recorrentes ativos/pausados */}
-            {recurring.length > 0 && (
-              <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-3 mb-2">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 mb-2 flex items-center gap-1.5">🔁 Repasses automáticos ({recurring.filter((r) => r.ativo).length} ativos)</p>
-                <div className="space-y-1.5">
-                  {recurring.map((rec) => (
-                    <div key={rec.id} className="flex items-center justify-between gap-2 bg-[#1c2128] rounded-xl border border-white/5 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-white truncate flex items-center gap-1.5">
-                          {rec.candidateName || '—'}
-                          {!rec.ativo && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-600/40 text-slate-300">pausado</span>}
-                          {rec.ativo && rec.pausadoPelaValvula && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">⏸️ válvula</span>}
-                        </p>
-                        <p className="text-[11px] text-slate-400 truncate">
-                          {money(rec.valor)} · {FREQ_LABEL[rec.frequencia] || rec.frequencia}
-                          {rec.ativo ? ` · próximo ${new Date(rec.proximaData + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
-                          {rec.dataFim ? ` · até ${new Date(rec.dataFim + 'T00:00:00').toLocaleDateString('pt-BR')}` : ''}
-                          {rec.totalLancado ? ` · ${rec.totalLancado} lançado(s)` : ''}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button onClick={() => toggleRecurring(rec)} disabled={recBusy === rec.id}
-                          className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-50">
-                          {rec.ativo ? '⏸️ Pausar' : '▶️ Retomar'}
-                        </button>
-                        <button onClick={() => cancelRecurring(rec)} disabled={recBusy === rec.id} title="Cancelar"
-                          className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 disabled:opacity-50"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[10px] text-slate-500 mt-2">Lançam sozinhos na data agendada. Se a válvula do candidato estiver segurada/cortada, pausam automaticamente e voltam quando você liberar.</p>
-              </div>
-            )}
-
-            {[...candidates].sort((a, b) => (Number(b.valorRecebido) || 0) - (Number(a.valorRecebido) || 0)).map((c) => {
-              const recebido = Number(c.valorRecebido) || 0;
-              const restante = recebido - (Number(c.valorAlocado) || 0);
-              return (
-              <div key={c.id} className="bg-[#1c2128] p-4 rounded-2xl border border-white/5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-bold text-white truncate flex items-center gap-2">{c.displayName} <ValveChip status={c.repasseStatus} /></p>
-                    <p className="text-xs text-slate-400">{[c.cargo, localOf(c)].filter(Boolean).join(' · ') || '—'} · 🎯 {c.metasDone}/{c.metasTotal} metas</p>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="text-right">
-                      <p className="text-lg font-black text-white leading-none">{money(recebido)}</p>
-                      {recebido > 0 && <p className={`text-[11px] font-bold ${restante > 0.005 ? 'text-rose-400' : 'text-emerald-400'}`}>{restante > 0.005 ? `${money(restante)} a justificar` : 'tudo alocado ✅'}</p>}
-                    </div>
-                    <button onClick={() => openRepasse(c)}
-                      className="text-xs flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300"><Wallet className="w-3.5 h-3.5" /> Repasse</button>
-                  </div>
-                </div>
-                {/* Válvula inline: liberar / segurar / cortar o repasse */}
-                <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2 flex-wrap">
-                  <span className="text-[11px] text-slate-500 mr-1">Válvula:</span>
-                  {(['liberado', 'retido', 'cortado'] as const).map((d) => {
-                    const active = (c.repasseStatus || 'liberado') === d;
-                    return (
-                      <button key={d} onClick={() => setValve(d, c)} disabled={valveBusy === c.id}
-                        className={`text-[11px] font-bold rounded-lg px-2.5 py-1 border disabled:opacity-50 ${active ? VALVE_META[d].cls : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>
-                        {d === 'liberado' ? '✅ Liberar' : d === 'retido' ? '⏸️ Segurar' : '⛔ Cortar'}
-                      </button>
-                    );
-                  })}
-                  {valveBusy === c.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
-                </div>
-              </div>
-              );
-            })}
-          </div>
-        )
       )}
 
       {tab === 'Comprovação' && (
@@ -1058,14 +796,14 @@ const PartyPresidentPage: React.FC = () => {
           <PartyRestore onRestored={() => load(true)} />
           <PartyEmergencyWipe
             partyName={party.name}
-            hasData={candidates.length > 0 || totalRepassado > 0}
+            hasData={candidates.length > 0}
             onWiped={() => { setTab('Candidatos'); load(); }}
           />
         </>
       )}
 
       {/* ORB Conversacional (#142) — assistente flutuante do partido */}
-      <PartyAIOrb onRepasseDone={() => load(true)} />
+      <PartyAIOrb />
 
       {/* Card flutuante de resolução de duplicatas — aparece ANTES do preview
           quando a IA detecta linhas potencialmente repetidas na planilha. */}
@@ -1073,7 +811,10 @@ const PartyPresidentPage: React.FC = () => {
         <DuplicateResolutionCard
           groups={aiDupGroups}
           decisions={aiDecisions}
-          rows={aiPreview}
+          // O módulo do partido não lida mais com dinheiro; o card de duplicatas
+          // ainda tipa valor/data (DupRow), então mandamos vazio só pra satisfazer
+          // o contrato — esses campos somem da UI quando vazios.
+          rows={aiPreview.map((r) => ({ ...r, valor: '', data: '' }))}
           onDecide={(groupIdx, decision) => setAiDecisions((d) => {
             if (!decision) { const next = { ...d }; delete next[groupIdx]; return next; }
             return { ...d, [groupIdx]: decision };
@@ -1092,20 +833,16 @@ const PartyPresidentPage: React.FC = () => {
                 return;
               }
               if (dec.action === 'unify') {
-                // Soma valores, pega primeiro não-vazio dos demais campos.
+                // Pega o primeiro não-vazio de cada campo entre as linhas do grupo.
                 const rows = g.indexes.map((i) => aiPreview[i]);
                 const merged = { ...rows[0] };
-                const valores: number[] = [];
                 for (const r of rows) {
-                  const v = Number(r.valor) || 0;
-                  if (v > 0) valores.push(v);
                   if (!merged.cargo && r.cargo) merged.cargo = r.cargo;
+                  if (!merged.regiao && r.regiao) merged.regiao = r.regiao;
                   if (!merged.estado && r.estado) merged.estado = r.estado;
                   if (!merged.phone && r.phone) merged.phone = r.phone;
-                  if (!merged.data && r.data) merged.data = r.data;
+                  if (!merged.email && r.email) merged.email = r.email;
                 }
-                const soma = valores.reduce((a, b) => a + b, 0);
-                merged.valor = soma > 0 ? String(soma) : '';
                 // Remove originais; insere o merged na posição da primeira.
                 g.indexes.forEach((i) => removeIdx.add(i));
                 inserts.push({ afterIdx: g.indexes[0], row: merged });
@@ -1209,12 +946,6 @@ const PartyPresidentPage: React.FC = () => {
               </div>
               <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} type="email" placeholder="E-mail que o candidato mais usa (opcional)" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
               <p className="text-[11px] text-slate-500">* Nome, cidade, UF e telefone são obrigatórios (mapa + convite por WhatsApp). Cargo e e-mail são opcionais — o e-mail agiliza o contato e já vem sugerido no cadastro dele.</p>
-              {/* Repasse inicial (opcional) — se informado, já cria o registro e popula o histórico */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                <input value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} placeholder="Valor do repasse (opcional)" inputMode="decimal" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-                <input value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" title="Data do repasse" />
-              </div>
-              <p className="text-[11px] text-slate-500">Se já houve um repasse, informe o valor e a data — entra no histórico e o candidato presta contas dele.</p>
             </div>
             <button onClick={addCandidate} disabled={adding || !form.displayName.trim() || !form.regiao.trim() || !form.estado || form.phone.replace(/\D/g, '').length < 10} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
               {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Adicionar
@@ -1230,6 +961,18 @@ const PartyPresidentPage: React.FC = () => {
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-bold text-white">Editar candidato</h4>
               <button onClick={() => setEditFor(null)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex items-center gap-3 mb-3">
+              <Avatar name={editForm.displayName || editFor.displayName} url={editPhotoUrl} size={64} />
+              <div>
+                <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => uploadCandidatePhoto(e.target.files?.[0])} />
+                <button type="button" onClick={() => photoInputRef.current?.click()} disabled={photoBusy}
+                  className="text-xs font-bold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 flex items-center gap-1.5 disabled:opacity-50">
+                  {photoBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {editPhotoUrl ? 'Trocar foto' : 'Enviar foto'}
+                </button>
+                <p className="text-[11px] text-slate-500 mt-1">JPG/PNG · até ~2MB</p>
+              </div>
             </div>
             <div className="space-y-2">
               <input value={editForm.displayName} onChange={(e) => setEditForm({ ...editForm, displayName: e.target.value })} placeholder="Nome do candidato *" className="w-full bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
@@ -1291,8 +1034,8 @@ const PartyPresidentPage: React.FC = () => {
 
             {/* Campos obrigatórios — vale para os dois modos, evita erro de importação */}
             <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-[11px] text-amber-100 leading-relaxed">
-              ⚠️ <b>O que não pode faltar:</b> o <b>Nome</b> é obrigatório (linha sem nome é descartada). <b>Cidade + UF</b> posicionam no mapa/telão e o <b>Telefone</b> permite o convite por WhatsApp — sem eles o candidato entra, mas incompleto. Cargo, e-mail e valores são opcionais.<br />
-              <span className="text-amber-200/80">Não precisa rotular as colunas: a IA identifica cada dado pelo conteúdo (e-mail tem @, telefone = dígitos, UF = 2 letras, valor = número) mesmo <b>sem cabeçalho</b>. Cabeçalhos e linhas vazias são ignorados.</span>
+              ⚠️ <b>O que não pode faltar:</b> o <b>Nome</b> é obrigatório (linha sem nome é descartada). <b>Cidade + UF</b> posicionam no mapa/telão e o <b>Telefone</b> permite o convite por WhatsApp — sem eles o candidato entra, mas incompleto. Cargo e e-mail são opcionais.<br />
+              <span className="text-amber-200/80">Não precisa rotular as colunas: a IA identifica cada dado pelo conteúdo (e-mail tem @, telefone = dígitos, UF = 2 letras) mesmo <b>sem cabeçalho</b>. Cabeçalhos e linhas vazias são ignorados.</span>
             </div>
 
             {importMode === 'manual' ? (
@@ -1382,10 +1125,6 @@ const PartyPresidentPage: React.FC = () => {
                               className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
                             <input value={c.email} onChange={(e) => updatePreviewRow(i, 'email', e.target.value)} placeholder="E-mail"
                               className="col-span-2 bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-slate-200" />
-                            <input value={c.valor} onChange={(e) => updatePreviewRow(i, 'valor', e.target.value)} placeholder="Valor R$ (repasse)"
-                              className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-emerald-200" />
-                            <input type="date" value={c.data} onChange={(e) => updatePreviewRow(i, 'data', e.target.value)}
-                              className="bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-emerald-200" title="Data do repasse" />
                           </div>
                           <button onClick={() => removePreviewRow(i)} title="Remover" className="p-1 text-slate-500 hover:text-rose-400 shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
@@ -1403,129 +1142,6 @@ const PartyPresidentPage: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Modal: registrar repasse com RATEIO */}
-      {repasseFor && (() => {
-        const total = parseBRL(repForm.valor);
-        // Resumo do MÊS CORRENTE: soma dos repasses do mês + data do último.
-        const ym = new Date().toISOString().slice(0, 7); // YYYY-MM
-        const mesReps = repHistory.filter((r) => (r.data || '').slice(0, 7) === ym);
-        const totalMes = mesReps.reduce((s, r) => s + (Number(r.valor) || 0), 0);
-        const ultimaDataMes = mesReps.map((r) => r.data).filter(Boolean).sort().slice(-1)[0] || null;
-        return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !savingRep && setRepasseFor(null)}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-1">
-              <h4 className="font-bold text-white">Registrar repasse</h4>
-              <button onClick={() => setRepasseFor(null)} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
-            </div>
-            <p className="text-xs text-slate-400 mb-3">Para <b className="text-slate-200">{repasseFor.displayName}</b></p>
-
-            {repasseFor.repasseStatus && repasseFor.repasseStatus !== 'liberado' && (
-              <div className={`mb-3 rounded-xl p-3 text-xs border ${VALVE_META[repasseFor.repasseStatus]?.cls}`}>
-                {VALVE_META[repasseFor.repasseStatus]?.emoji} Atenção: você marcou o repasse deste candidato como <b>{repasseFor.repasseStatus === 'retido' ? 'SEGURADO' : 'CORTADO'}</b>{repasseFor.valveNote ? ` (${repasseFor.valveNote})` : ''}. Registrar mesmo assim ficará no histórico.
-              </div>
-            )}
-
-            {/* Aviso de imutabilidade — uma vez registrado, valor e data não podem ser alterados. */}
-            <div className="mb-3 rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-[11px] text-amber-200 leading-relaxed">
-              ⚠️ <b>Atenção:</b> uma vez registrado, o <b>valor</b> e a <b>data</b> deste repasse NÃO poderão ser alterados nem o repasse excluído (regra de prestação de contas).
-              Para qualquer ajuste, será necessário lançar um <b>NOVO repasse</b> (positivo para acréscimo, negativo para estorno).
-            </div>
-
-            {/* Resumo do MÊS CORRENTE (somente leitura): total recebido no mês +
-                data do último repasse. Os repasses individuais ficam no histórico. */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-              <div className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-slate-500">Recebido no mês corrente</p>
-                <p className="text-white font-bold">{money(totalMes)}</p>
-              </div>
-              <div className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-slate-500">Último repasse do mês</p>
-                <p className="text-white font-bold">{ultimaDataMes ? new Date(ultimaDataMes + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</p>
-              </div>
-            </div>
-
-            {/* O rateio NÃO é mais preenchido pelo presidente — é prestação de
-                contas do candidato. Aqui só informamos isso. */}
-            <div className="rounded-xl bg-slate-950 border border-white/10 p-3 mb-3 text-xs text-slate-400 leading-relaxed">
-              💡 <b className="text-slate-200">Como o dinheiro será aplicado</b> é preenchido pelo próprio <b className="text-slate-200">{repasseFor.displayName}</b> na tela de prestação de contas dele. Você acompanha (somente leitura) pela <b className="text-slate-200">comprovação</b> do candidato — não edita esses valores.
-            </div>
-
-            {/* Histórico de repasses já registrados (somente leitura) */}
-            {repHistory.length > 0 && (
-              <div className="mb-3">
-                <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Histórico de repasses ({repHistory.length}) · total {money(repHistory.reduce((s, r) => s + (Number(r.valor) || 0), 0))}</p>
-                <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5">
-                  {repHistory.map((r) => {
-                    const aplicado = Array.isArray(r.itens) ? r.itens.reduce((a, it) => a + (Number(it.valor) || 0), 0) : 0;
-                    const restante = (Number(r.valor) || 0) - aplicado;
-                    return (
-                      <div key={r.id} className="flex items-center justify-between px-3 py-2 text-xs">
-                        <div className="min-w-0">
-                          <p className="text-white font-bold">{money(Number(r.valor) || 0)}</p>
-                          <p className="text-[10px] text-slate-500 truncate">{r.data ? new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'sem data'}{r.descricao ? ` · ${r.descricao}` : ''}</p>
-                        </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${restante > 0.005 ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
-                          {restante > 0.005 ? `${money(restante)} a justificar` : 'justificado ✅'}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Lançar um NOVO repasse (valor + data). O resumo acima é só leitura. */}
-            <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1.5">Lançar novo repasse</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1">
-              <input value={repForm.valor} onChange={(e) => setRepForm({ ...repForm, valor: e.target.value })} placeholder="Valor recebido *" inputMode="decimal" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white font-bold" />
-              <input value={repForm.data} onChange={(e) => setRepForm({ ...repForm, data: e.target.value })} type="date" className="bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white" />
-            </div>
-            <p className="text-[10px] text-slate-500 mb-3">Cada lançamento é um repasse imutável e entra no histórico acima.</p>
-
-            {/* Repasse recorrente (#147): repete sozinho até a eleição */}
-            <div className={`rounded-xl border p-3 mb-3 transition-colors ${repRecurring ? 'bg-indigo-500/10 border-indigo-500/40' : 'bg-slate-950 border-white/10'}`}>
-              <label className="flex items-start gap-2.5 cursor-pointer">
-                <input type="checkbox" checked={repRecurring} onChange={(e) => setRepRecurring(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-indigo-500" />
-                <span>
-                  <span className="text-sm font-bold text-white flex items-center gap-1.5">🔁 Repetir este repasse automaticamente</span>
-                  <span className="block text-[11px] text-slate-400 mt-0.5">O mesmo valor é lançado sozinho na frequência escolhida — você não precisa refazer o formulário todo mês.</span>
-                </span>
-              </label>
-              {repRecurring && (
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Frequência</label>
-                    <select value={repFreq} onChange={(e) => setRepFreq(e.target.value as any)}
-                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white">
-                      <option value="mensal">Mensal</option>
-                      <option value="quinzenal">Quinzenal (15 dias)</option>
-                      <option value="semanal">Semanal</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Repetir até (opcional)</label>
-                    <input type="date" value={repUntil} onChange={(e) => setRepUntil(e.target.value)}
-                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-sm text-white" />
-                  </div>
-                  <p className="sm:col-span-2 text-[11px] text-indigo-300">
-                    Próximo lançamento automático: <b>{new Date(nextOccurrence(/^\d{4}-\d{2}-\d{2}$/.test(repForm.data) ? repForm.data : new Date().toISOString().slice(0, 10), repFreq) + 'T00:00:00').toLocaleDateString('pt-BR')}</b>
-                    {repUntil ? ` · até ${new Date(repUntil + 'T00:00:00').toLocaleDateString('pt-BR')}` : ' · até você cancelar'}.
-                    {' '}Se a válvula deste candidato estiver segurada/cortada, o repasse pausa sozinho.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <button onClick={saveRepasse} disabled={savingRep || !(total > 0)} className="w-full bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl px-4 py-2.5 font-bold flex items-center justify-center gap-2">
-              {savingRep ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />} {repRecurring ? 'Registrar + agendar repasse' : 'Registrar repasse'}
-            </button>
-          </div>
-        </div>
-        );
-      })()}
 
       {/* Modal: prova visual (comitê + check-ins com fotos) */}
       {proofFor && (
@@ -1552,37 +1168,8 @@ const PartyPresidentPage: React.FC = () => {
               </div>
             )}
             {proofFor.score && proofFor.score.reasons.length === 0 && (
-              <div className="mb-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200 font-bold">✅ Tudo em dia — comprovação completa e contas alocadas.</div>
+              <div className="mb-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200 font-bold">✅ Tudo em dia — comprovação completa.</div>
             )}
-
-            {/* VÁLVULA — decisão do presidente sobre o repasse */}
-            <div className="mb-4 bg-slate-950/60 border border-white/10 rounded-2xl p-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Válvula de repasse</p>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${VALVE_META[proofFor.repasseStatus || 'liberado']?.cls}`}>
-                  {VALVE_META[proofFor.repasseStatus || 'liberado']?.emoji} {VALVE_META[proofFor.repasseStatus || 'liberado']?.label}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {(['liberado', 'retido', 'cortado'] as const).map((d) => (
-                  <button key={d} onClick={() => setValve(d)} disabled={!!valveBusy}
-                    className={`text-xs font-bold rounded-lg px-2 py-2 border disabled:opacity-50 transition-colors ${
-                      proofFor.repasseStatus === d || (!proofFor.repasseStatus && d === 'liberado')
-                        ? VALVE_META[d].cls
-                        : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}>
-                    {d === 'liberado' ? '✅ Liberar' : d === 'retido' ? '⏸️ Segurar' : '⛔ Cortar'}
-                  </button>
-                ))}
-              </div>
-              {proofFor.valveNote && <p className="text-[11px] text-slate-400 mt-2">Motivo: {proofFor.valveNote}</p>}
-              {proofData?.valveLog && proofData.valveLog.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-white/5 space-y-0.5">
-                  {proofData.valveLog.slice(0, 4).map((l, i) => (
-                    <p key={i} className="text-[10px] text-slate-500">{new Date(l.createdAt).toLocaleString('pt-BR')} — {VALVE_META[l.decision]?.emoji} {l.decision}{l.note ? ` · ${l.note}` : ''}</p>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {proofLoading ? (
               <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>
@@ -1640,42 +1227,6 @@ const PartyPresidentPage: React.FC = () => {
                     </div>
                   ) : <div className="text-xs text-slate-500">Nenhum check-in registrado ainda.</div>}
                 </div>
-
-                {/* Prestação de contas — preenchida pelo CANDIDATO, presidente só lê */}
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Prestação de contas <span className="text-[10px] normal-case font-normal text-slate-500">· preenchida pelo candidato</span></p>
-                  {proofRepasses.length ? (
-                    <div className="space-y-2">
-                      {proofRepasses.map((rep: any) => {
-                        const aplicado = Number(rep.alocado) || 0;
-                        const restante = (Number(rep.valor) || 0) - aplicado;
-                        const itens = Array.isArray(rep.itens) ? rep.itens : [];
-                        return (
-                          <div key={rep.id} className="bg-[#1c2128] rounded-2xl border border-white/5 p-3">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <p className="text-sm font-black text-white">{money(Number(rep.valor) || 0)}
-                                <span className="text-[10px] font-normal text-slate-500 ml-1">{rep.data ? new Date(rep.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'sem data'}</span>
-                              </p>
-                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${restante > 0.005 ? 'bg-rose-500/15 text-rose-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
-                                {restante > 0.005 ? `${money(restante)} a justificar` : 'tudo justificado ✅'}
-                              </span>
-                            </div>
-                            {itens.length ? (
-                              <ul className="space-y-0.5">
-                                {itens.map((it: any, i: number) => (
-                                  <li key={i} className="flex justify-between text-xs text-slate-300">
-                                    <span>{it.categoria}{it.descricao ? <span className="text-slate-500"> · {it.descricao}</span> : ''}</span>
-                                    <span className="text-slate-200 font-mono">{money(Number(it.valor) || 0)}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : <p className="text-[11px] text-amber-300/80">⏳ Aguardando o candidato detalhar a aplicação.</p>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : <div className="text-xs text-slate-500">Nenhum repasse lançado ainda.</div>}
-                </div>
               </div>
             )}
           </div>
@@ -1721,7 +1272,7 @@ const PartyPresidentPage: React.FC = () => {
 
 /**
  * Botão "🕵️ Análise Antifraude IA" — chama o callAgent no servidor pra
- * detectar candidatos absorvendo recurso sem entregar. Mostra os alertas
+ * detectar candidatos sem estrutura, inativos ou sem equipe. Mostra os alertas
  * em um painel inline expansível. Custo escondido (regra #111).
  */
 const AntifraudButton: React.FC = () => {
@@ -1751,7 +1302,7 @@ const AntifraudButton: React.FC = () => {
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <p className="text-xs uppercase tracking-wider text-slate-500">Auditoria assistida</p>
-          <p className="text-sm text-slate-300">Análise antifraude cruza repasse × atividade × score.</p>
+          <p className="text-sm text-slate-300">Análise antifraude cruza estrutura × atividade × equipe × score.</p>
         </div>
         <button onClick={run} disabled={loading}
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white text-sm font-bold px-4 py-2 rounded-xl flex items-center gap-2">
@@ -1782,7 +1333,7 @@ const AntifraudButton: React.FC = () => {
             </div>
           ))}
           <p className="text-[10px] text-slate-600 pt-2 border-t border-white/5">
-            Sugestões são da IA. Decisão final é sua — use a válvula no card do candidato para liberar/segurar/cortar repasse.
+            Sugestões são da IA. Decisão final é sua.
           </p>
         </div>
       )}

@@ -3,8 +3,8 @@
  *
  * Bolinha flutuante no Centro de Comando. Abre um painel de chat onde o
  * presidente pergunta por texto OU voz (Web Speech API). A IA consulta E
- * executa ações (lançar/editar/excluir repasse, cadastrar/excluir candidato,
- * relatório) — SEMPRE com card de confirmação antes de gravar.
+ * executa ações (cadastrar/excluir candidato) — SEMPRE com card de
+ * confirmação antes de gravar.
  *
  * Estados: idle | listening | thinking | error.
  * Segurança: backend valida role + escopa tudo ao partido. Nada é gravado sem
@@ -13,7 +13,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, Send, Mic, Loader2, Bot, User, CheckCircle2, XCircle, Volume2 } from 'lucide-react';
 import { authedFetch } from '../../lib/authedFetch';
-import PartyRepasseReport from './PartyRepasseReport';
 
 // TTS leve (Web Speech) — lê a resposta da IA em voz alta.
 function speak(text: string) {
@@ -28,39 +27,20 @@ function speak(text: string) {
   } catch { /* ok */ }
 }
 
-interface RepasseDraft {
-  type: 'create_repasse' | 'edit_repasse' | 'delete_repasse' | 'create_candidate' | 'delete_candidate' | 'batch_repasse';
+interface CandidateDraft {
+  type: 'create_candidate' | 'delete_candidate';
   candidateId?: string;
   candidateName?: string;
-  valor?: number;
-  valorAntigo?: number;
-  descricao?: string;
-  data?: string | null;
-  repasseId?: string;
-  count?: number;
-  total?: number;
   // campos de candidato (create_candidate)
   cargo?: string;
   regiao?: string;
   estado?: string;
   phone?: string;
 }
-interface RepasseOption {
-  repasseId: string;
-  candidateId: string;
-  candidateName: string;
-  valor: number;
-  descricao: string;
-  data: string | null;
-  suggested?: boolean; // o mais recente — destacado como sugestão (#147)
-}
-interface PendingAction { type: 'edit_repasse' | 'delete_repasse'; valor?: number }
 interface Msg {
   role: 'user' | 'assistant';
   text: string;
-  draft?: RepasseDraft | null;
-  options?: RepasseOption[] | null;     // lista de repasses pra escolher
-  pendingAction?: PendingAction | null; // ação a aplicar na escolha
+  draft?: CandidateDraft | null;
 }
 
 // Web Speech API (sem types nativos no TS) — acessa via window com any.
@@ -80,12 +60,9 @@ function getRecognition(): SpeechRec | null {
 const SUGESTOES = [
   '❓ O que você consegue fazer?',
   'Cadastra o João Silva, vereador, Niterói RJ',
-  'Lança 5 mil pro João, material gráfico',
   'Lista os candidatos pendentes',
-  'Gere o relatório de repasses',
+  'Quantos candidatos eu tenho?',
 ];
-
-const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone }) => {
   const [open, setOpen] = useState(false);
@@ -94,7 +71,6 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [executing, setExecuting] = useState(false);
-  const [showReport, setShowReport] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const recRef = useRef<SpeechRec | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -129,13 +105,9 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
       });
       const j = await r.json().catch(() => ({}));
       const reply = j.message || j.error || 'Não consegui responder agora.';
-      // Se a IA propôs um lançamento, anexa o draft à mensagem (vira card de confirmação)
-      const draft: RepasseDraft | null = ['lancar_repasse', 'editar_repasse', 'excluir_repasse', 'criar_candidato', 'excluir_candidato'].includes(j.intent) && j.draft ? j.draft : null;
-      const options: RepasseOption[] | null = j.intent === 'escolher_repasse' && Array.isArray(j.options) ? j.options : null;
-      const pendingAction: PendingAction | null = options ? (j.pendingAction || null) : null;
-      setMsgs((m) => [...m, { role: 'assistant', text: reply, draft, options, pendingAction }]);
-      // Pediu relatório → abre o overlay imprimível
-      if (j.intent === 'gerar_relatorio') setShowReport(true);
+      // Se a IA propôs cadastrar/excluir candidato, anexa o draft à mensagem (vira card de confirmação)
+      const draft: CandidateDraft | null = ['criar_candidato', 'excluir_candidato'].includes(j.intent) && j.draft ? j.draft : null;
+      setMsgs((m) => [...m, { role: 'assistant', text: reply, draft }]);
       setState('idle');
     } catch (err: any) {
       setMsgs((m) => [...m, { role: 'assistant', text: 'Erro de conexão. Tente de novo.' }]);
@@ -144,40 +116,21 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
     }
   };
 
-  // Executa o draft confirmado (lançar/editar/excluir). Reusa endpoints existentes.
-  const confirmDraft = async (draft: RepasseDraft, msgIdx: number) => {
+  // Executa o draft confirmado (cadastrar/excluir candidato).
+  const confirmDraft = async (draft: CandidateDraft, msgIdx: number) => {
     setExecuting(true);
     try {
       let r: Response;
       let okMsg: string;
-      if (draft.type === 'create_repasse') {
-        r = await authedFetch(`/api/v1/party/candidates/${draft.candidateId}/repasses`, {
-          method: 'POST',
-          body: JSON.stringify({ valor: draft.valor, data: draft.data, descricao: draft.descricao, itens: [] }),
-        });
-        okMsg = `✅ Repasse de ${brl(draft.valor || 0)} lançado para ${draft.candidateName}.`;
-      } else if (draft.type === 'edit_repasse') {
-        r = await authedFetch(`/api/v1/party/repasses/${draft.repasseId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ valor: draft.valor, descricao: draft.descricao }),
-        });
-        okMsg = `✅ Repasse de ${draft.candidateName} alterado para ${brl(draft.valor || 0)}.`;
-      } else if (draft.type === 'batch_repasse') {
-        r = await authedFetch('/api/v1/party/batch-repasses', { method: 'POST' });
-        const j = await r.json().catch(() => ({}));
-        okMsg = `✅ ${j.created || 0} repasses lançados no histórico (${brl(j.totalValue || 0)}).`;
-      } else if (draft.type === 'create_candidate') {
+      if (draft.type === 'create_candidate') {
         r = await authedFetch('/api/v1/party/candidates', {
           method: 'POST',
           body: JSON.stringify({ displayName: draft.candidateName, cargo: draft.cargo, regiao: draft.regiao, estado: draft.estado, phone: draft.phone }),
         });
         okMsg = `✅ Candidato ${draft.candidateName} cadastrado.`;
-      } else if (draft.type === 'delete_candidate') {
+      } else {
         r = await authedFetch(`/api/v1/party/candidates/${draft.candidateId}`, { method: 'DELETE' });
         okMsg = `✅ Candidato ${draft.candidateName} e todos os dados dele foram excluídos.`;
-      } else {
-        r = await authedFetch(`/api/v1/party/repasses/${draft.repasseId}`, { method: 'DELETE' });
-        okMsg = `✅ Repasse de ${brl(draft.valor || 0)} de ${draft.candidateName} excluído.`;
       }
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
@@ -196,19 +149,7 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
 
   const cancelDraft = (msgIdx: number) => {
     setMsgs((m) => m.map((msg, i) => i === msgIdx ? { ...msg, draft: null } : msg)
-      .concat({ role: 'assistant', text: 'Ok, cancelei. Nada foi lançado.' }));
-  };
-
-  // Presidente escolheu um repasse da lista → vira card de confirmação
-  const chooseOption = (opt: RepasseOption, action: PendingAction, msgIdx: number) => {
-    const draft: RepasseDraft = action.type === 'edit_repasse'
-      ? { type: 'edit_repasse', repasseId: opt.repasseId, candidateId: opt.candidateId, candidateName: opt.candidateName,
-          valorAntigo: opt.valor, valor: action.valor || 0, descricao: opt.descricao, data: opt.data }
-      : { type: 'delete_repasse', repasseId: opt.repasseId, candidateId: opt.candidateId, candidateName: opt.candidateName,
-          valor: opt.valor, descricao: opt.descricao, data: opt.data };
-    // Remove as opções da mensagem (já escolheu) e adiciona o card de confirmação
-    setMsgs((m) => m.map((msg, i) => i === msgIdx ? { ...msg, options: null, pendingAction: null } : msg)
-      .concat({ role: 'assistant', text: action.type === 'delete_repasse' ? 'Confira antes de excluir:' : 'Confira a alteração:', draft }));
+      .concat({ role: 'assistant', text: 'Ok, cancelei. Nada foi salvo.' }));
   };
 
   const startVoice = () => {
@@ -265,7 +206,7 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
             {msgs.length === 0 && (
               <div className="text-center py-6">
                 <Bot className="w-10 h-10 text-indigo-400/50 mx-auto mb-2" />
-                <p className="text-xs text-slate-400 mb-3">Pergunte ou peça ações: lançar repasse, cadastrar candidato, relatório. Sempre confirmo antes de salvar.</p>
+                <p className="text-xs text-slate-400 mb-3">Pergunte ou peça ações: cadastrar candidato, consultar a base. Sempre confirmo antes de salvar.</p>
                 <div className="space-y-1.5">
                   {SUGESTOES.map((s) => (
                     <button key={s} onClick={() => ask(s)}
@@ -292,56 +233,36 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                   </div>
                   {m.role === 'user' && <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center shrink-0 mt-0.5"><User className="w-3.5 h-3.5 text-slate-300" /></div>}
                 </div>
-                {/* Card de confirmação: lançar/editar/excluir repasse + criar/excluir candidato */}
+                {/* Card de confirmação: criar/excluir candidato */}
                 {m.draft && (() => {
                   const t = m.draft.type;
-                  const isBatch = t === 'batch_repasse';
-                  const isDelete = t === 'delete_repasse' || t === 'delete_candidate';
-                  const isEdit = t === 'edit_repasse';
-                  const isCreateCand = t === 'create_candidate';
                   const isDeleteCand = t === 'delete_candidate';
-                  const cls = isDelete ? 'bg-red-500/10 border-red-500/40' : 'bg-amber-500/10 border-amber-500/30';
-                  const titleCls = isDelete ? 'text-red-300' : 'text-amber-300';
-                  const title = isBatch ? 'Lançamento em lote'
-                    : isDeleteCand ? '⚠️ Excluir candidato'
-                    : isCreateCand ? 'Confirmar cadastro'
-                    : t === 'delete_repasse' ? '⚠️ Confirmar EXCLUSÃO'
-                    : isEdit ? 'Confirmar alteração' : 'Confirmar lançamento';
+                  const isCreateCand = t === 'create_candidate';
+                  const cls = isDeleteCand ? 'bg-red-500/10 border-red-500/40' : 'bg-amber-500/10 border-amber-500/30';
+                  const titleCls = isDeleteCand ? 'text-red-300' : 'text-amber-300';
+                  const title = isDeleteCand ? '⚠️ Excluir candidato' : 'Confirmar cadastro';
                   const loc = [m.draft.regiao, m.draft.estado].filter(Boolean).join('/');
                   return (
                   <div className={`ml-8 w-[85%] border rounded-xl p-3 ${cls}`}>
                     <p className={`text-[10px] font-bold uppercase tracking-widest mb-1.5 ${titleCls}`}>{title}</p>
                     <div className="text-xs text-slate-200 space-y-0.5 mb-2.5">
-                      {isBatch ? (
-                        <>
-                          <p><b>{m.draft.count}</b> candidato{(m.draft.count || 0) > 1 ? 's' : ''} com valor mas sem registro no histórico</p>
-                          <p className="text-emerald-300 font-bold">Total: {brl(m.draft.total || 0)}</p>
-                          <p className="text-slate-400 text-[10px]">Cada um receberá um registro de repasse com a data de hoje.</p>
-                        </>
-                      ) : isCreateCand ? (
+                      {isCreateCand ? (
                         <>
                           <p>Cadastrar <b>{m.draft.candidateName}</b></p>
                           {(m.draft.cargo || loc) && <p className="text-slate-400">{[m.draft.cargo, loc].filter(Boolean).join(' · ')}</p>}
                           {m.draft.phone && <p className="text-slate-500 text-[10px]">📱 {m.draft.phone}</p>}
                         </>
-                      ) : isDeleteCand ? (
+                      ) : (
                         <>
                           <p>Excluir <b>{m.draft.candidateName}</b></p>
-                          <p className="text-red-300/80 text-[10px] font-bold">Apaga também repasses, comitê e check-ins. Não pode ser desfeito.</p>
+                          <p className="text-red-300/80 text-[10px] font-bold">Apaga também comitê e check-ins. Não pode ser desfeito.</p>
                         </>
-                      ) : isEdit ? (
-                        <p><b>{m.draft.candidateName}</b>: <span className="line-through text-slate-500">{brl(m.draft.valorAntigo || 0)}</span> → <b className="text-emerald-300">{brl(m.draft.valor || 0)}</b></p>
-                      ) : (
-                        <p><b>{brl(m.draft.valor || 0)}</b> {isDelete ? 'de' : 'para'} <b>{m.draft.candidateName}</b></p>
                       )}
-                      {!isCreateCand && !isDeleteCand && m.draft.descricao && <p className="text-slate-400">Finalidade: {m.draft.descricao}</p>}
-                      {!isCreateCand && !isDeleteCand && m.draft.data && <p className="text-slate-500 text-[10px]">Data: {new Date(m.draft.data).toLocaleDateString('pt-BR')}</p>}
-                      {t === 'delete_repasse' && <p className="text-red-300/80 text-[10px] font-bold">Esta ação não pode ser desfeita.</p>}
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => confirmDraft(m.draft!, i)} disabled={executing}
-                        className={`flex-1 flex items-center justify-center gap-1 py-1.5 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg ${isDelete ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
-                        {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} {isDelete ? 'Excluir' : 'Confirmar'}
+                        className={`flex-1 flex items-center justify-center gap-1 py-1.5 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg ${isDeleteCand ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+                        {executing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} {isDeleteCand ? 'Excluir' : 'Confirmar'}
                       </button>
                       <button onClick={() => cancelDraft(i)} disabled={executing}
                         className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-200 text-[11px] font-bold rounded-lg">
@@ -351,28 +272,6 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                   </div>
                   );
                 })()}
-                {/* Lista de repasses pra escolher (candidato com vários).
-                    O mais recente (suggested) vem destacado como sugestão (#147). */}
-                {m.options && m.options.length > 0 && m.pendingAction && (
-                  <div className="ml-8 w-[85%] space-y-1.5">
-                    {m.options.map((opt, oi) => (
-                      <button key={opt.repasseId} onClick={() => chooseOption(opt, m.pendingAction!, i)}
-                        className={`w-full text-left rounded-lg px-3 py-2 transition-colors border ${
-                          opt.suggested
-                            ? 'bg-indigo-500/15 border-indigo-400/50 hover:bg-indigo-500/25 ring-1 ring-indigo-400/30'
-                            : 'bg-slate-800 hover:bg-slate-700 border-white/10'}`}>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
-                            {oi + 1}. {brl(opt.valor)}
-                            {opt.suggested && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 uppercase tracking-wider">⭐ mais recente</span>}
-                          </span>
-                          <span className="text-[10px] text-slate-500">{opt.data ? new Date(opt.data).toLocaleDateString('pt-BR') : 's/data'}</span>
-                        </div>
-                        {opt.descricao && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{opt.descricao}</p>}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
             {state === 'thinking' && (
@@ -411,13 +310,10 @@ const PartyAIOrb: React.FC<{ onRepasseDone?: () => void }> = ({ onRepasseDone })
                 <Send className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-[9px] text-slate-600 mt-1.5 text-center">Assistente automatizado · consultar, cadastrar/excluir candidato e lançar/editar repasse (sempre com confirmação)</p>
+            <p className="text-[9px] text-slate-600 mt-1.5 text-center">Assistente automatizado · consultar e cadastrar/excluir candidato (sempre com confirmação)</p>
           </div>
         </div>
       )}
-
-      {/* Relatório de repasses imprimível (#144) */}
-      {showReport && <PartyRepasseReport onClose={() => setShowReport(false)} />}
     </>
   );
 };
