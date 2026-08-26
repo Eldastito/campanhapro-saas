@@ -107,7 +107,7 @@ const KWAI_SNAPSHOT = {
 // ── Suites ────────────────────────────────────────────────────────────
 
 describe('createSocialAdapters — registry', () => {
-  test('devolve adapters somente para os providers implementados neste PR', () => {
+  test('devolve adapters somente para os providers implementados', () => {
     const supabase = createMockSupabase({ social_tokens: [] });
     const adapters = createSocialAdapters(supabase);
     for (const p of IMPLEMENTED_PROVIDERS) {
@@ -116,7 +116,6 @@ describe('createSocialAdapters — registry', () => {
     }
     // Providers ainda não implementados ficam ausentes (undefined) —
     // §11 do PRD, caller decide como tratar.
-    assert.equal(adapters.instagram, undefined);
     assert.equal(adapters.facebook, undefined);
     assert.equal(adapters.youtube, undefined);
     assert.equal(adapters.tiktok, undefined);
@@ -128,6 +127,7 @@ describe('createSocialAdapters — registry', () => {
     assert.equal(adapters.x!.getCapabilities().adapterMaturity, 'production');
     assert.equal(adapters.linkedin!.getCapabilities().adapterMaturity, 'beta');
     assert.equal(adapters.kwai!.getCapabilities().adapterMaturity, 'limited');
+    assert.equal(adapters.instagram!.getCapabilities().adapterMaturity, 'beta');
   });
 });
 

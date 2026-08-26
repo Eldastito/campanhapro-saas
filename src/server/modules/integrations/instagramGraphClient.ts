@@ -154,6 +154,36 @@ export async function businessDiscovery(
   };
 }
 
+export interface IgAccountProfile {
+  igUserId: string;
+  username: string | null;
+  name: string | null;
+  followersCount: number | null;
+  mediaCount: number | null;
+  biography: string | null;
+  profilePictureUrl: string | null;
+}
+
+/**
+ * Snapshot básico da CONTA IG conectada. Distinto de `businessDiscovery`
+ * (que é sobre outras contas). Usa o endpoint `/{igUserId}` com fields do
+ * próprio Business account. Contagens são `null` quando a API não expõe
+ * (§20/§103 do PRD: nunca 0 quando é indisponível).
+ */
+export async function fetchIgAccountProfile(conn: IgConnection): Promise<IgAccountProfile> {
+  const fields = 'username,name,followers_count,media_count,biography,profile_picture_url';
+  const json = await graphGet(`${conn.igUserId}?fields=${encodeURIComponent(fields)}`, conn.token);
+  return {
+    igUserId: conn.igUserId,
+    username: json?.username ?? null,
+    name: json?.name ?? null,
+    followersCount: typeof json?.followers_count === 'number' ? json.followers_count : null,
+    mediaCount: typeof json?.media_count === 'number' ? json.media_count : null,
+    biography: json?.biography ?? null,
+    profilePictureUrl: json?.profile_picture_url ?? null,
+  };
+}
+
 /**
  * Comentários COM texto nas publicações do PRÓPRIO candidato. A API libera isso por
  * completo (são posts da conta autenticada).
