@@ -116,7 +116,6 @@ describe('createSocialAdapters — registry', () => {
     }
     // Providers ainda não implementados ficam ausentes (undefined) —
     // §11 do PRD, caller decide como tratar.
-    assert.equal(adapters.facebook, undefined);
     assert.equal(adapters.youtube, undefined);
     assert.equal(adapters.tiktok, undefined);
   });
@@ -128,6 +127,7 @@ describe('createSocialAdapters — registry', () => {
     assert.equal(adapters.linkedin!.getCapabilities().adapterMaturity, 'beta');
     assert.equal(adapters.kwai!.getCapabilities().adapterMaturity, 'limited');
     assert.equal(adapters.instagram!.getCapabilities().adapterMaturity, 'beta');
+    assert.equal(adapters.facebook!.getCapabilities().adapterMaturity, 'beta');
   });
 });
 

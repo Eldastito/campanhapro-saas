@@ -15,19 +15,27 @@ import { createXAdapter, type XAdapterDeps } from './xAdapter.js';
 import { createLinkedInAdapter, type LinkedInAdapterDeps } from './linkedInAdapter.js';
 import { createKwaiAdapter, type KwaiAdapterDeps } from './kwaiAdapter.js';
 import { createInstagramMetaAdapter, type InstagramMetaAdapterDeps } from './instagramMetaAdapter.js';
+import { createFacebookMetaAdapter, type FacebookMetaAdapterDeps } from './facebookMetaAdapter.js';
 
 export {
   SocialCapabilityNotAvailableError,
   SocialConnectionNotFoundError,
 } from './errors.js';
 
-export type { XAdapterDeps, LinkedInAdapterDeps, KwaiAdapterDeps, InstagramMetaAdapterDeps };
+export type {
+  XAdapterDeps,
+  LinkedInAdapterDeps,
+  KwaiAdapterDeps,
+  InstagramMetaAdapterDeps,
+  FacebookMetaAdapterDeps,
+};
 
 export interface CreateSocialAdaptersDeps {
   x?: XAdapterDeps;
   linkedin?: LinkedInAdapterDeps;
   kwai?: KwaiAdapterDeps;
   instagram?: InstagramMetaAdapterDeps;
+  facebook?: FacebookMetaAdapterDeps;
 }
 
 /**
@@ -49,7 +57,7 @@ export function createSocialAdapters(
     linkedin: createLinkedInAdapter(supabase, deps.linkedin),
     kwai: createKwaiAdapter(supabase, deps.kwai),
     instagram: createInstagramMetaAdapter(supabase, deps.instagram),
-    // facebook: PR 5 (FacebookMetaAdapter — OAuth Meta unificado)
+    facebook: createFacebookMetaAdapter(supabase, deps.facebook),
     // youtube: PR 6-7
     // tiktok: PR 8
   };
@@ -64,4 +72,5 @@ export const IMPLEMENTED_PROVIDERS: readonly SocialProvider[] = Object.freeze([
   'linkedin',
   'kwai',
   'instagram',
+  'facebook',
 ] as const);
