@@ -52,24 +52,27 @@ export const SOCIAL_CAPABILITY_REGISTRY: Readonly<Record<SocialProvider, SocialP
   },
 
   // ── Facebook (Meta Graph — Page Feed + Insights) ────────────────────────
-  // AS-IS §2.2: só paste manual + Ad Library de leitura. Sem sync, sem publish.
+  // PR 5: FacebookMetaAdapter implementa page feed + comments via
+  // facebookPageClient. Meta OAuth unificado (long-lived exchange +
+  // disconnect por provider) fica para PR futuro — refresh e disconnect
+  // continuam not_configured até lá.
   facebook: {
-    adapterMaturity: 'limited',
-    maturityNote: 'Paste manual do token; sem client de Page Feed; Ad Library só leitura via intelRouter. F3 (PR 5) traz Meta OAuth compartilhado com IG.',
+    adapterMaturity: 'beta',
+    maturityNote: 'Page profile + posts + comments funcionam via facebookPageClient. Meta OAuth unificado (fb_exchange_token, disconnect por-provider) entra em PR futuro. Ad Library de terceiros via intelRouter.',
     capabilities: {
-      profileRead: 'permission_required',      // /me/accounts existe mas sem OAuth real
-      postsRead: 'not_configured',
-      ownCommentsRead: 'not_configured',
-      thirdPartyCommentsRead: 'provider_restricted',
-      metricsRead: 'not_configured',
-      audienceInsights: 'not_configured',
+      profileRead: 'supported',                // page profile via /me/accounts + /{pageId}
+      postsRead: 'supported',                  // page feed com reactions/comments/shares summary
+      ownCommentsRead: 'supported',            // texto completo dos comments (Page própria)
+      thirdPartyCommentsRead: 'provider_restricted', // Business Discovery só devolve contagem
+      metricsRead: 'permission_required',      // /insights precisa read_insights
+      audienceInsights: 'permission_required',
       mentionsRead: 'unsupported',
       competitorDiscovery: 'supported',        // Ad Library via metaAdLibrary.ts
-      publishText: 'not_configured',
+      publishText: 'not_configured',           // exige review + escopos publish_pages
       publishImage: 'not_configured',
       publishVideo: 'not_configured',
       schedule: 'not_configured',
-      webhook: 'not_configured',
+      webhook: 'not_configured',               // handler existe pra WhatsApp, expandir em PR futuro
     },
   },
 
