@@ -8,7 +8,7 @@
  *  3. PATCH /:id      — edit text, image, hashtags
  *  4. POST /:id/approve  — promote draft to approved (audit + final compliance gate)
  *  5. POST /:id/schedule — define scheduledAt (status → scheduled)
- *  6. POST /:id/publish  — mark as published (manual confirmation; v1 does not auto-post)
+ *  6. POST /:id/publish  — mark as published; requer approved|scheduled (§70 do PRD)
  *  7. GET /            — list with optional ?status filter
  */
 import { Router, Request, Response } from 'express';
@@ -16,10 +16,8 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { chatCompletion, isChatConfigured, activeChatProvider } from '../ai/chatCompletion';
 import { generateImage, isImageGenerationConfigured } from '../ai/imageGeneration';
 import { audit, actorFromRequest } from '../observability/auditLogger';
+import { tenantCampaignId } from '../../lib/tenantScope';
 
-function campaignIdOf(req: Request): string | undefined {
-  return (req as any).user?.campaignId;
-}
 function userIdOf(req: Request): string | null {
   return (req as any).user?.id ?? null;
 }
@@ -48,9 +46,37 @@ const TONE_GUIDANCE: Record<Tone, string> = {
 };
 
 // TSE compliance — basic banned-content check (Resolução TSE 23.610/2019).
+//
+// Auditoria F0 (docs/social/SOCIAL-AS-IS.md §5.4, bug B4) mostrou que o gate
+// só rejeita `severity='error'` — mas NENHUMA regra emitia error. Ficava
+// cosmético. Este PR (1½) adiciona regras determinísticas / mecânicas com
+// severity='error' — o tipo de regra que não precisa decisão de produto:
+//   - texto vazio: não dá pra publicar nada.
+//   - texto > 50k chars: excede limite técnico de TODAS as redes suportadas.
+//
+// Regras de CONTEÚDO eleitoral (ofensas, propaganda negativa, promessas
+// vedadas) continuam como `warn` — a decisão de subi-las pra `error` cabe
+// ao jurídico da campanha e ao produto (§89-§93 do PRD). Adicionar aqui
+// no automático viraria censura arbitrária.
 function checkCompliance(text: string): Array<{ rule: string; severity: 'warn' | 'error'; message: string }> {
   const flags: Array<{ rule: string; severity: 'warn' | 'error'; message: string }> = [];
   const lower = text.toLowerCase();
+
+  // Regras mecânicas — bloqueiam publicação.
+  if (text.trim().length < 1) {
+    flags.push({
+      rule: 'empty_text',
+      severity: 'error',
+      message: 'Post sem texto não pode ser aprovado — verifique geração e edição.',
+    });
+  }
+  if (text.length > 50_000) {
+    flags.push({
+      rule: 'oversize',
+      severity: 'error',
+      message: `Texto com ${text.length} caracteres excede o máximo técnico (50.000). Corte o conteúdo.`,
+    });
+  }
 
   const offenseTerms = ['idiota', 'imbecil', 'corrupto', 'ladrão', 'criminoso', 'bandido'];
   const found = offenseTerms.filter(t => lower.includes(t));
@@ -112,7 +138,7 @@ export function createContentRouter(supabase: SupabaseClient) {
   // POST /generate  — generate text + hashtags via AI (does NOT save)
   // ---------------------------------------------------------------------------
   router.post('/generate', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
     const { channel, tone, topic, postType, lengthHint } = req.body as {
@@ -196,7 +222,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // Returns: { imageUrl: data-URL, provider }
   // ---------------------------------------------------------------------------
   router.post('/generate-image', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
     if (!isImageGenerationConfigured()) {
       return res.status(503).json({ error: 'Geração de imagem não configurada (defina GEMINI_API_KEY ou OPENAI_API_KEY)' });
@@ -225,7 +251,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // POST /  — create post (draft)
   // ---------------------------------------------------------------------------
   router.post('/', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     const userId = userIdOf(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
@@ -279,7 +305,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // GET /  — list posts, optional ?status filter
   // ---------------------------------------------------------------------------
   router.get('/', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
     try {
@@ -305,7 +331,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // GET /:id
   // ---------------------------------------------------------------------------
   router.get('/:id', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
     try {
@@ -327,7 +353,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // PATCH /:id  — edit any mutable field
   // ---------------------------------------------------------------------------
   router.patch('/:id', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
     const allowed = ['topic', 'brief', 'tone', 'generatedText', 'finalText', 'hashtags', 'imageUrl', 'postType'];
@@ -359,7 +385,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // POST /:id/approve
   // ---------------------------------------------------------------------------
   router.post('/:id/approve', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     const userId = userIdOf(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
@@ -410,7 +436,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // POST /:id/schedule  { scheduledAt: ISO }
   // ---------------------------------------------------------------------------
   router.post('/:id/schedule', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
     const when = req.body?.scheduledAt;
@@ -450,18 +476,58 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
 
   // ---------------------------------------------------------------------------
   // POST /:id/publish  — manual confirmation that user posted externally
+  //
+  // §70 do PRD: aprovação humana é obrigatória. Auditoria F0 (bug B3) mostrou
+  // que este endpoint aceitava publicar de qualquer status (inclusive draft).
+  // Agora exige status ∈ {approved, scheduled} e re-roda compliance como
+  // safety net (post pode ter sido editado depois do approve).
   // ---------------------------------------------------------------------------
   router.post('/:id/publish', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
     try {
+      // SELECT antes do UPDATE — sem isso o endpoint devolvia `ok:true` mesmo
+      // se o id não existisse na campanha (info leak: atacante conseguia
+      // enumerar existência via timing/audit).
+      const { data: post, error: fetchErr } = await supabase
+        .from('content_posts')
+        .select('id, finalText, generatedText, status')
+        .eq('id', req.params.id)
+        .eq('campaignId', campaignId)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (!post) return res.status(404).json({ error: 'not_found' });
+
+      // Idempotência: re-publicar é no-op silencioso.
+      if (post.status === 'published') {
+        return res.json({ ok: true, alreadyPublished: true });
+      }
+
+      // Gate §70: só publica de approved ou scheduled.
+      if (post.status !== 'approved' && post.status !== 'scheduled') {
+        return res.status(400).json({
+          error: 'requires_approval',
+          message: `Post está em '${post.status}'. Aprove antes de publicar.`,
+          currentStatus: post.status,
+        });
+      }
+
+      // Safety net: reroda compliance no momento do publish. Se algum
+      // severity=error surgiu por edição posterior ao approve, bloqueia aqui.
+      const text = post.finalText ?? post.generatedText ?? '';
+      const flags = checkCompliance(text);
+      if (flags.some(f => f.severity === 'error')) {
+        return res.status(400).json({ error: 'blocked_by_compliance', flags });
+      }
+
       const { error } = await supabase
         .from('content_posts')
         .update({
           status: 'published',
           publishedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+          complianceFlags: flags,
         })
         .eq('id', req.params.id)
         .eq('campaignId', campaignId);
@@ -473,6 +539,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
         resourceType: 'content_posts',
         resourceId: req.params.id,
         severity: 'info',
+        metadata: { fromStatus: post.status, flagsCount: flags.length },
       });
 
       return res.json({ ok: true });
@@ -485,7 +552,7 @@ Gere o conteúdo final, pronto para publicar. Inclua de 3 a 8 hashtags relevante
   // DELETE /:id
   // ---------------------------------------------------------------------------
   router.delete('/:id', async (req: Request, res: Response) => {
-    const campaignId = campaignIdOf(req);
+    const campaignId = tenantCampaignId(req);
     if (!campaignId) return res.status(400).json({ error: 'campaignId obrigatório' });
 
     try {
