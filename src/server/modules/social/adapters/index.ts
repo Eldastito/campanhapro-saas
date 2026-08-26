@@ -14,18 +14,20 @@ import type { SocialProviderAdapter } from '../contracts/socialProviderAdapter.j
 import { createXAdapter, type XAdapterDeps } from './xAdapter.js';
 import { createLinkedInAdapter, type LinkedInAdapterDeps } from './linkedInAdapter.js';
 import { createKwaiAdapter, type KwaiAdapterDeps } from './kwaiAdapter.js';
+import { createInstagramMetaAdapter, type InstagramMetaAdapterDeps } from './instagramMetaAdapter.js';
 
 export {
   SocialCapabilityNotAvailableError,
   SocialConnectionNotFoundError,
 } from './errors.js';
 
-export type { XAdapterDeps, LinkedInAdapterDeps, KwaiAdapterDeps };
+export type { XAdapterDeps, LinkedInAdapterDeps, KwaiAdapterDeps, InstagramMetaAdapterDeps };
 
 export interface CreateSocialAdaptersDeps {
   x?: XAdapterDeps;
   linkedin?: LinkedInAdapterDeps;
   kwai?: KwaiAdapterDeps;
+  instagram?: InstagramMetaAdapterDeps;
 }
 
 /**
@@ -46,7 +48,7 @@ export function createSocialAdapters(
     x: createXAdapter(supabase, deps.x),
     linkedin: createLinkedInAdapter(supabase, deps.linkedin),
     kwai: createKwaiAdapter(supabase, deps.kwai),
-    // instagram: PR 4 (InstagramMetaAdapter — preserva Pulso dos Bairros)
+    instagram: createInstagramMetaAdapter(supabase, deps.instagram),
     // facebook: PR 5 (FacebookMetaAdapter — OAuth Meta unificado)
     // youtube: PR 6-7
     // tiktok: PR 8
@@ -54,11 +56,12 @@ export function createSocialAdapters(
 }
 
 /**
- * Helper: providers implementados neste PR. Útil para o endpoint
+ * Helper: providers implementados. Útil para o endpoint
  * `/api/v1/social/adapters` (que ainda não existe) listar rapidamente.
  */
 export const IMPLEMENTED_PROVIDERS: readonly SocialProvider[] = Object.freeze([
   'x',
   'linkedin',
   'kwai',
+  'instagram',
 ] as const);
