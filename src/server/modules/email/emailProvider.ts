@@ -18,6 +18,17 @@ export interface SendEmailResult {
   /** True if the provider accepted the message; false otherwise (caller writes error). */
   ok: boolean;
   error?: string;
+  /**
+   * HTTP status quando disponível — permite ao caller decidir retry
+   * (429 → back-off por Retry-After, 5xx → transient, 4xx → permanente).
+   * Opcional pra não quebrar providers stub/legacy.
+   */
+  status?: number;
+  /**
+   * Sugestão de espera antes de retry (ms), quando o provider expõe
+   * Retry-After. Só faz sentido combinado com status=429.
+   */
+  retryAfterMs?: number;
 }
 
 export interface EmailProvider {
