@@ -44,6 +44,7 @@ interface FiltersState {
   source: SocialSignalSource | '';
   topic: SocialTopic | '';
   provider: SocialProvider | '';
+  search: string;
 }
 
 const INITIAL_FILTERS: FiltersState = {
@@ -51,6 +52,7 @@ const INITIAL_FILTERS: FiltersState = {
   source: '',
   topic: '',
   provider: '',
+  search: '',
 };
 
 function buildQuery(f: FiltersState): string {
@@ -59,6 +61,8 @@ function buildQuery(f: FiltersState): string {
   if (f.source) params.set('source', f.source);
   if (f.topic) params.set('topic', f.topic);
   if (f.provider) params.set('provider', f.provider);
+  const trimmedSearch = f.search.trim();
+  if (trimmedSearch) params.set('search', trimmedSearch);
   params.set('limit', '100');
   return params.toString();
 }
@@ -252,6 +256,20 @@ const PulsoDigitalPage: React.FC = () => {
             onChange={v => setFilter('provider', v as SocialProvider | '')}
             options={SOCIAL_PROVIDERS.map(p => ({ value: p, label: PROVIDER_LABELS[p] }))}
           />
+        </div>
+        {/* Text search — filtro por substring no summary */}
+        <div className="mt-3">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Buscar no summary</span>
+            <input
+              type="search"
+              value={filters.search}
+              onChange={e => setFilter('search', e.target.value)}
+              placeholder="ex.: protesto, hospital, escola…"
+              maxLength={200}
+              className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+            />
+          </label>
         </div>
         {hasFilters && (
           <div className="mt-3">

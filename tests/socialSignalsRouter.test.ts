@@ -167,6 +167,45 @@ describe('GET /signals — resultados e isolamento §35', () => {
     assert.deepEqual(body.signals.map(s => s.dedupKey).sort(), ['a', 'd']);
   });
 
+  test('search filtra substring case-insensitive no summary', async () => {
+    const supabase = await seedMulti();
+    // sobrescreve summaries pra deixar previsível
+    const store = (supabase as unknown as { _store: Map<string, Array<{ dedupKey: string; summary: string }>> })._store;
+    const signals = store.get('social_signals') ?? [];
+    for (const s of signals) {
+      if (s.dedupKey === 'a') s.summary = 'volume subiu sobre PROTESTO no bairro';
+      if (s.dedupKey === 'b') s.summary = 'reclamação sobre hospital';
+      if (s.dedupKey === 'c') s.summary = 'anúncio de novo protesto pacífico';
+    }
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await req(app, 'GET', '/api/v1/social/signals?search=protesto');
+    const body = r.body as { signals: Array<{ dedupKey: string }> };
+    // Só 'a' e 'c' têm "protesto" no summary
+    assert.deepEqual(body.signals.map(s => s.dedupKey).sort(), ['a', 'c']);
+  });
+
+  test('search vazio ou só espaços é ignorado (mesmo comportamento sem search)', async () => {
+    const supabase = await seedMulti();
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await req(app, 'GET', '/api/v1/social/signals?search=%20%20');
+    const body = r.body as { signals: Array<{ dedupKey: string }> };
+    assert.equal(body.signals.length, 4);
+  });
+
+  test('search combinado com outros filtros — intersecção', async () => {
+    const supabase = await seedMulti();
+    const store = (supabase as unknown as { _store: Map<string, Array<{ dedupKey: string; summary: string }>> })._store;
+    const signals = store.get('social_signals') ?? [];
+    for (const s of signals) {
+      s.summary = s.dedupKey === 'b' ? 'hospital tem fila' : 'algo genérico';
+    }
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    // hospital + minSeverity=risk → só 'b' (risk + summary match)
+    const r = await req(app, 'GET', '/api/v1/social/signals?search=hospital&minSeverity=risk');
+    const body = r.body as { signals: Array<{ dedupKey: string }> };
+    assert.deepEqual(body.signals.map(s => s.dedupKey), ['b']);
+  });
+
   test('since filtra', async () => {
     const supabase = await seedMulti();
     const app = buildApp({ campaignId: CAMP }, supabase);
@@ -221,6 +260,15 @@ describe('GET /signals — filtros inválidos', () => {
     const r = await req(app, 'GET', '/api/v1/social/signals?since=not-a-date');
     assert.equal(r.status, 400);
     assert.deepEqual(r.body, { error: 'invalid_since' });
+  });
+
+  test('search > 200 chars → 400 invalid_search', async () => {
+    const app = buildApp({ campaignId: CAMP }, empty());
+    const longStr = 'a'.repeat(201);
+    const r = await req(app, 'GET', `/api/v1/social/signals?search=${longStr}`);
+    assert.equal(r.status, 400);
+    const body = r.body as { error: string };
+    assert.equal(body.error, 'invalid_search');
   });
 
   test('limit não-inteiro ou fora de 1-500 → 400', async () => {
