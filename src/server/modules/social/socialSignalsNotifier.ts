@@ -54,6 +54,29 @@ export interface NotifyConfig {
   fetchImpl?: typeof fetch;
   /** Injeção pra testes — clock ao notificar. Default new Date(). */
   now?: () => Date;
+  /**
+   * Injeção pra testes — função de sleep entre retry pós-429.
+   * Default: `setTimeout` real via Promise. Passar `async () => {}` em
+   * testes pra pular a espera.
+   */
+  sleepImpl?: (ms: number) => Promise<void>;
+}
+
+// Retry-After em segundos → ms. Rejeita valores inválidos ou negativos.
+// Cap em 60s pra não bloquear o worker por muito tempo (>60s = deixa o
+// próximo tick tentar).
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const n = Number(header);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const ms = Math.min(n * 1000, 60_000);
+  return ms;
+}
+
+const DEFAULT_RETRY_AFTER_MS = 5_000;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export const SOCIAL_SIGNALS_NOTIFIER_VERSION = '2026-08-27.v1';
@@ -203,14 +226,26 @@ export async function notifySignals(
 
   const payload = buildSlackPayload(toNotify);
   const fetcher = cfg.fetchImpl ?? fetch;
+  const sleeper = cfg.sleepImpl ?? defaultSleep;
+
+  const postSlack = async (): Promise<Response> => fetcher(cfg.slackWebhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 
   let response: Response;
   try {
-    response = await fetcher(cfg.slackWebhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    response = await postSlack();
+    // Retry ÚNICO em 429 respeitando Retry-After (segundos).
+    // Slack e Resend documentam esse header; sem ele, cap em 30s como
+    // fallback conservador. Uma tentativa só — evita loop exponencial
+    // que poderia agravar o rate-limit durante um pico.
+    if (response.status === 429) {
+      const waitMs = parseRetryAfterMs(response.headers.get('retry-after')) ?? DEFAULT_RETRY_AFTER_MS;
+      await sleeper(waitMs);
+      response = await postSlack();
+    }
   } catch (err: unknown) {
     return {
       attempted: signals.length, notified: 0,

@@ -60,6 +60,30 @@ function makeFetchStub(response: { ok: boolean; status?: number; text?: string }
       ok: response.ok,
       status: response.status ?? (response.ok ? 200 : 500),
       text: async () => response.text ?? (response.ok ? 'ok' : 'error'),
+      headers: new Headers(),
+    } as Response;
+  }) as typeof fetch;
+  return { fetch: fetchImpl, calls };
+}
+
+/** Fetch stub que devolve uma sequência de respostas (uma por chamada). */
+function makeSequencedFetch(responses: Array<{ ok: boolean; status?: number; text?: string; retryAfter?: string }>): {
+  fetch: typeof fetch;
+  calls: CapturedCall[];
+} {
+  const calls: CapturedCall[] = [];
+  let idx = 0;
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init: init ?? {} });
+    const r = responses[Math.min(idx, responses.length - 1)];
+    idx += 1;
+    const headers = new Headers();
+    if (r.retryAfter !== undefined) headers.set('retry-after', r.retryAfter);
+    return {
+      ok: r.ok,
+      status: r.status ?? (r.ok ? 200 : 500),
+      text: async () => r.text ?? (r.ok ? 'ok' : 'error'),
+      headers,
     } as Response;
   }) as typeof fetch;
   return { fetch: fetchImpl, calls };
@@ -248,6 +272,123 @@ describe('notifySignals — erros', () => {
 
   test('SOCIAL_SIGNALS_NOTIFIER_VERSION é string estável', () => {
     assert.ok(typeof SOCIAL_SIGNALS_NOTIFIER_VERSION === 'string');
+  });
+});
+
+// ── 429 rate-limit retry ───────────────────────────────────────────
+
+describe('notifySignals — retry único em 429', () => {
+  test('429 seguido de 200 → success; fetch chamado 2x; sleep respeita Retry-After', async () => {
+    const { fetch: seqFetch, calls } = makeSequencedFetch([
+      { ok: false, status: 429, retryAfter: '2' },
+      { ok: true },
+    ]);
+    let sleepMs = 0;
+    const cfg: NotifyConfig = {
+      slackWebhookUrl: 'https://hooks.slack.com/x',
+      fetchImpl: seqFetch,
+      sleepImpl: async (ms) => { sleepMs = ms; }, // instant sleep, capturar ms
+    };
+    const r = await notifySignals(cfg, CAMP_A, [signal({ severity: 'risk' })]);
+    assert.equal(r.reason, 'ok');
+    assert.equal(r.notified, 1);
+    assert.equal(calls.length, 2);
+    assert.equal(sleepMs, 2000);
+  });
+
+  test('429 sem Retry-After → usa default (5s)', async () => {
+    const { fetch: seqFetch, calls } = makeSequencedFetch([
+      { ok: false, status: 429 },
+      { ok: true },
+    ]);
+    let sleepMs = 0;
+    const cfg: NotifyConfig = {
+      slackWebhookUrl: 'https://hooks.slack.com/x',
+      fetchImpl: seqFetch,
+      sleepImpl: async (ms) => { sleepMs = ms; },
+    };
+    const r = await notifySignals(cfg, CAMP_A, [signal({ severity: 'risk' })]);
+    assert.equal(r.reason, 'ok');
+    assert.equal(calls.length, 2);
+    assert.equal(sleepMs, 5000);
+  });
+
+  test('429 → 429 (segundo falho) → reason=error, 1 retry só', async () => {
+    const { fetch: seqFetch, calls } = makeSequencedFetch([
+      { ok: false, status: 429, retryAfter: '1' },
+      { ok: false, status: 429, retryAfter: '1' },
+    ]);
+    const cfg: NotifyConfig = {
+      slackWebhookUrl: 'https://hooks.slack.com/x',
+      fetchImpl: seqFetch,
+      sleepImpl: async () => {},
+    };
+    const r = await notifySignals(cfg, CAMP_A, [signal({ severity: 'risk' })]);
+    assert.equal(r.reason, 'error');
+    assert.equal(r.httpStatus, 429);
+    // Só 2 chamadas totais (original + 1 retry)
+    assert.equal(calls.length, 2);
+  });
+
+  test('429 → 500 (segundo falho de outro erro) → reason=error com status do 500', async () => {
+    const { fetch: seqFetch, calls } = makeSequencedFetch([
+      { ok: false, status: 429, retryAfter: '1' },
+      { ok: false, status: 500, text: 'internal' },
+    ]);
+    const cfg: NotifyConfig = {
+      slackWebhookUrl: 'https://hooks.slack.com/x',
+      fetchImpl: seqFetch,
+      sleepImpl: async () => {},
+    };
+    const r = await notifySignals(cfg, CAMP_A, [signal({ severity: 'risk' })]);
+    assert.equal(r.reason, 'error');
+    assert.equal(r.httpStatus, 500);
+    assert.equal(calls.length, 2);
+  });
+
+  test('Retry-After inválido (não-numérico) → cai no default', async () => {
+    const { fetch: seqFetch } = makeSequencedFetch([
+      { ok: false, status: 429, retryAfter: 'abc' },
+      { ok: true },
+    ]);
+    let sleepMs = 0;
+    const cfg: NotifyConfig = {
+      slackWebhookUrl: 'https://hooks.slack.com/x',
+      fetchImpl: seqFetch,
+      sleepImpl: async (ms) => { sleepMs = ms; },
+    };
+    const r = await notifySignals(cfg, CAMP_A, [signal({ severity: 'risk' })]);
+    assert.equal(r.reason, 'ok');
+    assert.equal(sleepMs, 5000);
+  });
+
+  test('Retry-After absurdo (999999) → cap em 60s', async () => {
+    const { fetch: seqFetch } = makeSequencedFetch([
+      { ok: false, status: 429, retryAfter: '999999' },
+      { ok: true },
+    ]);
+    let sleepMs = 0;
+    const cfg: NotifyConfig = {
+      slackWebhookUrl: 'https://hooks.slack.com/x',
+      fetchImpl: seqFetch,
+      sleepImpl: async (ms) => { sleepMs = ms; },
+    };
+    await notifySignals(cfg, CAMP_A, [signal({ severity: 'risk' })]);
+    assert.equal(sleepMs, 60_000);
+  });
+
+  test('200 na primeira → sem retry, sem sleep', async () => {
+    const { fetch: seqFetch, calls } = makeSequencedFetch([{ ok: true }]);
+    let sleepCalled = false;
+    const cfg: NotifyConfig = {
+      slackWebhookUrl: 'https://hooks.slack.com/x',
+      fetchImpl: seqFetch,
+      sleepImpl: async () => { sleepCalled = true; },
+    };
+    const r = await notifySignals(cfg, CAMP_A, [signal({ severity: 'risk' })]);
+    assert.equal(r.reason, 'ok');
+    assert.equal(calls.length, 1);
+    assert.equal(sleepCalled, false);
   });
 });
 
