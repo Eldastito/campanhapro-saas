@@ -21,6 +21,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { querySignals, getSignalStats } from './socialSignalStore.js';
 import { computeCampaignSocialSignals } from './socialSignalsRunner.js';
+import { getSlackNotifierStatus } from './socialSignalsNotifier.js';
+import { getEmailNotifierStatus } from './socialSignalsEmailNotifier.js';
 import { toCsv, csvFilename, statsCsv, statsCsvFilename } from './socialSignalsCsvExporter.js';
 import type {
   SocialSignalSeverity,
@@ -193,6 +195,25 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
     } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: 'stats_failed', detail });
+    }
+  });
+
+  // GET /signals/notifier-status — Admin-only. Observabilidade dos notifiers
+  // (Slack + email): configuração ativa (sem vazar URL/emails), minSeverity
+  // efetivo, tamanho do dedup cache. Útil pra ops confirmar do UI que os
+  // env vars estão setados corretamente sem SSH.
+  router.get('/signals/notifier-status', (req: Request, res: Response) => {
+    const campaignId = (req as unknown as { user?: { campaignId?: string } }).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    if (!isAdmin(req)) return res.status(403).json({ error: 'admin_required' });
+
+    try {
+      const slack = getSlackNotifierStatus(campaignId);
+      const email = getEmailNotifierStatus(campaignId);
+      return res.json({ slack, email });
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return res.status(500).json({ error: 'notifier_status_failed', detail });
     }
   });
 
