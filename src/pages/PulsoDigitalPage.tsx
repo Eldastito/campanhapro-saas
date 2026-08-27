@@ -19,6 +19,7 @@ import Card from '../components/ui/Card';
 import PulsoSignalCard from '../components/social/PulsoSignalCard';
 import PulsoSignalDetailsModal from '../components/social/PulsoSignalDetailsModal';
 import PulsoSummaryHeader from '../components/social/PulsoSummaryHeader';
+import PulsoNotifierAdminCard from '../components/social/PulsoNotifierAdminCard';
 import {
   StoredSocialSignal,
   BroadcastSocialSignal,
@@ -323,6 +324,9 @@ const PulsoDigitalPage: React.FC = () => {
         signal={selectedSignal}
         onClose={() => setSelectedSignal(null)}
       />
+
+      {/* Config de notifiers — auto-esconde se não for Admin/Coordenador */}
+      <PulsoNotifierAdminCard />
     </div>
   );
 };
