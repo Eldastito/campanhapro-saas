@@ -382,4 +382,93 @@ function buildDayBuckets(
   return [...buckets.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// ── Retention / archive ────────────────────────────────────────────
+
+export interface ArchiveOldSignalsResult {
+  attempted: number;
+  archived: number;
+  reason: 'ok' | 'noop' | 'error';
+  errorMessage?: string;
+  /** ISO do cutoff — signals com emittedAt < cutoff foram removidos. */
+  cutoffDate: string;
+}
+
+/**
+ * Remove signals antigos de UMA campanha. Hard-delete, não soft: o
+ * dedup do notifier já mantém cache in-memory (best-effort); signals
+ * que ressurgirem depois do cutoff serão notificados de novo — o que
+ * é geralmente o comportamento correto ("acabou o histórico, é ruído
+ * novo").
+ *
+ * Isolamento §35: filtra por campaignId; RLS reforça no banco.
+ *
+ * Uso típico: scheduler chama ao final de cada tick com
+ * retentionMs=30 dias. Manter tabela lean sem crescer indefinidamente.
+ */
+export async function archiveOldSignals(
+  supabase: SupabaseClient,
+  campaignId: string,
+  retentionMs: number,
+  now: Date = new Date(),
+): Promise<ArchiveOldSignalsResult> {
+  if (!campaignId) throw new Error('archiveOldSignals: campaignId obrigatório');
+  if (!Number.isFinite(retentionMs) || retentionMs <= 0) {
+    return {
+      attempted: 0, archived: 0,
+      reason: 'noop',
+      cutoffDate: now.toISOString(),
+    };
+  }
+
+  const cutoff = new Date(now.getTime() - retentionMs);
+
+  // Two-step porque o mock do supabase (e algumas versões do PostgREST)
+  // não devolvem contagem confiável de delete sem select prévio.
+  const { data: rowsToDelete, error: selectError } = await supabase
+    .from('social_signals')
+    .select('id')
+    .eq('campaignId', campaignId)
+    .lt('emittedAt', cutoff.toISOString());
+
+  if (selectError) {
+    return {
+      attempted: 0, archived: 0,
+      reason: 'error',
+      errorMessage: `select failed: ${selectError.message}`,
+      cutoffDate: cutoff.toISOString(),
+    };
+  }
+
+  const count = (rowsToDelete ?? []).length;
+  if (count === 0) {
+    return {
+      attempted: 0, archived: 0,
+      reason: 'ok',
+      cutoffDate: cutoff.toISOString(),
+    };
+  }
+
+  const { error: deleteError } = await supabase
+    .from('social_signals')
+    .delete()
+    .eq('campaignId', campaignId)
+    .lt('emittedAt', cutoff.toISOString());
+
+  if (deleteError) {
+    return {
+      attempted: count, archived: 0,
+      reason: 'error',
+      errorMessage: `delete failed: ${deleteError.message}`,
+      cutoffDate: cutoff.toISOString(),
+    };
+  }
+
+  return {
+    attempted: count,
+    archived: count,
+    reason: 'ok',
+    cutoffDate: cutoff.toISOString(),
+  };
+}
+
 export const SOCIAL_SIGNAL_STORE_VERSION = '2026-08-27.v1';

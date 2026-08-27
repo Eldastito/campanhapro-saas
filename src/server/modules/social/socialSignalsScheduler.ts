@@ -250,6 +250,12 @@ export interface SchedulerEnv {
   SOCIAL_SIGNALS_SCHEDULER_NOTIFY?: string;
   /** Se '1', tick tenta notificar email (usa emailNotifierConfigFromEnv). Default: '0'. */
   SOCIAL_SIGNALS_SCHEDULER_EMAIL_NOTIFY?: string;
+  /**
+   * Se > 0, remove signals mais antigos que N dias em cada tick. Mantém
+   * social_signals lean; 0 (default) → sem retenção. Valores negativos ou
+   * não-numéricos são rejeitados silenciosamente (default 0).
+   */
+  SOCIAL_SIGNALS_SCHEDULER_ARCHIVE_DAYS?: string;
 }
 
 export interface MaybeStartOptions {
@@ -302,17 +308,30 @@ export function maybeStartSocialSignalsScheduler(
   const notify = parseBool(env.SOCIAL_SIGNALS_SCHEDULER_NOTIFY, false);
   const emailNotify = parseBool(env.SOCIAL_SIGNALS_SCHEDULER_EMAIL_NOTIFY, false);
 
+  let archiveOlderThanMs = 0;
+  const rawArchive = env.SOCIAL_SIGNALS_SCHEDULER_ARCHIVE_DAYS;
+  if (rawArchive !== undefined && rawArchive !== '') {
+    const days = Number(rawArchive);
+    if (Number.isFinite(days) && days > 0) {
+      archiveOlderThanMs = days * 24 * 60 * 60 * 1000;
+    } else if (rawArchive !== '0') {
+      console.warn(
+        `[socialSignalsScheduler] SOCIAL_SIGNALS_SCHEDULER_ARCHIVE_DAYS inválido (${rawArchive}); usando 0 (sem retenção)`,
+      );
+    }
+  }
+
   try {
     const handle = startSocialSignalsScheduler({
       supabase: opts.supabase,
       intervalMs,
       runOnStart,
       onTick: opts.onTick,
-      batchOptions: { persist, broadcast, notify, emailNotify },
+      batchOptions: { persist, broadcast, notify, emailNotify, archiveOlderThanMs },
     });
     _currentSchedulerHandle = handle;
     console.log(
-      `[socialSignalsScheduler] enabled — interval=${intervalMs}ms runOnStart=${runOnStart} persist=${persist} broadcast=${broadcast} notify=${notify} emailNotify=${emailNotify}`,
+      `[socialSignalsScheduler] enabled — interval=${intervalMs}ms runOnStart=${runOnStart} persist=${persist} broadcast=${broadcast} notify=${notify} emailNotify=${emailNotify} archiveDays=${archiveOlderThanMs > 0 ? archiveOlderThanMs / (24 * 60 * 60 * 1000) : 0}`,
     );
     return handle;
   } catch (err: unknown) {
