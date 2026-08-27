@@ -24,6 +24,7 @@ import AgendaPanel from '../components/agenda/AgendaPanel';
 import VoiceCommandButton from '../components/agenda/VoiceCommandButton';
 import FieldFocusCard from '../components/dashboard/FieldFocusCard';
 import PartyFieldQuickCard from '../components/party/PartyFieldQuickCard';
+import PulsoStatsTile from '../components/dashboard/PulsoStatsTile';
 // ExternalMemoryRefreshCard movido para SettingsPage (#56 era admin 1x/dia, não decisão diária do coord)
 
 const DashboardPage = () => {
@@ -110,6 +111,7 @@ const DashboardPage = () => {
             )}
             
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <PulsoStatsTile />
                 <FraudAlertPanel />
                 <IssueMap visits={filteredVisits} engagements={filteredEngagements} />
                 <ConversionFunnel />
