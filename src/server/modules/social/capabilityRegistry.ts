@@ -76,22 +76,25 @@ export const SOCIAL_CAPABILITY_REGISTRY: Readonly<Record<SocialProvider, SocialP
     },
   },
 
-  // ── YouTube — AS-IS §2.3: totalmente ausente. ───────────────────────────
+  // ── YouTube — PR 6: Data API v3 (channel + videos + comments) via
+  // API key ou OAuth token. OAuth Google flow + Analytics API entram em PR
+  // futuro. Cobre §26-§29 do PRD; §30 (Analytics — watch time, retention,
+  // demografia) ainda não.
   youtube: {
-    adapterMaturity: 'not_implemented',
-    maturityNote: 'Apenas mencionado em prompts (intelRouter). F4-F5 (PRs 6-7) trazem OAuth Google + Data API + Analytics API.',
+    adapterMaturity: 'beta',
+    maturityNote: 'Data API v3 via YOUTUBE_API_KEY (env) ou access_token do settings. OAuth Google flow (Login + refresh) + Analytics API (watch time, retention, demografia) entram em PR futuro.',
     capabilities: {
-      profileRead: 'not_configured',
-      postsRead: 'not_configured',
-      ownCommentsRead: 'not_configured',
-      thirdPartyCommentsRead: 'permission_required',
-      metricsRead: 'not_configured',
-      audienceInsights: 'not_configured',
+      profileRead: 'supported',                // channel snippet + statistics
+      postsRead: 'supported',                  // uploads playlist + videos details
+      ownCommentsRead: 'supported',            // commentThreads.list
+      thirdPartyCommentsRead: 'supported',     // idem — public por default
+      metricsRead: 'supported',                // view/like/comment counts básicos
+      audienceInsights: 'permission_required', // Analytics API precisa yt-analytics.readonly
       mentionsRead: 'unsupported',
-      competitorDiscovery: 'not_configured',
+      competitorDiscovery: 'supported',        // channels.list + videos.list de terceiros
       publishText: 'unsupported',              // YT não tem "post de texto"
       publishImage: 'unsupported',
-      publishVideo: 'not_configured',
+      publishVideo: 'not_configured',          // exige OAuth + youtube.upload scope
       schedule: 'not_configured',
       webhook: 'unsupported',                  // YT usa PubSubHubbub, fora do escopo
     },

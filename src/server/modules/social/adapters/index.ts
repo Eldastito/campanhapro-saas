@@ -16,6 +16,7 @@ import { createLinkedInAdapter, type LinkedInAdapterDeps } from './linkedInAdapt
 import { createKwaiAdapter, type KwaiAdapterDeps } from './kwaiAdapter.js';
 import { createInstagramMetaAdapter, type InstagramMetaAdapterDeps } from './instagramMetaAdapter.js';
 import { createFacebookMetaAdapter, type FacebookMetaAdapterDeps } from './facebookMetaAdapter.js';
+import { createYouTubeAdapter, type YouTubeAdapterDeps } from './youtubeAdapter.js';
 
 export {
   SocialCapabilityNotAvailableError,
@@ -28,6 +29,7 @@ export type {
   KwaiAdapterDeps,
   InstagramMetaAdapterDeps,
   FacebookMetaAdapterDeps,
+  YouTubeAdapterDeps,
 };
 
 export interface CreateSocialAdaptersDeps {
@@ -36,6 +38,7 @@ export interface CreateSocialAdaptersDeps {
   kwai?: KwaiAdapterDeps;
   instagram?: InstagramMetaAdapterDeps;
   facebook?: FacebookMetaAdapterDeps;
+  youtube?: YouTubeAdapterDeps;
 }
 
 /**
@@ -58,7 +61,7 @@ export function createSocialAdapters(
     kwai: createKwaiAdapter(supabase, deps.kwai),
     instagram: createInstagramMetaAdapter(supabase, deps.instagram),
     facebook: createFacebookMetaAdapter(supabase, deps.facebook),
-    // youtube: PR 6-7
+    youtube: createYouTubeAdapter(supabase, deps.youtube),
     // tiktok: PR 8
   };
 }
@@ -73,4 +76,5 @@ export const IMPLEMENTED_PROVIDERS: readonly SocialProvider[] = Object.freeze([
   'kwai',
   'instagram',
   'facebook',
+  'youtube',
 ] as const);
