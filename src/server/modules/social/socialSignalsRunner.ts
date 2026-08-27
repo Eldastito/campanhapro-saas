@@ -70,6 +70,12 @@ import {
   type NotifyConfig,
   type NotifyResult,
 } from './socialSignalsNotifier.js';
+import {
+  emailNotifySignals,
+  emailNotifierConfigFromEnv,
+  type EmailNotifyConfig,
+  type EmailNotifyResult,
+} from './socialSignalsEmailNotifier.js';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -140,6 +146,21 @@ export interface ComputeCampaignSignalsOptions {
    * Se omitido e notify=true, lê das env vars via notifierConfigFromEnv().
    */
   notifyConfig?: NotifyConfig;
+
+  /**
+   * Se true, envia signals com severity >= minSeverity pro email dos
+   * recipients configurados. Default false. Dedup independente do Slack
+   * notifier — mesmo signal pode ir pros dois canais.
+   * Sem env válido → skip silencioso (reason='skipped_no_env').
+   */
+  emailNotify?: boolean;
+
+  /**
+   * Config explícito pra emailNotify — recipients, minSeverity, provider.
+   * Se omitido e emailNotify=true, lê das env vars via
+   * emailNotifierConfigFromEnv().
+   */
+  emailNotifyConfig?: EmailNotifyConfig;
 }
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -157,6 +178,7 @@ export type ComputeCampaignSignalsResult = PipelineResult & {
   persist?: PersistSignalsResult;
   broadcast?: BroadcastResult;
   notify?: NotifyResult;
+  emailNotify?: EmailNotifyResult;
 };
 
 /**
@@ -281,6 +303,21 @@ export async function computeCampaignSocialSignals(
       result.notify = await notifySignals(cfg, campaignId, pipelineResult.signals);
     } else {
       result.notify = {
+        attempted: pipelineResult.signals.length,
+        notified: 0,
+        skippedBelowThreshold: 0,
+        skippedDeduped: 0,
+        reason: 'skipped_no_env',
+      };
+    }
+  }
+
+  if (opts.emailNotify) {
+    const cfg = opts.emailNotifyConfig ?? emailNotifierConfigFromEnv();
+    if (cfg) {
+      result.emailNotify = await emailNotifySignals(cfg, campaignId, pipelineResult.signals);
+    } else {
+      result.emailNotify = {
         attempted: pipelineResult.signals.length,
         notified: 0,
         skippedBelowThreshold: 0,
