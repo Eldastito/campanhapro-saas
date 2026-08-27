@@ -57,7 +57,12 @@ import type { AnomalyDetectorConfig } from './intelligence/anomalyDetector.js';
 import type { CorrelateNetworksOptions } from './intelligence/crossNetworkCorrelator.js';
 import type { SignalBusOptions } from './intelligence/socialSignalBus.js';
 import { isSocialProvider } from './contracts/socialProvider.js';
-import { persistSignals, type PersistSignalsResult } from './socialSignalStore.js';
+import {
+  persistSignals,
+  archiveOldSignals,
+  type PersistSignalsResult,
+  type ArchiveOldSignalsResult,
+} from './socialSignalStore.js';
 import {
   broadcastSignals,
   broadcastConfigFromEnv,
@@ -161,6 +166,14 @@ export interface ComputeCampaignSignalsOptions {
    * emailNotifierConfigFromEnv().
    */
   emailNotifyConfig?: EmailNotifyConfig;
+
+  /**
+   * Se > 0, chama archiveOldSignals ao final: signals persistidos com
+   * `emittedAt < now - archiveOlderThanMs` são removidos da tabela.
+   * Só faz sentido combinado com persist=true (senão nada foi persistido
+   * pra arquivar). Default 0 (sem archive).
+   */
+  archiveOlderThanMs?: number;
 }
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -179,6 +192,7 @@ export type ComputeCampaignSignalsResult = PipelineResult & {
   broadcast?: BroadcastResult;
   notify?: NotifyResult;
   emailNotify?: EmailNotifyResult;
+  archive?: ArchiveOldSignalsResult;
 };
 
 /**
@@ -325,6 +339,10 @@ export async function computeCampaignSocialSignals(
         reason: 'skipped_no_env',
       };
     }
+  }
+
+  if (opts.archiveOlderThanMs && opts.archiveOlderThanMs > 0) {
+    result.archive = await archiveOldSignals(supabase, campaignId, opts.archiveOlderThanMs, now);
   }
 
   return result;
