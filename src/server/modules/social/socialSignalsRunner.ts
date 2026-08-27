@@ -58,6 +58,12 @@ import type { CorrelateNetworksOptions } from './intelligence/crossNetworkCorrel
 import type { SignalBusOptions } from './intelligence/socialSignalBus.js';
 import { isSocialProvider } from './contracts/socialProvider.js';
 import { persistSignals, type PersistSignalsResult } from './socialSignalStore.js';
+import {
+  broadcastSignals,
+  broadcastConfigFromEnv,
+  type BroadcastConfig,
+  type BroadcastResult,
+} from './socialSignalsBroadcaster.js';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -98,6 +104,23 @@ export interface ComputeCampaignSignalsOptions {
    * "ver" os signals não paga custo de escrita.
    */
   persist?: boolean;
+
+  /**
+   * Se true, broadcasta os signals no canal
+   * `campaign:<campaignId>:social_signals` via /realtime/v1/api/broadcast
+   * (CLAUDE.md — Broadcast, não postgres_changes). Default false.
+   * Config vem de `broadcastConfig` (injetado) ou das env vars
+   * SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+   * Sem env válido → skip silencioso (reason='skipped_no_env').
+   */
+  broadcast?: boolean;
+
+  /**
+   * Config explícito para broadcast — supabaseUrl, serviceRoleKey e
+   * fetchImpl (útil pra tests). Se omitido e broadcast=true, lê das
+   * env vars via broadcastConfigFromEnv().
+   */
+  broadcastConfig?: BroadcastConfig;
 }
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -107,12 +130,13 @@ const DEFAULT_COMMENTS_LIMIT = 1000;
 // ── API pública ─────────────────────────────────────────────────────
 
 /**
- * Extensão do PipelineResult quando `persist: true` foi passado ao
- * runner — carrega o outcome da gravação. Compatível com quem não
- * setou `persist` (o campo fica ausente).
+ * Extensão do PipelineResult quando `persist: true` e/ou `broadcast: true`
+ * foram passados ao runner — carrega o outcome de cada operação.
+ * Compatível com quem não setou (os campos ficam ausentes).
  */
 export type ComputeCampaignSignalsResult = PipelineResult & {
   persist?: PersistSignalsResult;
+  broadcast?: BroadcastResult;
 };
 
 /**
@@ -212,12 +236,26 @@ export async function computeCampaignSocialSignals(
 
   const pipelineResult = runSocialSignalsPipeline(pipelineInput);
 
+  const result: ComputeCampaignSignalsResult = { ...pipelineResult };
+
   if (opts.persist) {
-    const persistResult = await persistSignals(supabase, campaignId, pipelineResult.signals);
-    return { ...pipelineResult, persist: persistResult };
+    result.persist = await persistSignals(supabase, campaignId, pipelineResult.signals);
   }
 
-  return pipelineResult;
+  if (opts.broadcast) {
+    const cfg = opts.broadcastConfig ?? broadcastConfigFromEnv();
+    if (cfg) {
+      result.broadcast = await broadcastSignals(cfg, campaignId, pipelineResult.signals);
+    } else {
+      result.broadcast = {
+        attempted: pipelineResult.signals.length,
+        broadcast: 0,
+        reason: 'skipped_no_env',
+      };
+    }
+  }
+
+  return result;
 }
 
 export const SOCIAL_SIGNALS_RUNNER_VERSION = '2026-08-27.v1';
