@@ -28,6 +28,7 @@ import type {
 import { SIGNAL_SEVERITY_ORDER } from './intelligence/socialSignalBus.js';
 import { isSocialProvider, type SocialProvider } from './contracts/socialProvider.js';
 import { SOCIAL_TOPICS, type SocialTopic } from './intelligence/topicClassifier.js';
+import { getCurrentSchedulerHandle } from './socialSignalsScheduler.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -108,6 +109,23 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
       const detail = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: 'query_failed', detail });
     }
+  });
+
+  // GET /signals/scheduler-status — Admin-only. Observabilidade do
+  // scheduler autônomo (PR 20-21). Devolve running/tickCount/lastOutcome.
+  // Não escopa por campaignId — o scheduler serve todas as campanhas.
+  router.get('/signals/scheduler-status', (req: Request, res: Response) => {
+    const campaignId = (req as unknown as { user?: { campaignId?: string } }).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    if (!isAdmin(req)) return res.status(403).json({ error: 'admin_required' });
+    const handle = getCurrentSchedulerHandle();
+    if (!handle) {
+      return res.json({
+        enabled: false,
+        reason: 'scheduler_not_running',
+      });
+    }
+    return res.json({ enabled: true, ...handle.getStatus() });
   });
 
   // POST /signals/compute — sob demanda; caro (varre stored posts/comments).
