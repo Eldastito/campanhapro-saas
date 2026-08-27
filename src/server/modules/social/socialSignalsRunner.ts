@@ -64,6 +64,12 @@ import {
   type BroadcastConfig,
   type BroadcastResult,
 } from './socialSignalsBroadcaster.js';
+import {
+  notifySignals,
+  notifierConfigFromEnv,
+  type NotifyConfig,
+  type NotifyResult,
+} from './socialSignalsNotifier.js';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -121,6 +127,19 @@ export interface ComputeCampaignSignalsOptions {
    * env vars via broadcastConfigFromEnv().
    */
   broadcastConfig?: BroadcastConfig;
+
+  /**
+   * Se true, envia signals com severity >= minSeverity (default 'risk')
+   * pro Slack webhook. Default false. Idempotência via cache in-memory
+   * de dedupKeys já notificados por campanha.
+   */
+  notify?: boolean;
+
+  /**
+   * Config explícito pra notify — slackWebhookUrl, minSeverity, fetchImpl.
+   * Se omitido e notify=true, lê das env vars via notifierConfigFromEnv().
+   */
+  notifyConfig?: NotifyConfig;
 }
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -130,13 +149,14 @@ const DEFAULT_COMMENTS_LIMIT = 1000;
 // ── API pública ─────────────────────────────────────────────────────
 
 /**
- * Extensão do PipelineResult quando `persist: true` e/ou `broadcast: true`
- * foram passados ao runner — carrega o outcome de cada operação.
- * Compatível com quem não setou (os campos ficam ausentes).
+ * Extensão do PipelineResult quando `persist: true`, `broadcast: true`
+ * e/ou `notify: true` foram passados ao runner — carrega o outcome de
+ * cada operação. Compatível com quem não setou (os campos ficam ausentes).
  */
 export type ComputeCampaignSignalsResult = PipelineResult & {
   persist?: PersistSignalsResult;
   broadcast?: BroadcastResult;
+  notify?: NotifyResult;
 };
 
 /**
@@ -250,6 +270,21 @@ export async function computeCampaignSocialSignals(
       result.broadcast = {
         attempted: pipelineResult.signals.length,
         broadcast: 0,
+        reason: 'skipped_no_env',
+      };
+    }
+  }
+
+  if (opts.notify) {
+    const cfg = opts.notifyConfig ?? notifierConfigFromEnv();
+    if (cfg) {
+      result.notify = await notifySignals(cfg, campaignId, pipelineResult.signals);
+    } else {
+      result.notify = {
+        attempted: pipelineResult.signals.length,
+        notified: 0,
+        skippedBelowThreshold: 0,
+        skippedDeduped: 0,
         reason: 'skipped_no_env',
       };
     }

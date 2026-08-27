@@ -246,6 +246,8 @@ export interface SchedulerEnv {
   SOCIAL_SIGNALS_SCHEDULER_PERSIST?: string;
   /** Se '1', tick broadcasta em campaign:<id>:social_signals. Default: '1'. */
   SOCIAL_SIGNALS_SCHEDULER_BROADCAST?: string;
+  /** Se '1', tick tenta notificar Slack (usa notifierConfigFromEnv). Default: '0'. */
+  SOCIAL_SIGNALS_SCHEDULER_NOTIFY?: string;
 }
 
 export interface MaybeStartOptions {
@@ -295,6 +297,7 @@ export function maybeStartSocialSignalsScheduler(
   const runOnStart = parseBool(env.SOCIAL_SIGNALS_SCHEDULER_RUN_ON_START, false);
   const persist = parseBool(env.SOCIAL_SIGNALS_SCHEDULER_PERSIST, true);
   const broadcast = parseBool(env.SOCIAL_SIGNALS_SCHEDULER_BROADCAST, true);
+  const notify = parseBool(env.SOCIAL_SIGNALS_SCHEDULER_NOTIFY, false);
 
   try {
     const handle = startSocialSignalsScheduler({
@@ -302,11 +305,11 @@ export function maybeStartSocialSignalsScheduler(
       intervalMs,
       runOnStart,
       onTick: opts.onTick,
-      batchOptions: { persist, broadcast },
+      batchOptions: { persist, broadcast, notify },
     });
     _currentSchedulerHandle = handle;
     console.log(
-      `[socialSignalsScheduler] enabled — interval=${intervalMs}ms runOnStart=${runOnStart} persist=${persist} broadcast=${broadcast}`,
+      `[socialSignalsScheduler] enabled — interval=${intervalMs}ms runOnStart=${runOnStart} persist=${persist} broadcast=${broadcast} notify=${notify}`,
     );
     return handle;
   } catch (err: unknown) {
