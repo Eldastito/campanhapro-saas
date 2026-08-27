@@ -81,6 +81,23 @@ function makeStubProvider(overrides: Partial<Record<string, boolean>> = {}): Ema
   return provider;
 }
 
+/** Provider stub que retorna respostas em sequência por chamada. */
+function makeSequencedProvider(responses: SendEmailResult[]): EmailProvider & { sent: RecordedSend[] } {
+  const sent: RecordedSend[] = [];
+  let idx = 0;
+  const provider: EmailProvider & { sent: RecordedSend[] } = {
+    providerName: 'stub' as const,
+    sent,
+    async sendEmail(p: SendEmailParams): Promise<SendEmailResult> {
+      sent.push({ to: p.to, subject: p.subject, html: p.html, text: p.text });
+      const r = responses[Math.min(idx, responses.length - 1)];
+      idx += 1;
+      return r;
+    },
+  };
+  return provider;
+}
+
 beforeEach(() => {
   _resetEmailNotifierCacheForTests();
   seq = 1;
@@ -318,6 +335,143 @@ describe('emailNotifySignals — provider fail modes', () => {
     );
     assert.equal(r2.skippedDeduped, 1);
     assert.equal(r2.notified, 0);
+  });
+});
+
+// ── 429 rate-limit retry ───────────────────────────────────────────
+
+describe('emailNotifySignals — retry único em 429', () => {
+  test('429 seguido de 200 → notified=1, provider chamado 2x, sleep respeita retryAfterMs', async () => {
+    const provider = makeSequencedProvider([
+      { providerMessageId: null, ok: false, error: 'rate limited', status: 429, retryAfterMs: 3000 },
+      { providerMessageId: 'msg-1', ok: true, status: 200 },
+    ]);
+    let sleepMs = 0;
+    const r = await emailNotifySignals(
+      {
+        recipients: ['a@b.com'],
+        provider,
+        sleepImpl: async (ms) => { sleepMs = ms; },
+      },
+      CAMP,
+      [signal({ severity: 'crisis' })],
+    );
+    assert.equal(r.reason, 'ok');
+    assert.equal(r.notified, 1);
+    assert.equal(provider.sent.length, 2);
+    assert.equal(sleepMs, 3000);
+  });
+
+  test('429 sem retryAfterMs → default 5s', async () => {
+    const provider = makeSequencedProvider([
+      { providerMessageId: null, ok: false, error: 'rate limited', status: 429 },
+      { providerMessageId: 'msg-1', ok: true, status: 200 },
+    ]);
+    let sleepMs = 0;
+    const r = await emailNotifySignals(
+      {
+        recipients: ['a@b.com'],
+        provider,
+        sleepImpl: async (ms) => { sleepMs = ms; },
+      },
+      CAMP,
+      [signal({ severity: 'crisis' })],
+    );
+    assert.equal(r.notified, 1);
+    assert.equal(sleepMs, 5000);
+  });
+
+  test('429 → 429 → recipient em failedRecipients, cache não marcado', async () => {
+    const provider = makeSequencedProvider([
+      { providerMessageId: null, ok: false, error: 'rate limited', status: 429, retryAfterMs: 1000 },
+      { providerMessageId: null, ok: false, error: 'still rate limited', status: 429, retryAfterMs: 1000 },
+    ]);
+    const s = signal({ severity: 'crisis', dedupKey: 'k429' });
+    const r = await emailNotifySignals(
+      {
+        recipients: ['a@b.com'],
+        provider,
+        sleepImpl: async () => {},
+      },
+      CAMP,
+      [s],
+    );
+    // 1 recipient, 2 fetches, todos falharam → reason=error, cache NÃO marcado
+    assert.equal(r.reason, 'error');
+    assert.equal(r.notified, 0);
+    assert.deepEqual(r.failedRecipients, ['a@b.com']);
+    assert.equal(provider.sent.length, 2);
+    // Cache não marcado — retry seguro
+    const provider2 = makeStubProvider();
+    const r2 = await emailNotifySignals(
+      { recipients: ['a@b.com'], provider: provider2 },
+      CAMP,
+      [s],
+    );
+    assert.equal(r2.notified, 1);
+  });
+
+  test('outros erros (5xx) NÃO fazem retry', async () => {
+    const provider = makeSequencedProvider([
+      { providerMessageId: null, ok: false, error: 'internal server error', status: 500 },
+    ]);
+    let sleepCalled = false;
+    const r = await emailNotifySignals(
+      {
+        recipients: ['a@b.com'],
+        provider,
+        sleepImpl: async () => { sleepCalled = true; },
+      },
+      CAMP,
+      [signal({ severity: 'crisis' })],
+    );
+    // 1 tentativa só, sem retry, sem sleep
+    assert.equal(r.reason, 'error');
+    assert.equal(provider.sent.length, 1);
+    assert.equal(sleepCalled, false);
+  });
+
+  test('sucesso na 1ª tentativa → sem sleep, sem retry', async () => {
+    const provider = makeSequencedProvider([
+      { providerMessageId: 'msg-1', ok: true, status: 200 },
+    ]);
+    let sleepCalled = false;
+    const r = await emailNotifySignals(
+      {
+        recipients: ['a@b.com'],
+        provider,
+        sleepImpl: async () => { sleepCalled = true; },
+      },
+      CAMP,
+      [signal({ severity: 'crisis' })],
+    );
+    assert.equal(r.reason, 'ok');
+    assert.equal(provider.sent.length, 1);
+    assert.equal(sleepCalled, false);
+  });
+
+  test('multi-recipient: retry aplicado independente por endereço', async () => {
+    const provider = makeSequencedProvider([
+      // recipient A: 429 → 200
+      { providerMessageId: null, ok: false, error: 'rate', status: 429, retryAfterMs: 100 },
+      { providerMessageId: 'msg-a', ok: true, status: 200 },
+      // recipient B: 200 direto (sem retry)
+      { providerMessageId: 'msg-b', ok: true, status: 200 },
+    ]);
+    const r = await emailNotifySignals(
+      {
+        recipients: ['a@b.com', 'c@d.com'],
+        provider,
+        sleepImpl: async () => {},
+      },
+      CAMP,
+      [signal({ severity: 'crisis' })],
+    );
+    assert.equal(r.reason, 'ok');
+    assert.equal(r.notified, 1);
+    assert.equal(r.deliveredCount, 2);
+    // A: 2 chamadas (retry), B: 1 chamada → total 3
+    assert.equal(provider.sent.length, 3);
   });
 });
 

@@ -43,14 +43,29 @@ export class ResendProvider implements EmailProvider {
       try { parsed = text ? JSON.parse(text) : null; } catch { /* keep as text */ }
 
       if (!res.ok) {
+        // Retry-After em segundos → ms (Resend segue RFC 6585); cap 60s
+        // pra não bloquear worker por muito tempo. Se ausente/inválido,
+        // caller usa próprio default.
+        let retryAfterMs: number | undefined;
+        if (res.status === 429) {
+          const raw = res.headers.get('retry-after');
+          if (raw) {
+            const n = Number(raw);
+            if (Number.isFinite(n) && n > 0) {
+              retryAfterMs = Math.min(n * 1000, 60_000);
+            }
+          }
+        }
         return {
           providerMessageId: null,
           ok: false,
           error: parsed?.message ?? parsed?.error ?? `resend_http_${res.status}`,
+          status: res.status,
+          retryAfterMs,
         };
       }
 
-      return { providerMessageId: parsed?.id ?? null, ok: true };
+      return { providerMessageId: parsed?.id ?? null, ok: true, status: res.status };
     } catch (err: any) {
       return { providerMessageId: null, ok: false, error: err.message };
     }

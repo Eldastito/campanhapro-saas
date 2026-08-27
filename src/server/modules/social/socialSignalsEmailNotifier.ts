@@ -66,6 +66,17 @@ export interface EmailNotifyConfig {
   provider?: EmailProvider;
   /** Injeção pra tests — override do relógio. Default new Date(). */
   now?: () => Date;
+  /**
+   * Injeção pra tests — função de sleep pós-429. Default: setTimeout
+   * via Promise. Passar `async () => {}` em testes pra pular a espera.
+   */
+  sleepImpl?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_EMAIL_RETRY_AFTER_MS = 5_000;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export const SOCIAL_SIGNALS_EMAIL_NOTIFIER_VERSION = '2026-08-27.v1';
@@ -269,19 +280,30 @@ export async function emailNotifySignals(
 
   const template = buildEmailTemplate(toNotify);
   const provider = cfg.provider ?? getEmailProvider();
+  const sleeper = cfg.sleepImpl ?? defaultSleep;
 
   // 1 request por recipient (Resend API não faz BCC nativo; mais transparente
   // pro debugging quando 1 endereço falha)
   const failedRecipients: string[] = [];
   let deliveredCount = 0;
 
+  const params = {
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
+  };
+
   for (const to of cfg.recipients) {
-    const result = await provider.sendEmail({
-      to,
-      subject: template.subject,
-      html: template.html,
-      text: template.text,
-    });
+    let result = await provider.sendEmail({ to, ...params });
+    // Retry ÚNICO em 429 (rate-limit) respeitando Retry-After do provider.
+    // Sem loop exponencial — mesma justificativa do Slack notifier (PR 34):
+    // scheduler tenta de novo no próximo tick com cache in-memory garantindo
+    // idempotência.
+    if (!result.ok && result.status === 429) {
+      const waitMs = result.retryAfterMs ?? DEFAULT_EMAIL_RETRY_AFTER_MS;
+      await sleeper(waitMs);
+      result = await provider.sendEmail({ to, ...params });
+    }
     if (result.ok) {
       deliveredCount += 1;
     } else {
