@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { querySignals } from './socialSignalStore.js';
 import { computeCampaignSocialSignals } from './socialSignalsRunner.js';
+import { toCsv, csvFilename } from './socialSignalsCsvExporter.js';
 import type {
   SocialSignalSeverity,
   SocialSignalSource,
@@ -100,10 +101,28 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
       limit = n;
     }
 
+    // Formato de resposta — JSON default; ?format=csv devolve CSV
+    // (RFC 4180) com header attachment pra download direto. Filename
+    // já gerado no serializer pra manter formato canônico.
+    let format: 'json' | 'csv' = 'json';
+    if (typeof req.query.format === 'string' && req.query.format) {
+      if (req.query.format !== 'json' && req.query.format !== 'csv') {
+        return res.status(400).json({ error: 'invalid_format' });
+      }
+      format = req.query.format;
+    }
+
     try {
       const signals = await querySignals(supabase, campaignId, {
         minSeverity, source, topic, provider, since, limit,
       });
+      if (format === 'csv') {
+        const body = toCsv(signals);
+        const filename = csvFilename(campaignId);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.status(200).send(body);
+      }
       return res.json({ signals });
     } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);

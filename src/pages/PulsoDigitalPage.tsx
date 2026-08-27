@@ -120,6 +120,40 @@ const PulsoDigitalPage: React.FC = () => {
     }
   }, [campaignId, filters]);
 
+  // Download CSV: usa authedFetch (Authorization header) + blob → link
+  // temporário. Não abre em nova tab pra evitar tela em branco no browser.
+  const [exporting, setExporting] = React.useState(false);
+  const exportCsv = React.useCallback(async () => {
+    if (!campaignId) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const q = buildQuery(filters);
+      const res = await authedFetch(`/api/v1/social/signals?${q}&format=csv`);
+      if (!res.ok) {
+        const t = await res.text();
+        setError(`Erro ${res.status}: ${t.slice(0, 200)}`);
+        return;
+      }
+      const blob = await res.blob();
+      const dispo = res.headers.get('Content-Disposition') ?? '';
+      const match = dispo.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : 'signals.csv';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExporting(false);
+    }
+  }, [campaignId, filters]);
+
   React.useEffect(() => {
     void fetchSignals();
   }, [fetchSignals]);
@@ -171,6 +205,15 @@ const PulsoDigitalPage: React.FC = () => {
                 +{liveCount} ao vivo
               </span>
             )}
+            <button
+              type="button"
+              onClick={() => void exportCsv()}
+              disabled={exporting || loading}
+              title="Baixar CSV com os filtros atuais"
+              className="px-3 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700"
+            >
+              {exporting ? 'Exportando…' : 'Exportar CSV'}
+            </button>
             <button
               type="button"
               onClick={() => void fetchSignals()}
