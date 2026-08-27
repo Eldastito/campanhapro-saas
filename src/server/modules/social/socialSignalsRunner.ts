@@ -57,6 +57,7 @@ import type { AnomalyDetectorConfig } from './intelligence/anomalyDetector.js';
 import type { CorrelateNetworksOptions } from './intelligence/crossNetworkCorrelator.js';
 import type { SignalBusOptions } from './intelligence/socialSignalBus.js';
 import { isSocialProvider } from './contracts/socialProvider.js';
+import { persistSignals, type PersistSignalsResult } from './socialSignalStore.js';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -89,6 +90,14 @@ export interface ComputeCampaignSignalsOptions {
   trendOptions?: Omit<DetectTrendOptions, 'now' | 'window' | 'series'>;
   correlateOptions?: CorrelateNetworksOptions;
   busOptions?: SignalBusOptions;
+
+  /**
+   * Se true, grava (upsert) os signals resultantes em `social_signals`
+   * — idempotente por UNIQUE(campaignId, dedupKey). Default false para
+   * preservar o contrato original do runner: consumer que só quer
+   * "ver" os signals não paga custo de escrita.
+   */
+  persist?: boolean;
 }
 
 const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -98,18 +107,28 @@ const DEFAULT_COMMENTS_LIMIT = 1000;
 // ── API pública ─────────────────────────────────────────────────────
 
 /**
+ * Extensão do PipelineResult quando `persist: true` foi passado ao
+ * runner — carrega o outcome da gravação. Compatível com quem não
+ * setou `persist` (o campo fica ausente).
+ */
+export type ComputeCampaignSignalsResult = PipelineResult & {
+  persist?: PersistSignalsResult;
+};
+
+/**
  * Roda a cadeia inteira de intelligence pra UMA campanha. Lê apenas os
  * dados dessa campanha (§35). Consumidor típico: cron horário do Pulso
  * Digital, webhook de post-ingest, endpoint on-demand de dashboard.
  *
- * ⚠ Este runner NÃO grava nada. Devolve o result inteiro pro caller
- * decidir o que persistir / notificar / renderizar.
+ * Por default NÃO grava — o consumer decide o que fazer com o result.
+ * Passe `opts.persist = true` para upsert em `social_signals` (PR 16 —
+ * idempotente por UNIQUE(campaignId, dedupKey)).
  */
 export async function computeCampaignSocialSignals(
   supabase: SupabaseClient,
   campaignId: string,
   opts: ComputeCampaignSignalsOptions = {},
-): Promise<PipelineResult> {
+): Promise<ComputeCampaignSignalsResult> {
   if (!campaignId) throw new Error('computeCampaignSocialSignals: campaignId obrigatório');
 
   const now = opts.now ?? new Date();
@@ -191,7 +210,14 @@ export async function computeCampaignSocialSignals(
     busOptions: opts.busOptions,
   };
 
-  return runSocialSignalsPipeline(pipelineInput);
+  const pipelineResult = runSocialSignalsPipeline(pipelineInput);
+
+  if (opts.persist) {
+    const persistResult = await persistSignals(supabase, campaignId, pipelineResult.signals);
+    return { ...pipelineResult, persist: persistResult };
+  }
+
+  return pipelineResult;
 }
 
 export const SOCIAL_SIGNALS_RUNNER_VERSION = '2026-08-27.v1';
