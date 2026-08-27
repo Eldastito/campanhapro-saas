@@ -32,6 +32,7 @@ const ApuracaoLiveDashboard = React.lazy(() => import('./components/election/Apu
 const ElectionReportsPage = React.lazy(() => import('./pages/ElectionReportsPage'));
 const CRMPage = React.lazy(() => import('./pages/CRMPage'));
 const IntelligencePage = React.lazy(() => import('./pages/IntelligencePage'));
+const PulsoDigitalPage = React.lazy(() => import('./pages/PulsoDigitalPage'));
 const AgentTasksPage = React.lazy(() => import('./pages/AgentTasksPage'));
 const InboxPage = React.lazy(() => import('./pages/InboxPage'));
 const ScenariosPage = React.lazy(() => import('./pages/ScenariosPage'));
@@ -90,7 +91,7 @@ const AdminApp: React.FC = () => {
             analytics: ['Analytics'], financial: ['Financeiro'], content_studio: ['Estúdio'],
             meetings: ['Reuniões'], tools: ['Calculadora', 'Ferramentas'], training: ['Treinamento'],
             whatsapp_omnichannel: ['Caixa de Entrada'], election_day: ['Dia das Eleições', 'Apuração ao Vivo'],
-            intelligence: ['Inteligência', 'Mapa da Campanha'], scenarios: ['Cenários'], budget_ceo: ['Plano'],
+            intelligence: ['Inteligência', 'Mapa da Campanha', 'Pulso Digital'], scenarios: ['Cenários'], budget_ceo: ['Plano'],
             paperclip: ['Agentes (Tarefas)'], compliance: ['Conformidade'],
         };
         // Abas de gestão sempre liberadas (qualquer plano) — evita lock-out do admin.
@@ -100,7 +101,7 @@ const AdminApp: React.FC = () => {
             'Dashboard', 'Agentes IA', 'Calculadora', 'Visitas', 'Engajamento',
             'Recursos', 'Equipes', 'Financeiro', 'Treinamento', 'Ferramentas',
             'Permissões', 'Configurações', 'Ajuda', 'Dia das Eleições',
-            'Analytics', 'CRM', 'Inteligência', 'Mapa da Campanha', 'Apuração ao Vivo', 'Caixa de Entrada', 'Agentes (Tarefas)',
+            'Analytics', 'CRM', 'Inteligência', 'Mapa da Campanha', 'Pulso Digital', 'Apuração ao Vivo', 'Caixa de Entrada', 'Agentes (Tarefas)',
             'Cenários', 'Conformidade', 'Plano', 'Objetivos', 'Rotinas', 'Reuniões', 'Estúdio', 'Links Curtos',
         ];
 
@@ -173,6 +174,7 @@ const AdminApp: React.FC = () => {
         'Analytics': <ElectionReportsPage />,
         'CRM': <CRMPage />,
         'Inteligência': <IntelligencePage />,
+        'Pulso Digital': <PulsoDigitalPage />,
         'Mapa da Campanha': <CampaignMapPage />,
         'Apuração ao Vivo': <ApuracaoLiveDashboard />,
         'Caixa de Entrada': <InboxPage />,
