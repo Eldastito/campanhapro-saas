@@ -299,6 +299,126 @@ describe('GET /signals/stats — validação de query', () => {
   });
 });
 
+// ── bucket=day ─────────────────────────────────────────────────────
+
+describe('getSignalStats — bucket=day', () => {
+  test('sem bucket, byDay ausente', async () => {
+    const supabase = createMockSupabase({ social_signals: [] });
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date(NOW.getTime() - DAY),
+      until: new Date(NOW.getTime() + HOUR),
+    });
+    assert.equal(stats.byDay, undefined);
+  });
+
+  test('bucket=day devolve buckets pre-populados (zeros pra dias vazios)', async () => {
+    const supabase = createMockSupabase({ social_signals: [] });
+    // intervalo de 3 dias
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date('2026-08-25T00:00:00Z'),
+      until: new Date('2026-08-28T00:00:00Z'),
+      bucket: 'day',
+    });
+    assert.ok(Array.isArray(stats.byDay));
+    // 25, 26, 27 → 3 dias
+    assert.equal(stats.byDay!.length, 3);
+    assert.deepEqual(stats.byDay!.map(b => b.date), ['2026-08-25', '2026-08-26', '2026-08-27']);
+    // todos zerados
+    for (const b of stats.byDay!) {
+      assert.equal(b.total, 0);
+      assert.equal(b.crisis, 0);
+      assert.equal(b.risk, 0);
+      assert.equal(b.attention, 0);
+      assert.equal(b.info, 0);
+    }
+  });
+
+  test('bucket=day distribui signals no dia UTC correto', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ dedupKey: 'a', severity: 'crisis', emittedAt: new Date('2026-08-25T12:00:00Z') }),
+      signal({ dedupKey: 'b', severity: 'risk', emittedAt: new Date('2026-08-25T23:00:00Z') }),
+      signal({ dedupKey: 'c', severity: 'attention', emittedAt: new Date('2026-08-26T02:00:00Z') }),
+      signal({ dedupKey: 'd', severity: 'info', emittedAt: new Date('2026-08-27T10:00:00Z') }),
+    ]);
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date('2026-08-25T00:00:00Z'),
+      until: new Date('2026-08-28T00:00:00Z'),
+      bucket: 'day',
+    });
+    assert.equal(stats.byDay!.length, 3);
+    const day25 = stats.byDay!.find(b => b.date === '2026-08-25')!;
+    assert.equal(day25.total, 2);
+    assert.equal(day25.crisis, 1);
+    assert.equal(day25.risk, 1);
+    const day26 = stats.byDay!.find(b => b.date === '2026-08-26')!;
+    assert.equal(day26.total, 1);
+    assert.equal(day26.attention, 1);
+    const day27 = stats.byDay!.find(b => b.date === '2026-08-27')!;
+    assert.equal(day27.total, 1);
+    assert.equal(day27.info, 1);
+  });
+
+  test('bucket=day: dias com signals somam por severity, dias sem ficam zerados', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ dedupKey: 'x1', severity: 'crisis', emittedAt: new Date('2026-08-25T10:00:00Z') }),
+      signal({ dedupKey: 'x2', severity: 'crisis', emittedAt: new Date('2026-08-27T10:00:00Z') }),
+    ]);
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date('2026-08-25T00:00:00Z'),
+      until: new Date('2026-08-28T00:00:00Z'),
+      bucket: 'day',
+    });
+    // 3 dias: 25 tem 1 crisis, 26 zero, 27 tem 1 crisis
+    const day26 = stats.byDay!.find(b => b.date === '2026-08-26')!;
+    assert.equal(day26.total, 0);
+    assert.equal(day26.crisis, 0);
+    // ordem ASC preservada
+    assert.deepEqual(stats.byDay!.map(b => b.date), ['2026-08-25', '2026-08-26', '2026-08-27']);
+  });
+
+  test('bucket=day quando until cai no meio do dia → dia atual entra', async () => {
+    const supabase = createMockSupabase({ social_signals: [] });
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date('2026-08-26T00:00:00Z'),
+      until: new Date('2026-08-27T15:00:00Z'), // meio do dia 27
+      bucket: 'day',
+    });
+    // 26 e 27 devem aparecer
+    assert.deepEqual(stats.byDay!.map(b => b.date), ['2026-08-26', '2026-08-27']);
+  });
+});
+
+describe('GET /signals/stats — bucket=day via HTTP', () => {
+  test('bucket=day retorna byDay no payload', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ severity: 'crisis', emittedAt: new Date('2026-08-27T10:00:00Z') }),
+    ]);
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await req(app, 'GET', '/api/v1/social/signals/stats?since=2026-08-26T00:00:00Z&until=2026-08-28T00:00:00Z&bucket=day');
+    assert.equal(r.status, 200);
+    const body = r.body as { total: number; byDay?: Array<{ date: string; crisis: number }> };
+    assert.ok(Array.isArray(body.byDay));
+    assert.equal(body.byDay!.length, 2);
+    const day27 = body.byDay!.find(b => b.date === '2026-08-27')!;
+    assert.equal(day27.crisis, 1);
+  });
+
+  test('bucket=xyz → 400 invalid_bucket', async () => {
+    const supabase = createMockSupabase({ social_signals: [] });
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await req(app, 'GET', '/api/v1/social/signals/stats?bucket=week');
+    assert.equal(r.status, 400);
+    const body = r.body as { error: string };
+    assert.equal(body.error, 'invalid_bucket');
+  });
+});
+
 describe('GET /signals/stats — isolamento §35 no HTTP', () => {
   test('CAMP não vê OTHER via endpoint', async () => {
     seq = 1;

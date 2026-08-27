@@ -182,6 +182,22 @@ export interface SignalStatsParams {
   /** ISO ou Date. Sinais com `emittedAt < until` entram na contagem.
    *  Default: agora. */
   until?: Date;
+  /**
+   * Se 'day', o resultado inclui `byDay`: um bucket por dia UTC no
+   * intervalo, com counts totais + por severity. Undefined pra pular
+   * o overhead quando o consumer só quer os agregados totais.
+   */
+  bucket?: 'day';
+}
+
+export interface SignalDayBucket {
+  /** yyyy-mm-dd em UTC. */
+  date: string;
+  total: number;
+  crisis: number;
+  risk: number;
+  attention: number;
+  info: number;
 }
 
 export interface SignalStats {
@@ -196,6 +212,12 @@ export interface SignalStats {
   /** Contagem por provider. Signals com N providers contam N vezes
    *  (um por provider). */
   byProvider: Record<SocialProvider, number>;
+  /**
+   * Presente quando `params.bucket === 'day'`. Um bucket por dia UTC no
+   * intervalo, ordenado ASC. Dias sem signals aparecem com counts=0
+   * (importante pra sparkline não pular no eixo X).
+   */
+  byDay?: SignalDayBucket[];
 }
 
 const ZERO_BY_SEVERITY: Record<SocialSignalSeverity, number> = {
@@ -235,23 +257,30 @@ export async function getSignalStats(
   const until = params.until ?? new Date();
   const since = params.since ?? new Date(until.getTime() - DEFAULT_STATS_SINCE_MS);
 
+  // Se o consumer pediu bucket=day, precisamos do emittedAt pra rotular
+  // cada row. Sem bucket, o SELECT fica minimalista.
+  const selectCols = params.bucket === 'day'
+    ? 'severity, source, topic, providers, emittedAt'
+    : 'severity, source, topic, providers';
+
   // Puxa TODOS os signals do intervalo. Poderíamos usar aggregate SQL
   // (COUNT(*) GROUP BY ...) mas o volume esperado (<1000/campanha/semana)
   // torna o roundtrip menor que compilar SQL agregado no PostgREST.
   const { data, error } = await supabase
     .from('social_signals')
-    .select('severity, source, topic, providers')
+    .select(selectCols)
     .eq('campaignId', campaignId)
     .gte('emittedAt', since.toISOString())
     .lt('emittedAt', until.toISOString());
 
   if (error) throw new Error(`getSignalStats failed: ${error.message}`);
 
-  const rows = (data ?? []) as Array<{
+  const rows = ((data ?? []) as unknown) as Array<{
     severity: SocialSignalSeverity;
     source: SocialSignalSource;
     topic: string | null;
     providers: SocialProvider[] | null;
+    emittedAt?: string;
   }>;
 
   const bySeverity: Record<SocialSignalSeverity, number> = { ...ZERO_BY_SEVERITY };
@@ -271,7 +300,7 @@ export async function getSignalStats(
     }
   }
 
-  return {
+  const result: SignalStats = {
     total: rows.length,
     sinceDate: since.toISOString(),
     untilDate: until.toISOString(),
@@ -280,6 +309,77 @@ export async function getSignalStats(
     byTopic,
     byProvider,
   };
+
+  if (params.bucket === 'day') {
+    result.byDay = buildDayBuckets(rows, since, until);
+  }
+
+  return result;
+}
+
+// ── Day bucket helpers ─────────────────────────────────────────────
+
+/** yyyy-mm-dd em UTC — chave estável pra bucket + eixo X. */
+function utcDateKey(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Enumera todos os dias UTC no intervalo [since, until) e agrega counts
+ * por severity por dia. Dias vazios ficam com counts=0 pra não haver
+ * gap no eixo X do sparkline.
+ *
+ * Iteração no dia UTC do `since` até (mas não incluindo) o dia UTC de
+ * `until`. Se `until` cai no meio de um dia, esse dia entra (porque
+ * cai no [since, until) até o instante de until, e os signals daquele
+ * dia foram carregados até esse instante).
+ */
+function buildDayBuckets(
+  rows: Array<{ severity: SocialSignalSeverity; emittedAt?: string }>,
+  since: Date,
+  until: Date,
+): SignalDayBucket[] {
+  const buckets = new Map<string, SignalDayBucket>();
+
+  // Pré-popula todos os dias do intervalo — evita gap
+  const cursor = new Date(Date.UTC(
+    since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate(),
+  ));
+  const untilDayMs = Date.UTC(
+    until.getUTCFullYear(), until.getUTCMonth(), until.getUTCDate(),
+  );
+  // Includes the day of `until` when until has any time > 00:00 UTC
+  const endMs = until.getUTCHours() === 0 && until.getUTCMinutes() === 0
+    && until.getUTCSeconds() === 0 && until.getUTCMilliseconds() === 0
+    ? untilDayMs
+    : untilDayMs + 24 * 60 * 60 * 1000;
+
+  while (cursor.getTime() < endMs) {
+    const key = utcDateKey(cursor);
+    buckets.set(key, {
+      date: key, total: 0, crisis: 0, risk: 0, attention: 0, info: 0,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  for (const r of rows) {
+    if (!r.emittedAt) continue;
+    const d = new Date(r.emittedAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = utcDateKey(d);
+    const bucket = buckets.get(key);
+    if (!bucket) continue; // signal fora do range (defensive)
+    bucket.total += 1;
+    if (r.severity in bucket) {
+      // TS narrow: severity is one of the keys explicitly
+      bucket[r.severity] += 1;
+    }
+  }
+
+  return [...buckets.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export const SOCIAL_SIGNAL_STORE_VERSION = '2026-08-27.v1';
