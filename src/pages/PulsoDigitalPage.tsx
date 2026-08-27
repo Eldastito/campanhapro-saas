@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import Card from '../components/ui/Card';
 import PulsoSignalCard from '../components/social/PulsoSignalCard';
+import PulsoSignalDetailsModal from '../components/social/PulsoSignalDetailsModal';
 import {
   StoredSocialSignal,
   BroadcastSocialSignal,
@@ -92,6 +93,7 @@ const PulsoDigitalPage: React.FC = () => {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [liveCount, setLiveCount] = React.useState(0);
+  const [selectedSignal, setSelectedSignal] = React.useState<StoredSocialSignal | null>(null);
 
   const fetchSignals = React.useCallback(async () => {
     if (!campaignId) return;
@@ -245,9 +247,18 @@ const PulsoDigitalPage: React.FC = () => {
 
       <div className="grid grid-cols-1 gap-3">
         {signals.map(s => (
-          <PulsoSignalCard key={s.dedupKey} signal={s} />
+          <PulsoSignalCard
+            key={s.dedupKey}
+            signal={s}
+            onClick={setSelectedSignal}
+          />
         ))}
       </div>
+
+      <PulsoSignalDetailsModal
+        signal={selectedSignal}
+        onClose={() => setSelectedSignal(null)}
+      />
     </div>
   );
 };
