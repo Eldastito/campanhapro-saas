@@ -55,6 +55,7 @@ import { createIntelRouter } from './src/server/modules/intel/intelRouter';
 import { createFraudGuardsRouter } from './src/server/modules/fraudGuards/fraudGuardsRouter';
 import { createSocialRouter } from './src/server/modules/social/socialRouter';
 import { createSocialSignalsRouter } from './src/server/modules/social/socialSignalsRouter';
+import { maybeStartSocialSignalsScheduler } from './src/server/modules/social/socialSignalsScheduler';
 import { createWhatsappRoutingRouter } from './src/server/modules/whatsappRouting/whatsappRoutingRouter';
 import { createCalculatorRouter } from './src/server/modules/calculator/calculatorRouter';
 import { createModulesRouter, createModulePricingHandler } from './src/server/modules/modules/modulesRouter';
@@ -1327,6 +1328,13 @@ Retorne ESTRITAMENTE um JSON array, um objeto por contato, na ordem da entrada:
     startProactiveMonitor(supabaseAdmin);
     startDailyBriefing(supabaseAdmin);
     startRoutinesWorker(supabaseAdmin);
+    // Social signals scheduler — opt-in via SOCIAL_SIGNALS_SCHEDULER_ENABLED=1.
+    // Silencioso quando off (return null). Ver socialSignalsScheduler.ts pra env vars.
+    const signalsSchedulerHandle = maybeStartSocialSignalsScheduler({ supabase: supabaseAdmin });
+    if (signalsSchedulerHandle) {
+      process.once('SIGTERM', () => signalsSchedulerHandle.stop());
+      process.once('SIGINT', () => signalsSchedulerHandle.stop());
+    }
     if (supabaseAdmin) startLifecycleSweeper(supabaseAdmin);
     // Re-register webhooks for all connected WhatsApp instances so the
     // correct EVOLUTION_WEBHOOK_URL is always active (self-healing).
