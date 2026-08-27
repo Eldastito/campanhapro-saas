@@ -17,6 +17,7 @@ import { createKwaiAdapter, type KwaiAdapterDeps } from './kwaiAdapter.js';
 import { createInstagramMetaAdapter, type InstagramMetaAdapterDeps } from './instagramMetaAdapter.js';
 import { createFacebookMetaAdapter, type FacebookMetaAdapterDeps } from './facebookMetaAdapter.js';
 import { createYouTubeAdapter, type YouTubeAdapterDeps } from './youtubeAdapter.js';
+import { createTikTokAdapter, type TikTokAdapterDeps } from './tiktokAdapter.js';
 
 export {
   SocialCapabilityNotAvailableError,
@@ -30,6 +31,7 @@ export type {
   InstagramMetaAdapterDeps,
   FacebookMetaAdapterDeps,
   YouTubeAdapterDeps,
+  TikTokAdapterDeps,
 };
 
 export interface CreateSocialAdaptersDeps {
@@ -39,6 +41,7 @@ export interface CreateSocialAdaptersDeps {
   instagram?: InstagramMetaAdapterDeps;
   facebook?: FacebookMetaAdapterDeps;
   youtube?: YouTubeAdapterDeps;
+  tiktok?: TikTokAdapterDeps;
 }
 
 /**
@@ -62,13 +65,16 @@ export function createSocialAdapters(
     instagram: createInstagramMetaAdapter(supabase, deps.instagram),
     facebook: createFacebookMetaAdapter(supabase, deps.facebook),
     youtube: createYouTubeAdapter(supabase, deps.youtube),
-    // tiktok: PR 8
+    tiktok: createTikTokAdapter(supabase, deps.tiktok),
   };
 }
 
 /**
  * Helper: providers implementados. Útil para o endpoint
  * `/api/v1/social/adapters` (que ainda não existe) listar rapidamente.
+ *
+ * Ao final do PR 7 (TikTok), TODOS os 7 providers do P0 do PRD (§5) estão
+ * cobertos pelo contrato SocialProviderAdapter.
  */
 export const IMPLEMENTED_PROVIDERS: readonly SocialProvider[] = Object.freeze([
   'x',
@@ -77,4 +83,5 @@ export const IMPLEMENTED_PROVIDERS: readonly SocialProvider[] = Object.freeze([
   'instagram',
   'facebook',
   'youtube',
+  'tiktok',
 ] as const);

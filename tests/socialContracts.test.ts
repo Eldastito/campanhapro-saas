@@ -84,14 +84,14 @@ test('registry: nenhuma capability crítica está em "unknown" — bloqueia lazi
   }
 });
 
-test('registry: X é production; TikTok segue not_implemented; Kwai fica em limited', () => {
+test('registry: X é production; Kwai fica em limited; demais são beta', () => {
   // Ancora nas descobertas do F0 — se alguém regredir X para beta sem migração,
-  // ou reintroduzir bug de scraping em Kwai, o teste avisa. YouTube subiu para
-  // beta em PR 6 (Data API v3 via API key + OAuth token).
+  // ou reintroduzir bug de scraping em Kwai, o teste avisa. TikTok subiu para
+  // beta em PR 7 (Display API), completando os 7 providers do P0 (§5 do PRD).
   assert.equal(SOCIAL_CAPABILITY_REGISTRY.x.adapterMaturity, 'production');
-  assert.equal(SOCIAL_CAPABILITY_REGISTRY.tiktok.adapterMaturity, 'not_implemented');
   assert.equal(SOCIAL_CAPABILITY_REGISTRY.kwai.adapterMaturity, 'limited');
   assert.equal(SOCIAL_CAPABILITY_REGISTRY.youtube.adapterMaturity, 'beta');
+  assert.equal(SOCIAL_CAPABILITY_REGISTRY.tiktok.adapterMaturity, 'beta');
 });
 
 test('providersByMaturity ordena production → beta → limited → not_implemented', () => {

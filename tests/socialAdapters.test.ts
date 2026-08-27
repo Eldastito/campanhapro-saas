@@ -114,9 +114,8 @@ describe('createSocialAdapters — registry', () => {
       assert.ok(adapters[p], `${p} deveria estar implementado`);
       assert.equal(adapters[p]!.provider, p);
     }
-    // Providers ainda não implementados ficam ausentes (undefined) —
-    // §11 do PRD, caller decide como tratar.
-    assert.equal(adapters.tiktok, undefined);
+    // Todos os 7 providers do P0 estão implementados após PR 7 (TikTok).
+    // Adicionar novos providers requer um novo entry aqui + no registry.
   });
 
   test('cada adapter devolve o snapshot do registry sem I/O', () => {
@@ -128,6 +127,7 @@ describe('createSocialAdapters — registry', () => {
     assert.equal(adapters.instagram!.getCapabilities().adapterMaturity, 'beta');
     assert.equal(adapters.facebook!.getCapabilities().adapterMaturity, 'beta');
     assert.equal(adapters.youtube!.getCapabilities().adapterMaturity, 'beta');
+    assert.equal(adapters.tiktok!.getCapabilities().adapterMaturity, 'beta');
   });
 });
 

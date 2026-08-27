@@ -100,22 +100,24 @@ export const SOCIAL_CAPABILITY_REGISTRY: Readonly<Record<SocialProvider, SocialP
     },
   },
 
-  // ── TikTok — AS-IS §2.4: stub simulado em server.ts:396. ────────────────
+  // ── TikTok — PR 7: Display API implementada. Login Kit (OAuth) + Comment
+  // Management + Business Insights + Content Posting entram em PRs futuros.
+  // §32 do PRD: nunca scraping, só capabilities aprovadas no app review.
   tiktok: {
-    adapterMaturity: 'not_implemented',
-    maturityNote: 'Stub simulado (server.ts:396-398); env TIKTOK_CLIENT_KEY checada por complianceService. F5 (PR 8) traz Login Kit real. Nunca scraping (§32 do PRD).',
+    adapterMaturity: 'beta',
+    maturityNote: 'Display API (user info + video list) via access_token paste manual. Login Kit OAuth + Comment API + Insights + Content Posting entram em PRs futuros. NUNCA scraping.',
     capabilities: {
-      profileRead: 'not_configured',
-      postsRead: 'not_configured',
-      ownCommentsRead: 'not_configured',
+      profileRead: 'supported',                // /v2/user/info
+      postsRead: 'supported',                  // /v2/video/list do próprio user
+      ownCommentsRead: 'permission_required',  // Comment Management API precisa approval
       thirdPartyCommentsRead: 'unsupported',
-      metricsRead: 'not_configured',
-      audienceInsights: 'not_configured',
+      metricsRead: 'supported',                // view/like/comment/share counts via Display
+      audienceInsights: 'permission_required', // Business Insights API precisa business account + approval
       mentionsRead: 'unsupported',
       competitorDiscovery: 'unsupported',
-      publishText: 'unsupported',
+      publishText: 'unsupported',              // TikTok não tem post de texto
       publishImage: 'unsupported',
-      publishVideo: 'not_configured',          // Content Posting API exige review
+      publishVideo: 'not_configured',          // Content Posting API — approval separada
       schedule: 'not_configured',
       webhook: 'not_configured',
     },
