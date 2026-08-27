@@ -12,18 +12,35 @@ import {
 
 interface Props {
   signal: StoredSocialSignal;
+  onClick?: (signal: StoredSocialSignal) => void;
 }
 
-const PulsoSignalCard: React.FC<Props> = ({ signal }) => {
+const PulsoSignalCard: React.FC<Props> = ({ signal, onClick }) => {
   const colors = SEVERITY_COLORS[signal.severity];
   const topicLabel = signal.topic && signal.topic in TOPIC_LABELS
     ? TOPIC_LABELS[signal.topic as SocialTopic]
     : signal.topic;
 
+  const clickable = typeof onClick === 'function';
+  const handleClick = () => { if (onClick) onClick(signal); };
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      onClick(signal);
+    }
+  };
+
   return (
     <div
-      className={`rounded-xl border ${colors.border} ${colors.bg} p-4 ring-1 ${colors.ring} print-bg-transparent`}
+      className={`rounded-xl border ${colors.border} ${colors.bg} p-4 ring-1 ${colors.ring} print-bg-transparent ${
+        clickable ? 'cursor-pointer hover:ring-2 hover:brightness-110 transition-all' : ''
+      }`}
       data-severity={signal.severity}
+      onClick={clickable ? handleClick : undefined}
+      onKeyDown={clickable ? handleKey : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `Ver detalhes: ${signal.summary}` : undefined}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
