@@ -154,8 +154,16 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
       return res.status(400).json({ error: 'invalid_range', detail: 'since must be < until' });
     }
 
+    let bucket: 'day' | undefined;
+    if (typeof req.query.bucket === 'string' && req.query.bucket) {
+      if (req.query.bucket !== 'day') {
+        return res.status(400).json({ error: 'invalid_bucket', detail: "supported: 'day'" });
+      }
+      bucket = req.query.bucket;
+    }
+
     try {
-      const stats = await getSignalStats(supabase, campaignId, { since, until });
+      const stats = await getSignalStats(supabase, campaignId, { since, until, bucket });
       return res.json(stats);
     } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);
