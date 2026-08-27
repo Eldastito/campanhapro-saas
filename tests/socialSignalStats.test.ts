@@ -200,6 +200,164 @@ describe('getSignalStats — janela + isolamento', () => {
   });
 });
 
+// ── statsCsv ──────────────────────────────────────────────────────
+
+import { statsCsv, statsCsvFilename } from '../src/server/modules/social/socialSignalsCsvExporter';
+
+const UTF8_BOM = '﻿';
+
+describe('statsCsv — shape e blocos', () => {
+  test('BOM + header meta como primeira linha', async () => {
+    const supabase = createMockSupabase({ social_signals: [] });
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date('2026-08-20T00:00:00Z'),
+      until: new Date('2026-08-27T00:00:00Z'),
+    });
+    const csv = statsCsv(stats);
+    assert.ok(csv.startsWith(UTF8_BOM));
+    const withoutBom = csv.slice(UTF8_BOM.length);
+    const lines = withoutBom.split('\r\n');
+    assert.equal(lines[0], 'section,key,value');
+    assert.equal(lines[1], 'meta,sinceDate,2026-08-20T00:00:00.000Z');
+    assert.equal(lines[2], 'meta,untilDate,2026-08-27T00:00:00.000Z');
+    assert.equal(lines[3], 'meta,total,0');
+  });
+
+  test('bloco bySeverity contém os 4 níveis', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ severity: 'crisis' }),
+      signal({ severity: 'crisis' }),
+      signal({ severity: 'risk' }),
+    ]);
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date(NOW.getTime() - DAY),
+      until: new Date(NOW.getTime() + HOUR),
+    });
+    const csv = statsCsv(stats).slice(UTF8_BOM.length);
+    assert.ok(csv.includes('bySeverity,count'));
+    assert.ok(csv.includes('crisis,2'));
+    assert.ok(csv.includes('risk,1'));
+    assert.ok(csv.includes('attention,0'));
+    assert.ok(csv.includes('info,0'));
+  });
+
+  test('bloco byTopic renderiza "__null__" como "(sem topic)"', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ topic: undefined }),
+      signal({ topic: 'saude' }),
+    ]);
+    const stats = await getSignalStats(supabase, CAMP, {
+      since: new Date(NOW.getTime() - DAY),
+      until: new Date(NOW.getTime() + HOUR),
+    });
+    const csv = statsCsv(stats).slice(UTF8_BOM.length);
+    assert.ok(csv.includes('byTopic,count'));
+    assert.ok(csv.includes('(sem topic),1'));
+    assert.ok(csv.includes('saude,1'));
+  });
+
+  test('bloco byDay só quando bucket=day', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ severity: 'crisis', emittedAt: new Date('2026-08-26T10:00:00Z') }),
+    ]);
+    const statsNoBucket = await getSignalStats(supabase, CAMP, {
+      since: new Date('2026-08-25T00:00:00Z'),
+      until: new Date('2026-08-28T00:00:00Z'),
+    });
+    const csvNoBucket = statsCsv(statsNoBucket);
+    assert.ok(!csvNoBucket.includes('byDay'));
+
+    const statsWithBucket = await getSignalStats(supabase, CAMP, {
+      since: new Date('2026-08-25T00:00:00Z'),
+      until: new Date('2026-08-28T00:00:00Z'),
+      bucket: 'day',
+    });
+    const csvWithBucket = statsCsv(statsWithBucket);
+    assert.ok(csvWithBucket.includes('byDay,total,crisis,risk,attention,info'));
+    assert.ok(csvWithBucket.includes('2026-08-26,1,1,0,0,0'));
+  });
+});
+
+describe('statsCsvFilename', () => {
+  test('formato signals-stats-<short>-<stamp>.csv', () => {
+    const out = statsCsvFilename(CAMP, new Date('2026-08-27T14:22:00Z'));
+    assert.equal(out, 'signals-stats-aaaaaaaa-202608271422.csv');
+  });
+
+  test('campaignId inválido cai em "campaign"', () => {
+    const out = statsCsvFilename('!!!', new Date('2026-08-27T00:00:00Z'));
+    assert.match(out, /^signals-stats-campaign-\d{12}\.csv$/);
+  });
+});
+
+describe('GET /signals/stats?format=csv', () => {
+  test('200 text/csv com Content-Disposition attachment', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ severity: 'crisis', topic: 'saude', providers: ['instagram', 'facebook'] }),
+    ]);
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await httpReq(app, 'GET', '/api/v1/social/signals/stats?format=csv');
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get('content-type') ?? '', /text\/csv/);
+    const dispo = r.headers.get('content-disposition') ?? '';
+    assert.match(dispo, /^attachment; filename="signals-stats-aaaaaaaa-\d{12}\.csv"$/);
+  });
+
+  test('body começa com BOM (0xEF 0xBB 0xBF)', async () => {
+    const supabase = createMockSupabase({ social_signals: [] });
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await httpReq(app, 'GET', '/api/v1/social/signals/stats?format=csv');
+    assert.equal(r.bytes[0], 0xEF);
+    assert.equal(r.bytes[1], 0xBB);
+    assert.equal(r.bytes[2], 0xBF);
+  });
+
+  test('bucket=day + format=csv → bloco byDay presente', async () => {
+    seq = 1;
+    const supabase = createMockSupabase({ social_signals: [] });
+    await persistSignals(supabase, CAMP, [
+      signal({ severity: 'risk', emittedAt: new Date('2026-08-26T10:00:00Z') }),
+    ]);
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await httpReq(app, 'GET', '/api/v1/social/signals/stats?format=csv&bucket=day&since=2026-08-25T00:00:00Z&until=2026-08-28T00:00:00Z');
+    assert.equal(r.status, 200);
+    assert.ok(r.text.includes('byDay,total,crisis,risk,attention,info'));
+    assert.ok(r.text.includes('2026-08-26,1,0,1,0,0'));
+  });
+
+  test('format inválido → 400 JSON', async () => {
+    const supabase = createMockSupabase({ social_signals: [] });
+    const app = buildApp({ campaignId: CAMP }, supabase);
+    const r = await httpReq(app, 'GET', '/api/v1/social/signals/stats?format=xml');
+    assert.equal(r.status, 400);
+  });
+});
+
+// Helper HTTP que devolve bytes crus (BOM detection). Reusa buildApp já
+// definido acima; renomeado pra evitar shadow.
+async function httpReq(app: express.Express, method: string, path: string) {
+  return new Promise<{ status: number; text: string; bytes: Uint8Array; headers: Headers }>((resolve, reject) => {
+    const server = app.listen(0, async () => {
+      const port = (server.address() as { port: number }).port;
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}${path}`, { method });
+        const buf = await res.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        const text = new TextDecoder('utf-8').decode(bytes);
+        resolve({ status: res.status, text, bytes, headers: res.headers });
+      } catch (err) { reject(err); } finally { server.close(); }
+    });
+  });
+}
+
 // ── Router ────────────────────────────────────────────────────────
 
 interface FakeUser { id?: string; campaignId?: string; type?: string }
