@@ -19,7 +19,7 @@
 import { Router, Request, Response } from 'express';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { querySignals } from './socialSignalStore.js';
+import { querySignals, getSignalStats } from './socialSignalStore.js';
 import { computeCampaignSocialSignals } from './socialSignalsRunner.js';
 import { toCsv, csvFilename } from './socialSignalsCsvExporter.js';
 import type {
@@ -127,6 +127,39 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
     } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: 'query_failed', detail });
+    }
+  });
+
+  // GET /signals/stats — agregado por severity/source/topic/provider
+  // no intervalo [since, until). Serve dashboards resumo e relatórios.
+  // NÃO exige Admin: leitura do próprio tenant é ok pra qualquer usuário
+  // autenticado.
+  router.get('/signals/stats', async (req: Request, res: Response) => {
+    const campaignId = (req as unknown as { user?: { campaignId?: string } }).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+
+    let since: Date | undefined;
+    if (typeof req.query.since === 'string' && req.query.since) {
+      const d = new Date(req.query.since);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'invalid_since' });
+      since = d;
+    }
+    let until: Date | undefined;
+    if (typeof req.query.until === 'string' && req.query.until) {
+      const d = new Date(req.query.until);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'invalid_until' });
+      until = d;
+    }
+    if (since && until && since >= until) {
+      return res.status(400).json({ error: 'invalid_range', detail: 'since must be < until' });
+    }
+
+    try {
+      const stats = await getSignalStats(supabase, campaignId, { since, until });
+      return res.json(stats);
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return res.status(500).json({ error: 'stats_failed', detail });
     }
   });
 

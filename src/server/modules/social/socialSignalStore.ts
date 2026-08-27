@@ -173,4 +173,113 @@ export async function querySignals(
   return filtered;
 }
 
+// ── Stats agregado ─────────────────────────────────────────────────
+
+export interface SignalStatsParams {
+  /** ISO ou Date. Sinais com `emittedAt >= since` entram na contagem.
+   *  Default: 7 dias atrás. */
+  since?: Date;
+  /** ISO ou Date. Sinais com `emittedAt < until` entram na contagem.
+   *  Default: agora. */
+  until?: Date;
+}
+
+export interface SignalStats {
+  total: number;
+  sinceDate: string;
+  untilDate: string;
+  bySeverity: Record<SocialSignalSeverity, number>;
+  bySource: Record<SocialSignalSource, number>;
+  /** Contagem por topic. Chave `null` (literal string "__null__") pra
+   *  signals sem topic — evita ambiguidade JSON. */
+  byTopic: Record<string, number>;
+  /** Contagem por provider. Signals com N providers contam N vezes
+   *  (um por provider). */
+  byProvider: Record<SocialProvider, number>;
+}
+
+const ZERO_BY_SEVERITY: Record<SocialSignalSeverity, number> = {
+  info: 0, attention: 0, risk: 0, crisis: 0,
+};
+
+const ZERO_BY_SOURCE: Record<SocialSignalSource, number> = {
+  trend: 0, anomaly: 0, cross_network_trend: 0, cross_network_anomaly: 0,
+};
+
+const ZERO_BY_PROVIDER: Record<SocialProvider, number> = {
+  instagram: 0, facebook: 0, youtube: 0, tiktok: 0, x: 0, linkedin: 0, kwai: 0,
+};
+
+const DEFAULT_STATS_SINCE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Agrega counts de sinais no intervalo [since, until). Consumido pelo
+ * dashboard de resumo (widget na home) e por relatórios semanais.
+ *
+ * Isolamento §35: filtra por `campaignId` em TODA query. RLS reforça.
+ *
+ * Provider counting: signals com N providers contam N vezes (um por
+ * provider). Isso reflete "presença por rede" — mais útil pra relatório
+ * do que "quantidade única de signals".
+ *
+ * Topics sem valor → agregados em `"__null__"` (chave literal). Evita
+ * ambiguidade com `"null"` textual.
+ */
+export async function getSignalStats(
+  supabase: SupabaseClient,
+  campaignId: string,
+  params: SignalStatsParams = {},
+): Promise<SignalStats> {
+  if (!campaignId) throw new Error('getSignalStats: campaignId obrigatório');
+
+  const until = params.until ?? new Date();
+  const since = params.since ?? new Date(until.getTime() - DEFAULT_STATS_SINCE_MS);
+
+  // Puxa TODOS os signals do intervalo. Poderíamos usar aggregate SQL
+  // (COUNT(*) GROUP BY ...) mas o volume esperado (<1000/campanha/semana)
+  // torna o roundtrip menor que compilar SQL agregado no PostgREST.
+  const { data, error } = await supabase
+    .from('social_signals')
+    .select('severity, source, topic, providers')
+    .eq('campaignId', campaignId)
+    .gte('emittedAt', since.toISOString())
+    .lt('emittedAt', until.toISOString());
+
+  if (error) throw new Error(`getSignalStats failed: ${error.message}`);
+
+  const rows = (data ?? []) as Array<{
+    severity: SocialSignalSeverity;
+    source: SocialSignalSource;
+    topic: string | null;
+    providers: SocialProvider[] | null;
+  }>;
+
+  const bySeverity: Record<SocialSignalSeverity, number> = { ...ZERO_BY_SEVERITY };
+  const bySource: Record<SocialSignalSource, number> = { ...ZERO_BY_SOURCE };
+  const byTopic: Record<string, number> = {};
+  const byProvider: Record<SocialProvider, number> = { ...ZERO_BY_PROVIDER };
+
+  for (const r of rows) {
+    if (r.severity in bySeverity) bySeverity[r.severity] += 1;
+    if (r.source in bySource) bySource[r.source] += 1;
+    const topicKey = r.topic ?? '__null__';
+    byTopic[topicKey] = (byTopic[topicKey] ?? 0) + 1;
+    if (Array.isArray(r.providers)) {
+      for (const p of r.providers) {
+        if (p in byProvider) byProvider[p] += 1;
+      }
+    }
+  }
+
+  return {
+    total: rows.length,
+    sinceDate: since.toISOString(),
+    untilDate: until.toISOString(),
+    bySeverity,
+    bySource,
+    byTopic,
+    byProvider,
+  };
+}
+
 export const SOCIAL_SIGNAL_STORE_VERSION = '2026-08-27.v1';
