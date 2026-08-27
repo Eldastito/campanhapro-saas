@@ -5,7 +5,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { computePulsoSummary } from '../src/components/social/pulsoSummary';
+import { computePulsoSummary, computeDayBuckets } from '../src/components/social/pulsoSummary';
 import type { StoredSocialSignal } from '../src/components/social/pulsoTypes';
 
 const NOW = '2026-08-27T12:00:00Z';
@@ -189,5 +189,100 @@ describe('computePulsoSummary — top topics', () => {
     const list = [s({ topic: null }), s({ topic: null })];
     const r = computePulsoSummary(list);
     assert.deepEqual(r.topTopics, []);
+  });
+});
+
+// ── computeDayBuckets ─────────────────────────────────────────────
+
+describe('computeDayBuckets — casos base', () => {
+  test('lista vazia → array vazio', () => {
+    const NOW_DATE = new Date('2026-08-27T12:00:00Z');
+    const r = computeDayBuckets([], NOW_DATE);
+    assert.deepEqual(r, []);
+  });
+
+  test('um signal no mesmo dia do now → 1 bucket', () => {
+    seq = 1;
+    const NOW_DATE = new Date('2026-08-27T12:00:00Z');
+    const list = [s({ severity: 'crisis', emittedAt: '2026-08-27T05:00:00Z' })];
+    const r = computeDayBuckets(list, NOW_DATE);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].date, '2026-08-27');
+    assert.equal(r[0].total, 1);
+    assert.equal(r[0].crisis, 1);
+  });
+});
+
+describe('computeDayBuckets — bucketing e range', () => {
+  test('signals em 3 dias diferentes → 3 buckets ASC', () => {
+    seq = 1;
+    const NOW_DATE = new Date('2026-08-27T23:00:00Z');
+    const list = [
+      s({ severity: 'crisis', emittedAt: '2026-08-25T10:00:00Z' }),
+      s({ severity: 'risk', emittedAt: '2026-08-26T02:00:00Z' }),
+      s({ severity: 'attention', emittedAt: '2026-08-27T15:00:00Z' }),
+    ];
+    const r = computeDayBuckets(list, NOW_DATE);
+    assert.equal(r.length, 3);
+    assert.deepEqual(r.map(b => b.date), ['2026-08-25', '2026-08-26', '2026-08-27']);
+    assert.equal(r[0].crisis, 1);
+    assert.equal(r[1].risk, 1);
+    assert.equal(r[2].attention, 1);
+  });
+
+  test('dias vazios entre extremos ficam zerados no bucket', () => {
+    seq = 1;
+    const NOW_DATE = new Date('2026-08-27T12:00:00Z');
+    // signal em 25 e outro em 27 — 26 sem nada
+    const list = [
+      s({ severity: 'crisis', emittedAt: '2026-08-25T10:00:00Z' }),
+      s({ severity: 'risk', emittedAt: '2026-08-27T10:00:00Z' }),
+    ];
+    const r = computeDayBuckets(list, NOW_DATE);
+    assert.equal(r.length, 3);
+    const day26 = r.find(b => b.date === '2026-08-26')!;
+    assert.equal(day26.total, 0);
+    assert.equal(day26.crisis, 0);
+  });
+
+  test('multiple signals no mesmo dia agregam corretamente', () => {
+    seq = 1;
+    const NOW_DATE = new Date('2026-08-27T12:00:00Z');
+    const list = [
+      s({ severity: 'crisis', emittedAt: '2026-08-27T05:00:00Z' }),
+      s({ severity: 'crisis', emittedAt: '2026-08-27T15:00:00Z' }),
+      s({ severity: 'info', emittedAt: '2026-08-27T20:00:00Z' }),
+    ];
+    const r = computeDayBuckets(list, NOW_DATE);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].total, 3);
+    assert.equal(r[0].crisis, 2);
+    assert.equal(r[0].info, 1);
+  });
+
+  test('range vai até now UTC — signal antigo + now recente cria intervalo', () => {
+    seq = 1;
+    const NOW_DATE = new Date('2026-08-27T12:00:00Z');
+    const list = [
+      s({ emittedAt: '2026-08-24T00:00:00Z' }),
+    ];
+    const r = computeDayBuckets(list, NOW_DATE);
+    // 24 25 26 27 — 4 dias
+    assert.equal(r.length, 4);
+    assert.deepEqual(r.map(b => b.date), ['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27']);
+  });
+
+  test('emittedAt inválido é ignorado sem quebrar', () => {
+    seq = 1;
+    const NOW_DATE = new Date('2026-08-27T12:00:00Z');
+    const bad = s();
+    (bad as unknown as { emittedAt: string }).emittedAt = 'not-a-date';
+    const good = s({ severity: 'crisis', emittedAt: '2026-08-27T10:00:00Z' });
+    const r = computeDayBuckets([bad, good], NOW_DATE);
+    // O bad tem emittedAt inválido → NaN.getTime() → não atualiza minMs (fica NOW_DATE);
+    // range então é 27→27 (1 dia). good conta 1 crisis.
+    assert.equal(r.length, 1);
+    assert.equal(r[0].total, 1);
+    assert.equal(r[0].crisis, 1);
   });
 });

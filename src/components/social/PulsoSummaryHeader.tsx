@@ -22,7 +22,8 @@ import {
   SEVERITY_LABELS,
   SEVERITY_COLORS,
 } from './pulsoTypes';
-import { computePulsoSummary } from './pulsoSummary';
+import { computePulsoSummary, computeDayBuckets } from './pulsoSummary';
+import PulsoSparkline from './PulsoSparkline';
 
 // ── Render ─────────────────────────────────────────────────────────
 
@@ -42,6 +43,13 @@ interface PulsoSummaryHeaderProps {
 
 const PulsoSummaryHeader: React.FC<PulsoSummaryHeaderProps> = ({ signals, className }) => {
   const summary = React.useMemo(() => computePulsoSummary(signals), [signals]);
+  // "now" fixado uma vez no mount pra determinismo do bucket em cada render.
+  // Refresh vem via re-mount ou nova query — não precisa de relógio ticking.
+  const nowRef = React.useRef<Date>(new Date());
+  const dayBuckets = React.useMemo(
+    () => computeDayBuckets(signals, nowRef.current),
+    [signals],
+  );
   if (summary.total === 0) return null;
 
   return (
@@ -92,6 +100,14 @@ const PulsoSummaryHeader: React.FC<PulsoSummaryHeaderProps> = ({ signals, classN
           );
         })}
       </div>
+
+      {/* Sparkline por dia — reusa componente do Dashboard tile (PR 32) */}
+      {dayBuckets.length > 0 && (
+        <PulsoSparkline
+          buckets={dayBuckets}
+          ariaLabel="Volume diário dos sinais visíveis"
+        />
+      )}
 
       {/* Chips numéricos por severity */}
       <div className="mt-2 flex flex-wrap gap-1.5">
