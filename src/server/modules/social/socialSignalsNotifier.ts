@@ -117,6 +117,39 @@ export function _resetNotifierCacheForTests(campaignId?: string): void {
   else _notifiedCache.clear();
 }
 
+// ── Status helpers (para observabilidade) ──────────────────────────
+
+export interface SlackNotifierStatus {
+  /** Envs configuradas — sem vazar o URL. */
+  configured: boolean;
+  /** minSeverity efetivo (env ou default). null se não configurado. */
+  minSeverity: SocialSignalSeverity | null;
+  /** Tamanho do dedup cache pra uma campanha. */
+  cachedDedupKeys: number;
+  cacheMaxPerCampaign: number;
+  notifierVersion: string;
+}
+
+/**
+ * Snapshot do estado atual do Slack notifier pra uma campanha. Usado no
+ * endpoint /notifier-status pra admin verificar se o webhook está
+ * configurado e quantos dedupKeys estão na cache in-memory.
+ *
+ * NÃO devolve o próprio URL do webhook — não vaza pro cliente.
+ */
+export function getSlackNotifierStatus(campaignId: string): SlackNotifierStatus {
+  if (!campaignId) throw new Error('getSlackNotifierStatus: campaignId obrigatório');
+  const cfg = notifierConfigFromEnv();
+  const cache = _notifiedCache.get(campaignId);
+  return {
+    configured: cfg !== null,
+    minSeverity: cfg ? (cfg.minSeverity ?? DEFAULT_MIN_SEVERITY) : null,
+    cachedDedupKeys: cache ? cache.size : 0,
+    cacheMaxPerCampaign: CACHE_MAX_PER_CAMPAIGN,
+    notifierVersion: SOCIAL_SIGNALS_NOTIFIER_VERSION,
+  };
+}
+
 // ── Payload builder ────────────────────────────────────────────────
 
 const SEVERITY_EMOJI: Record<SocialSignalSeverity, string> = {

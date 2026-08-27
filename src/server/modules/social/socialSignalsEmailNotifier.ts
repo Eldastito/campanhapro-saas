@@ -116,6 +116,38 @@ export function _resetEmailNotifierCacheForTests(campaignId?: string): void {
   else _notifiedCache.clear();
 }
 
+// ── Status helpers ─────────────────────────────────────────────────
+
+export interface EmailNotifierStatus {
+  configured: boolean;
+  minSeverity: SocialSignalSeverity | null;
+  /** Quantidade de recipients configurados. Não expõe os endereços. */
+  recipientsCount: number;
+  cachedDedupKeys: number;
+  cacheMaxPerCampaign: number;
+  notifierVersion: string;
+}
+
+/**
+ * Snapshot do estado atual do email notifier pra uma campanha. Usado no
+ * endpoint /notifier-status.
+ *
+ * NÃO devolve emails individuais — só a contagem — pra não vazar PII.
+ */
+export function getEmailNotifierStatus(campaignId: string): EmailNotifierStatus {
+  if (!campaignId) throw new Error('getEmailNotifierStatus: campaignId obrigatório');
+  const cfg = emailNotifierConfigFromEnv();
+  const cache = _notifiedCache.get(campaignId);
+  return {
+    configured: cfg !== null,
+    minSeverity: cfg ? (cfg.minSeverity ?? DEFAULT_MIN_SEVERITY) : null,
+    recipientsCount: cfg ? cfg.recipients.length : 0,
+    cachedDedupKeys: cache ? cache.size : 0,
+    cacheMaxPerCampaign: CACHE_MAX_PER_CAMPAIGN,
+    notifierVersion: SOCIAL_SIGNALS_EMAIL_NOTIFIER_VERSION,
+  };
+}
+
 // ── Template builder ────────────────────────────────────────────────
 
 const SEVERITY_LABEL_PT: Record<SocialSignalSeverity, string> = {
