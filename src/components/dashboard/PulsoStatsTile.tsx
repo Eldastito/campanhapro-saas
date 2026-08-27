@@ -18,6 +18,7 @@ import * as React from 'react';
 import { authedFetch } from '../../lib/authedFetch';
 import Card from '../ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
+import PulsoSparkline, { SparklineDayBucket } from '../social/PulsoSparkline';
 
 interface StatsResponse {
   total: number;
@@ -30,6 +31,7 @@ interface StatsResponse {
     crisis: number;
   };
   byTopic: Record<string, number>;
+  byDay?: SparklineDayBucket[];
 }
 
 const SEVERITY_LABEL: Record<'info' | 'attention' | 'risk' | 'crisis', string> = {
@@ -63,7 +65,7 @@ const PulsoStatsTile: React.FC<PulsoStatsTileProps> = ({ onNavigate }) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await authedFetch('/api/v1/social/signals/stats');
+      const res = await authedFetch('/api/v1/social/signals/stats?bucket=day');
       if (!res.ok) {
         setError(`Erro ${res.status}`);
         setStats(null);
@@ -192,6 +194,14 @@ const PulsoStatsTile: React.FC<PulsoStatsTileProps> = ({ onNavigate }) => {
                 </span>
               ))}
             </div>
+          )}
+
+          {/* Sparkline dos últimos 7 dias — só renderiza se houver dado */}
+          {stats.byDay && stats.byDay.length > 0 && (
+            <PulsoSparkline
+              buckets={stats.byDay}
+              ariaLabel="Volume diário de sinais (últimos 7 dias)"
+            />
           )}
         </div>
       )}
