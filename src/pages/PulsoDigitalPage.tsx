@@ -18,6 +18,7 @@ import { useAuth } from '../contexts/AuthContext';
 import Card from '../components/ui/Card';
 import PulsoSignalCard from '../components/social/PulsoSignalCard';
 import PulsoSignalDetailsModal from '../components/social/PulsoSignalDetailsModal';
+import PulsoSummaryHeader from '../components/social/PulsoSummaryHeader';
 import {
   StoredSocialSignal,
   BroadcastSocialSignal,
@@ -287,6 +288,8 @@ const PulsoDigitalPage: React.FC = () => {
           </p>
         </Card>
       )}
+
+      {signals.length > 0 && <PulsoSummaryHeader signals={signals} />}
 
       <div className="grid grid-cols-1 gap-3">
         {signals.map(s => (
