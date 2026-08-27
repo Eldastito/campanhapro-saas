@@ -72,6 +72,17 @@ export interface QuerySignalsParams {
   provider?: SocialProvider;
   since?: Date;
   limit?: number;
+  /**
+   * Filtro texto: substring case-insensitive contra `summary`.
+   * Trimado; string vazia ignora o filtro. Aplicado APÓS os outros
+   * filtros pra não perder signals que satisfazem severity/topic mas
+   * têm summary sem a palavra buscada.
+   *
+   * PORQUÊ in-memory: dataset esperado é <=100 signals (limit default);
+   * evita adicionar dep de ilike no PostgREST (que não é indexado
+   * por default) e mantém o mock supabase simples.
+   */
+  search?: string;
 }
 
 // ── Serialização ────────────────────────────────────────────────────
@@ -169,6 +180,14 @@ export async function querySignals(
   if (params.provider) {
     const p = params.provider;
     filtered = filtered.filter(r => Array.isArray(r.providers) && r.providers.includes(p));
+  }
+  if (params.search) {
+    const needle = params.search.trim().toLowerCase();
+    if (needle.length > 0) {
+      filtered = filtered.filter(r =>
+        typeof r.summary === 'string' && r.summary.toLowerCase().includes(needle),
+      );
+    }
   }
   return filtered;
 }

@@ -101,6 +101,16 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
       limit = n;
     }
 
+    // Search text — trimado; length cap 200 pra evitar payload absurdo.
+    let search: string | undefined;
+    if (typeof req.query.search === 'string' && req.query.search) {
+      const s = req.query.search.trim();
+      if (s.length > 200) {
+        return res.status(400).json({ error: 'invalid_search', detail: 'search too long (max 200)' });
+      }
+      if (s.length > 0) search = s;
+    }
+
     // Formato de resposta — JSON default; ?format=csv devolve CSV
     // (RFC 4180) com header attachment pra download direto. Filename
     // já gerado no serializer pra manter formato canônico.
@@ -114,7 +124,7 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
 
     try {
       const signals = await querySignals(supabase, campaignId, {
-        minSeverity, source, topic, provider, since, limit,
+        minSeverity, source, topic, provider, since, limit, search,
       });
       if (format === 'csv') {
         const body = toCsv(signals);
