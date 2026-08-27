@@ -116,6 +116,19 @@ export function _resetEmailNotifierCacheForTests(campaignId?: string): void {
   else _notifiedCache.clear();
 }
 
+/**
+ * Reset explícito do cache para USO EM PROD (admin endpoint).
+ * Mesma semântica do Slack notifier — devolve contagem de keys
+ * removidas pro caller confirmar efeito.
+ */
+export function resetEmailNotifierCache(campaignId: string): { cleared: number } {
+  if (!campaignId) throw new Error('resetEmailNotifierCache: campaignId obrigatório');
+  const cache = _notifiedCache.get(campaignId);
+  const cleared = cache ? cache.size : 0;
+  _notifiedCache.delete(campaignId);
+  return { cleared };
+}
+
 // ── Status helpers ─────────────────────────────────────────────────
 
 export interface EmailNotifierStatus {

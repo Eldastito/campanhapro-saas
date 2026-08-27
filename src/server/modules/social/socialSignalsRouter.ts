@@ -21,8 +21,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { querySignals, getSignalStats } from './socialSignalStore.js';
 import { computeCampaignSocialSignals } from './socialSignalsRunner.js';
-import { getSlackNotifierStatus } from './socialSignalsNotifier.js';
-import { getEmailNotifierStatus } from './socialSignalsEmailNotifier.js';
+import { getSlackNotifierStatus, resetSlackNotifierCache } from './socialSignalsNotifier.js';
+import { getEmailNotifierStatus, resetEmailNotifierCache } from './socialSignalsEmailNotifier.js';
 import { toCsv, csvFilename, statsCsv, statsCsvFilename } from './socialSignalsCsvExporter.js';
 import type {
   SocialSignalSeverity,
@@ -195,6 +195,32 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
     } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: 'stats_failed', detail });
+    }
+  });
+
+  // DELETE /signals/notifier-cache — Admin-only. Limpa o dedup cache
+  // in-memory de AMBOS os notifiers pra ESTA campanha. Uso típico:
+  // admin mudou config (severity threshold, webhook URL, recipients) e
+  // quer garantir que signals antigos sejam re-notificados na próxima
+  // janela do scheduler.
+  //
+  // Isolamento §35: só limpa a campanha do req.user; caches de outras
+  // campanhas ficam intactos.
+  router.delete('/signals/notifier-cache', (req: Request, res: Response) => {
+    const campaignId = (req as unknown as { user?: { campaignId?: string } }).user?.campaignId;
+    if (!campaignId) return res.status(401).json({ error: 'unauthorized' });
+    if (!isAdmin(req)) return res.status(403).json({ error: 'admin_required' });
+
+    try {
+      const slack = resetSlackNotifierCache(campaignId);
+      const email = resetEmailNotifierCache(campaignId);
+      return res.json({
+        slack: { cleared: slack.cleared },
+        email: { cleared: email.cleared },
+      });
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return res.status(500).json({ error: 'notifier_cache_reset_failed', detail });
     }
   });
 
