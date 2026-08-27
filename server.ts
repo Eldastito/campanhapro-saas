@@ -54,6 +54,7 @@ import { createMeetingsRouter } from './src/server/modules/meetings/meetingsRout
 import { createIntelRouter } from './src/server/modules/intel/intelRouter';
 import { createFraudGuardsRouter } from './src/server/modules/fraudGuards/fraudGuardsRouter';
 import { createSocialRouter } from './src/server/modules/social/socialRouter';
+import { createSocialSignalsRouter } from './src/server/modules/social/socialSignalsRouter';
 import { createWhatsappRoutingRouter } from './src/server/modules/whatsappRouting/whatsappRoutingRouter';
 import { createCalculatorRouter } from './src/server/modules/calculator/calculatorRouter';
 import { createModulesRouter, createModulePricingHandler } from './src/server/modules/modules/modulesRouter';
@@ -310,6 +311,9 @@ async function startServer() {
     app.use('/api/v1/intel', requireAuth, expensiveLimiter, requireFeature(supabaseAdmin, 'intelligence'), requireAiBudget(supabaseAdmin), createIntelRouter(supabaseAdmin));
     app.use('/api/v1/fraud-guards', requireAuth, mutationLimiter, createFraudGuardsRouter(supabaseAdmin));
     app.use('/api/v1/social', requireAuth, mutationLimiter, createSocialRouter(supabaseAdmin));
+    // Signals endpoints mounted under the same /social prefix — kept separate
+    // (§48-§49 §53-§59 Pulso Digital) para não puxar a cadeia pesada do socialRouter.
+    app.use('/api/v1/social', requireAuth, mutationLimiter, createSocialSignalsRouter(supabaseAdmin));
     app.use('/api/v1/whatsapp-routing', requireAuth, mutationLimiter, createWhatsappRoutingRouter(supabaseAdmin));
     app.use('/api/v1/calculator', requireAuth, mutationLimiter, createCalculatorRouter(supabaseAdmin));
     app.use('/api/v1/field-ops', requireAuth, mutationLimiter, createFieldOpsRouter(supabaseAdmin));
