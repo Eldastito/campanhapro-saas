@@ -117,6 +117,23 @@ export function _resetNotifierCacheForTests(campaignId?: string): void {
   else _notifiedCache.clear();
 }
 
+/**
+ * Reset explícito do cache para USO EM PROD (admin endpoint).
+ * Devolve `{ cleared }` — quantidade de dedupKeys removidos —
+ * para o caller confirmar que houve efeito.
+ *
+ * Use quando o admin muda config (severity threshold, webhook URL) e
+ * quer garantir que sinais previamente notificados sejam re-emitidos
+ * na próxima janela. Fora disso, cache LRU já resolve.
+ */
+export function resetSlackNotifierCache(campaignId: string): { cleared: number } {
+  if (!campaignId) throw new Error('resetSlackNotifierCache: campaignId obrigatório');
+  const cache = _notifiedCache.get(campaignId);
+  const cleared = cache ? cache.size : 0;
+  _notifiedCache.delete(campaignId);
+  return { cleared };
+}
+
 // ── Status helpers (para observabilidade) ──────────────────────────
 
 export interface SlackNotifierStatus {
