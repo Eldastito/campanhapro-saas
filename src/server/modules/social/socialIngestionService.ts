@@ -31,11 +31,32 @@ import type {
   NormalizedSocialPost,
   NormalizedSocialComment,
   SocialProviderAdapter,
+  SocialProvenance,
   GetPostsParams,
   GetCommentsParams,
 } from './contracts/socialProviderAdapter.js';
 import type { SocialProvider } from './contracts/socialProvider.js';
 import { SocialCapabilityNotAvailableError } from './adapters/errors.js';
+
+/**
+ * Shape do provenance no JSONB (serializado). Difere de `SocialProvenance`
+ * porque `collectedAt` é Date no runtime do adapter mas ISO string no
+ * armazenamento — Postgres jsonb não tem tipo Date.
+ */
+export interface StoredProvenance {
+  provider: string;
+  sourceType: 'owned' | 'public' | 'listening_provider';
+  collectedAt: string;
+  sourceUrl?: string;
+  dataAvailability: 'observed' | 'provider_aggregated' | 'inferred';
+}
+
+/**
+ * Override público para `ingestPosts` — permite ao caller estabelecer
+ * campos do provenance diferente do default (útil para webhooks que sabem
+ * que o dado veio agregado pelo provider ou de listening_provider).
+ */
+export type ProvenanceOverride = Partial<StoredProvenance>;
 
 // ── Tipos ────────────────────────────────────────────────────────────
 
@@ -95,20 +116,21 @@ export interface QueryCommentsParams {
 
 // ── Internos ─────────────────────────────────────────────────────────
 
-function serializeProvenance(p: NormalizedSocialPost extends { provenance: infer P }
-  ? P
-  : NormalizedSocialComment['provenance']): Record<string, unknown> {
+function serializeProvenance(p: SocialProvenance): StoredProvenance {
   // Já é um objeto simples — só converte Date pra ISO string pra travar
   // shape no jsonb (Postgres não tem tipo Date).
   return {
-    ...(p as any),
-    collectedAt: (p as any).collectedAt instanceof Date
-      ? (p as any).collectedAt.toISOString()
-      : (p as any).collectedAt,
+    provider: p.provider,
+    sourceType: p.sourceType,
+    collectedAt: p.collectedAt instanceof Date
+      ? p.collectedAt.toISOString()
+      : String(p.collectedAt),
+    sourceUrl: p.sourceUrl,
+    dataAvailability: p.dataAvailability,
   };
 }
 
-function postToRow(campaignId: string, post: NormalizedSocialPost, provenance: Record<string, unknown>) {
+function postToRow(campaignId: string, post: NormalizedSocialPost, provenance: StoredProvenance) {
   return {
     campaignId,
     provider: post.provider,
@@ -158,7 +180,7 @@ export async function ingestPosts(
   campaignId: string,
   connectionId: string,
   params?: GetPostsParams,
-  provenanceOverride?: Partial<NormalizedSocialPost extends { provenance?: infer P } ? P : never>,
+  provenanceOverride?: ProvenanceOverride,
 ): Promise<IngestionResult> {
   if (!campaignId) throw new Error('ingestPosts: campaignId obrigatório');
   if (!connectionId) throw new Error('ingestPosts: connectionId obrigatório');
@@ -192,11 +214,11 @@ export async function ingestPosts(
     return { provider: adapter.provider, attempted: 0, ingested: 0, skipped: 0, reason: 'ok' };
   }
 
-  const defaultProvenance = {
+  const defaultProvenance: StoredProvenance = {
     provider: adapter.provider,
-    sourceType: 'owned' as const,
+    sourceType: 'owned',
     collectedAt: new Date().toISOString(),
-    dataAvailability: 'observed' as const,
+    dataAvailability: 'observed',
     ...provenanceOverride,
   };
 
