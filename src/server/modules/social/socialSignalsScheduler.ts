@@ -80,11 +80,24 @@ export interface StartSchedulerOptions extends SignalsTickOptions {
   onTick?: (outcome: SignalsTickOutcome) => void;
 }
 
+export interface SchedulerStatus {
+  running: boolean;
+  /** ISO do momento em que o scheduler foi startado. */
+  startedAt: string;
+  /** Quantos ticks completados (inclui erros). */
+  tickCount: number;
+  /** Último outcome observado. `null` até o primeiro tick. */
+  lastOutcome: SignalsTickOutcome | null;
+  schedulerVersion: string;
+}
+
 export interface SchedulerHandle {
   /** Para o loop; próximo tick não roda. Idempotente. */
   stop(): void;
   /** Estado atual — util pra observabilidade e health check. */
   isRunning(): boolean;
+  /** Snapshot completo de estado — útil pra endpoint de status. */
+  getStatus(): SchedulerStatus;
 }
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000; // 15 min
@@ -154,6 +167,9 @@ export function startSocialSignalsScheduler(opts: StartSchedulerOptions): Schedu
 
   let running = true;
   let currentTimer: ReturnType<typeof setTimeout> | null = null;
+  const startedAt = new Date().toISOString();
+  let tickCount = 0;
+  let lastOutcome: SignalsTickOutcome | null = null;
   const tickOpts: SignalsTickOptions = {
     autoDiscover: opts.autoDiscover,
     campaignIds: opts.campaignIds,
@@ -164,6 +180,8 @@ export function startSocialSignalsScheduler(opts: StartSchedulerOptions): Schedu
   const doTick = async () => {
     if (!running) return;
     const outcome = await signalsTick(opts.supabase, tickOpts);
+    tickCount += 1;
+    lastOutcome = outcome;
     if (opts.onTick) {
       try { opts.onTick(outcome); } catch (err) {
         console.warn(
@@ -198,6 +216,15 @@ export function startSocialSignalsScheduler(opts: StartSchedulerOptions): Schedu
     },
     isRunning() {
       return running;
+    },
+    getStatus() {
+      return {
+        running,
+        startedAt,
+        tickCount,
+        lastOutcome,
+        schedulerVersion: SOCIAL_SIGNALS_SCHEDULER_VERSION,
+      };
     },
   };
 }
@@ -277,6 +304,7 @@ export function maybeStartSocialSignalsScheduler(
       onTick: opts.onTick,
       batchOptions: { persist, broadcast },
     });
+    _currentSchedulerHandle = handle;
     console.log(
       `[socialSignalsScheduler] enabled — interval=${intervalMs}ms runOnStart=${runOnStart} persist=${persist} broadcast=${broadcast}`,
     );
@@ -287,4 +315,31 @@ export function maybeStartSocialSignalsScheduler(
     );
     return null;
   }
+}
+
+// ── Handle registry (para o endpoint /scheduler-status observar) ────
+
+let _currentSchedulerHandle: SchedulerHandle | null = null;
+
+/**
+ * Devolve o handle do scheduler ativo, se houver. Consumido pelo
+ * endpoint admin de status. Retorna null se scheduler não foi
+ * iniciado (env off) ou já foi parado.
+ *
+ * Isso é um singleton em processo — assume 1 server = 1 scheduler
+ * ativo. Se o server for horizontal scale, cada worker tem o seu.
+ */
+export function getCurrentSchedulerHandle(): SchedulerHandle | null {
+  if (_currentSchedulerHandle && !_currentSchedulerHandle.isRunning()) {
+    _currentSchedulerHandle = null;
+  }
+  return _currentSchedulerHandle;
+}
+
+/**
+ * Reseta o registry — útil pra testes que criam múltiplos handles
+ * seguidamente. Em prod nunca é chamado.
+ */
+export function _resetCurrentSchedulerHandleForTests(): void {
+  _currentSchedulerHandle = null;
 }
