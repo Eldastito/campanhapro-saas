@@ -21,7 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { querySignals, getSignalStats } from './socialSignalStore.js';
 import { computeCampaignSocialSignals } from './socialSignalsRunner.js';
-import { toCsv, csvFilename } from './socialSignalsCsvExporter.js';
+import { toCsv, csvFilename, statsCsv, statsCsvFilename } from './socialSignalsCsvExporter.js';
 import type {
   SocialSignalSeverity,
   SocialSignalSource,
@@ -162,8 +162,23 @@ export function createSocialSignalsRouter(supabase: SupabaseClient): Router {
       bucket = req.query.bucket;
     }
 
+    let format: 'json' | 'csv' = 'json';
+    if (typeof req.query.format === 'string' && req.query.format) {
+      if (req.query.format !== 'json' && req.query.format !== 'csv') {
+        return res.status(400).json({ error: 'invalid_format' });
+      }
+      format = req.query.format;
+    }
+
     try {
       const stats = await getSignalStats(supabase, campaignId, { since, until, bucket });
+      if (format === 'csv') {
+        const body = statsCsv(stats);
+        const filename = statsCsvFilename(campaignId);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.status(200).send(body);
+      }
       return res.json(stats);
     } catch (err: unknown) {
       const detail = err instanceof Error ? err.message : String(err);
