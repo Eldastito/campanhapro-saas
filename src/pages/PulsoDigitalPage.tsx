@@ -20,6 +20,7 @@ import PulsoSignalCard from '../components/social/PulsoSignalCard';
 import PulsoSignalDetailsModal from '../components/social/PulsoSignalDetailsModal';
 import PulsoSummaryHeader from '../components/social/PulsoSummaryHeader';
 import PulsoNotifierAdminCard from '../components/social/PulsoNotifierAdminCard';
+import { PULSO_PRESETS, findMatchingPreset, FilterPreset } from '../components/social/pulsoPresets';
 import {
   StoredSocialSignal,
   BroadcastSocialSignal,
@@ -46,6 +47,8 @@ interface FiltersState {
   topic: SocialTopic | '';
   provider: SocialProvider | '';
   search: string;
+  /** ISO string ou vazio — passa como ?since= pro server. */
+  since: string;
 }
 
 const INITIAL_FILTERS: FiltersState = {
@@ -54,6 +57,7 @@ const INITIAL_FILTERS: FiltersState = {
   topic: '',
   provider: '',
   search: '',
+  since: '',
 };
 
 function buildQuery(f: FiltersState): string {
@@ -64,6 +68,7 @@ function buildQuery(f: FiltersState): string {
   if (f.provider) params.set('provider', f.provider);
   const trimmedSearch = f.search.trim();
   if (trimmedSearch) params.set('search', trimmedSearch);
+  if (f.since) params.set('since', f.since);
   params.set('limit', '100');
   return params.toString();
 }
@@ -231,6 +236,20 @@ const PulsoDigitalPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Presets — reduzem cliques em selects pra visões comuns */}
+        <PresetsRow
+          filters={filters}
+          onApply={(p) => {
+            const derived = p.computeFilters(new Date());
+            setFilters(f => ({
+              ...f,
+              minSeverity: derived.minSeverity,
+              since: derived.since,
+              // source/topic/provider preservados; presets são só severity + tempo
+            }));
+          }}
+        />
+
         {/* Filters */}
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <FilterSelect
@@ -337,6 +356,47 @@ interface FilterSelectProps {
   onChange: (v: string) => void;
   options: Array<{ value: string; label: string }>;
 }
+
+interface PresetsRowProps {
+  filters: FiltersState;
+  onApply: (preset: FilterPreset) => void;
+}
+
+const PresetsRow: React.FC<PresetsRowProps> = ({ filters, onApply }) => {
+  // Fixamos "now" no mount pra que a comparação com preset.since fique
+  // estável enquanto o usuário interage (senão o botão pisca "ativo"/
+  // "inativo" a cada segundo por drift no now).
+  const nowRef = React.useRef<Date>(new Date());
+  const active = React.useMemo(
+    () => findMatchingPreset({ minSeverity: filters.minSeverity, since: filters.since }, nowRef.current, 5 * 60_000),
+    [filters.minSeverity, filters.since],
+  );
+  return (
+    <div className="mt-4 flex flex-wrap gap-1.5">
+      <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold self-center mr-1">
+        Presets
+      </span>
+      {PULSO_PRESETS.map(p => {
+        const isActive = active?.id === p.id;
+        return (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => onApply(p)}
+            title={p.scope}
+            className={
+              isActive
+                ? 'px-2 py-1 rounded-md text-[11px] bg-sky-500/20 text-sky-200 border border-sky-500'
+                : 'px-2 py-1 rounded-md text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+            }
+          >
+            {p.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 const FilterSelect: React.FC<FilterSelectProps> = ({ label, value, onChange, options }) => (
   <label className="block">
